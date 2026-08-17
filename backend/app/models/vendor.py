@@ -1,0 +1,309 @@
+from datetime import datetime, timedelta
+from app.extensions import db
+
+
+class CompanySettings(db.Model):
+    """Singleton row — AnametaIOT's own details, used as the 'Buyer' block
+    on every generated vendor invoice. Editable by Admin/Finance."""
+    __tablename__ = "company_settings"
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_name = db.Column(db.String(150), default="AnametaIOT")
+    address = db.Column(db.Text, default="")
+    gstin = db.Column(db.String(20), nullable=True)
+    pan = db.Column(db.String(20), nullable=True)
+    state = db.Column(db.String(50), default="Karnataka")
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "company_name": self.company_name,
+            "address": self.address,
+            "gstin": self.gstin,
+            "pan": self.pan,
+            "state": self.state,
+        }
+
+
+class Vendor(db.Model):
+    """A staffing/recruitment vendor who supplies manpower to AnametaIOT
+    under one or more signed agreements."""
+    __tablename__ = "vendors"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False)
+    normalized_name = db.Column(db.String(150), index=True)  # for dedup matching
+    address = db.Column(db.Text, nullable=True)
+    state = db.Column(db.String(50), nullable=True)
+    gstin = db.Column(db.String(20), nullable=True)
+    pan = db.Column(db.String(20), nullable=True)
+
+    contact_person = db.Column(db.String(120), nullable=True)
+    contact_email = db.Column(db.String(150), nullable=True)
+    contact_phone = db.Column(db.String(20), nullable=True)
+
+    bank_name = db.Column(db.String(120), nullable=True)
+    bank_account_no = db.Column(db.String(40), nullable=True)
+    bank_ifsc = db.Column(db.String(20), nullable=True)
+    bank_branch = db.Column(db.String(120), nullable=True)
+
+    status = db.Column(db.String(20), default="active")  # active, inactive
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    agreements = db.relationship(
+        "VendorAgreement", backref="vendor", cascade="all, delete-orphan",
+        order_by="VendorAgreement.effective_from.desc()",
+    )
+
+    def to_dict(self, include_agreements=False):
+        data = {
+            "id": self.id,
+            "name": self.name,
+            "address": self.address,
+            "state": self.state,
+            "gstin": self.gstin,
+            "pan": self.pan,
+            "contact_person": self.contact_person,
+            "contact_email": self.contact_email,
+            "contact_phone": self.contact_phone,
+            "bank_name": self.bank_name,
+            "bank_account_no": self.bank_account_no,
+            "bank_ifsc": self.bank_ifsc,
+            "bank_branch": self.bank_branch,
+            "status": self.status,
+            "agreement_count": len(self.agreements),
+            "active_agreement": next(
+                (a.to_dict() for a in self.agreements if a.status == "active"), None
+            ),
+            "created_at": self.created_at.isoformat(),
+        }
+        if include_agreements:
+            data["agreements"] = [a.to_dict(include_roles=True) for a in self.agreements]
+        return data
+
+
+class VendorAgreement(db.Model):
+    """One signed contract with a vendor. A vendor can have several over
+    time (renewals) — the most recent by effective_from is the active one."""
+    __tablename__ = "vendor_agreements"
+
+    id = db.Column(db.Integer, primary_key=True)
+    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=False)
+
+    title = db.Column(db.String(150), nullable=True)
+    file_path = db.Column(db.String(255), nullable=False)
+
+    effective_from = db.Column(db.Date, nullable=True)
+    effective_to = db.Column(db.Date, nullable=True)
+    termination_notice_days = db.Column(db.Integer, default=90)
+    confidentiality_days = db.Column(db.Integer, default=60)
+    feedback_days = db.Column(db.Integer, default=2)
+
+    status = db.Column(db.String(20), default="active")  # active, expired, terminated
+    parsed_with_ai = db.Column(db.Boolean, default=False)
+    raw_extracted_text = db.Column(db.Text, nullable=True)
+
+    uploaded_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    roles = db.relationship(
+        "VendorAgreementRole", backref="agreement", cascade="all, delete-orphan"
+    )
+
+    def to_dict(self, include_roles=False):
+        data = {
+            "id": self.id,
+            "vendor_id": self.vendor_id,
+            "title": self.title,
+            "file_path": self.file_path,
+            "effective_from": self.effective_from.isoformat() if self.effective_from else None,
+            "effective_to": self.effective_to.isoformat() if self.effective_to else None,
+            "termination_notice_days": self.termination_notice_days,
+            "confidentiality_days": self.confidentiality_days,
+            "feedback_days": self.feedback_days,
+            "status": self.status,
+            "parsed_with_ai": self.parsed_with_ai,
+            "uploaded_at": self.uploaded_at.isoformat(),
+        }
+        if include_roles:
+            data["roles"] = [r.to_dict() for r in self.roles]
+        return data
+
+
+class VendorAgreementRole(db.Model):
+    """One rate-card line from an agreement's fee table — e.g.
+    'Telesales Executive: 7.55% of CTC, 30-day replacement, billable after
+    60-day tenure'."""
+    __tablename__ = "vendor_agreement_roles"
+
+    id = db.Column(db.Integer, primary_key=True)
+    agreement_id = db.Column(db.Integer, db.ForeignKey("vendor_agreements.id"), nullable=False)
+
+    role_name = db.Column(db.String(120), nullable=False)
+    service_fee_pct = db.Column(db.Float, nullable=False)
+    replacement_days = db.Column(db.Integer, default=30)
+    tenure_days = db.Column(db.Integer, default=60)  # billable once candidate completes this many days
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "agreement_id": self.agreement_id,
+            "role_name": self.role_name,
+            "service_fee_pct": self.service_fee_pct,
+            "replacement_days": self.replacement_days,
+            "tenure_days": self.tenure_days,
+        }
+
+
+class VendorHire(db.Model):
+    """A person supplied by a vendor and hired into a specific rate-card
+    role — the unit that payroll and vendor billing both hang off of."""
+    __tablename__ = "vendor_hires"
+
+    id = db.Column(db.Integer, primary_key=True)
+    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=False)
+    agreement_id = db.Column(db.Integer, db.ForeignKey("vendor_agreements.id"), nullable=False)
+    agreement_role_id = db.Column(db.Integer, db.ForeignKey("vendor_agreement_roles.id"), nullable=False)
+
+    candidate_id = db.Column(db.Integer, db.ForeignKey("candidates.id"), nullable=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    candidate_name = db.Column(db.String(150), nullable=False)
+
+    ctc = db.Column(db.Float, nullable=False)
+    tenure_start_date = db.Column(db.Date, nullable=False)
+
+    status = db.Column(db.String(20), default="active")
+    # active, replaced, invoiced (billed at least once), terminated
+    replacement_of_hire_id = db.Column(db.Integer, db.ForeignKey("vendor_hires.id"), nullable=True)
+
+    assigned_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    assigned_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    invoice_items = db.relationship("VendorInvoiceItem", backref="hire")
+
+    role = db.relationship("VendorAgreementRole")
+    agreement = db.relationship("VendorAgreement")
+
+    @property
+    def tenure_days_required(self):
+        return self.role.tenure_days if self.role else 60
+
+    @property
+    def tenure_end_date(self):
+        return self.tenure_start_date + timedelta(days=self.tenure_days_required)
+
+    @property
+    def is_billable(self):
+        from datetime import date
+        already_invoiced = any(i.invoice.status != "rejected" for i in self.invoice_items)
+        return (
+            self.status == "active"
+            and not already_invoiced
+            and date.today() >= self.tenure_end_date
+        )
+
+    def to_dict(self):
+        from datetime import date
+        days_elapsed = (date.today() - self.tenure_start_date).days
+        return {
+            "id": self.id,
+            "vendor_id": self.vendor_id,
+            "agreement_id": self.agreement_id,
+            "agreement_role_id": self.agreement_role_id,
+            "role_name": self.role.role_name if self.role else None,
+            "service_fee_pct": self.role.service_fee_pct if self.role else None,
+            "candidate_id": self.candidate_id,
+            "employee_id": self.employee_id,
+            "candidate_name": self.candidate_name,
+            "ctc": self.ctc,
+            "tenure_start_date": self.tenure_start_date.isoformat(),
+            "tenure_end_date": self.tenure_end_date.isoformat(),
+            "tenure_days_required": self.tenure_days_required,
+            "tenure_days_elapsed": max(0, days_elapsed),
+            "tenure_progress_pct": round(min(100, max(0, days_elapsed) / self.tenure_days_required * 100), 1),
+            "is_billable": self.is_billable,
+            "status": self.status,
+            "assigned_at": self.assigned_at.isoformat(),
+        }
+
+
+class VendorInvoice(db.Model):
+    __tablename__ = "vendor_invoices"
+
+    id = db.Column(db.Integer, primary_key=True)
+    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=False)
+    agreement_id = db.Column(db.Integer, db.ForeignKey("vendor_agreements.id"), nullable=True)
+
+    invoice_number = db.Column(db.String(50), unique=True, nullable=False)
+    invoice_date = db.Column(db.Date, nullable=False)
+
+    subtotal = db.Column(db.Float, default=0)
+    cgst_amount = db.Column(db.Float, default=0)
+    sgst_amount = db.Column(db.Float, default=0)
+    igst_amount = db.Column(db.Float, default=0)
+    total_amount = db.Column(db.Float, default=0)
+
+    status = db.Column(db.String(20), default="draft")
+    # draft, pending_approval, approved, rejected, paid
+    approved_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
+    approval_comment = db.Column(db.String(255), nullable=True)
+    paid_at = db.Column(db.DateTime, nullable=True)
+
+    pdf_path = db.Column(db.String(255), nullable=True)
+    generated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    items = db.relationship("VendorInvoiceItem", backref="invoice", cascade="all, delete-orphan")
+    vendor = db.relationship("Vendor")
+
+    def to_dict(self, include_items=False):
+        data = {
+            "id": self.id,
+            "vendor_id": self.vendor_id,
+            "vendor_name": self.vendor.name if self.vendor else None,
+            "invoice_number": self.invoice_number,
+            "invoice_date": self.invoice_date.isoformat(),
+            "subtotal": self.subtotal,
+            "cgst_amount": self.cgst_amount,
+            "sgst_amount": self.sgst_amount,
+            "igst_amount": self.igst_amount,
+            "total_amount": self.total_amount,
+            "status": self.status,
+            "approved_by": self.approved_by,
+            "approved_at": self.approved_at.isoformat() if self.approved_at else None,
+            "paid_at": self.paid_at.isoformat() if self.paid_at else None,
+            "pdf_path": self.pdf_path,
+            "generated_at": self.generated_at.isoformat(),
+        }
+        if include_items:
+            data["items"] = [i.to_dict() for i in self.items]
+        return data
+
+
+class VendorInvoiceItem(db.Model):
+    __tablename__ = "vendor_invoice_items"
+
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("vendor_invoices.id"), nullable=False)
+    hire_id = db.Column(db.Integer, db.ForeignKey("vendor_hires.id"), nullable=False)
+
+    candidate_name = db.Column(db.String(150), nullable=False)
+    role_name = db.Column(db.String(120), nullable=True)
+    ctc = db.Column(db.Float, nullable=False)
+    fee_pct = db.Column(db.Float, nullable=False)
+    fee_amount = db.Column(db.Float, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "hire_id": self.hire_id,
+            "candidate_name": self.candidate_name,
+            "role_name": self.role_name,
+            "ctc": self.ctc,
+            "fee_pct": self.fee_pct,
+            "fee_amount": self.fee_amount,
+        }
