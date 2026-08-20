@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta
 from flask import Blueprint, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
@@ -51,6 +51,48 @@ def summary():
         data["hired_this_month"] = Candidate.query.filter(
             Candidate.stage == "hired",
             db.extract("month", Candidate.created_at) == today.month,
+        ).count()
+        data["candidates_added_today"] = Candidate.query.filter(
+            Candidate.added_by == user_id,
+            db.func.date(Candidate.created_at) == today,
+        ).count()
+
+        # Per-day count of candidates THIS recruiter added, last 7 days —
+        # backs a small daily-activity bar chart on their dashboard.
+        week_start = today - timedelta(days=6)
+        week_rows = Candidate.query.filter(
+            Candidate.added_by == user_id,
+            Candidate.created_at >= datetime.combine(week_start, datetime.min.time()),
+        ).all()
+        day_counts = {(week_start + timedelta(days=i)).isoformat(): 0 for i in range(7)}
+        for c in week_rows:
+            d = c.created_at.date().isoformat()
+            if d in day_counts:
+                day_counts[d] += 1
+        data["candidates_by_day"] = [{"date": d, "count": n} for d, n in sorted(day_counts.items())]
+
+        # Quick-glance: this recruiter's own candidates whose stage changed
+        # most recently, and their own candidates still awaiting verification.
+        from app.models import CandidateAuditLog
+        recent_logs = (
+            CandidateAuditLog.query.join(Candidate, CandidateAuditLog.candidate_id == Candidate.id)
+            .filter(Candidate.added_by == user_id, CandidateAuditLog.action == "stage_changed")
+            .order_by(CandidateAuditLog.created_at.desc())
+            .limit(5)
+            .all()
+        )
+        recent = []
+        for log in recent_logs:
+            cand = Candidate.query.get(log.candidate_id)
+            if not cand:
+                continue
+            recent.append({
+                "candidate_id": cand.id, "candidate_name": cand.full_name,
+                "stage": cand.stage, "detail": log.detail, "changed_at": log.created_at.isoformat(),
+            })
+        data["recent_stage_changes"] = recent
+        data["pending_verification_count"] = Candidate.query.filter_by(
+            added_by=user_id, verification_status="unverified"
         ).count()
 
     elif role == OPERATIONS:

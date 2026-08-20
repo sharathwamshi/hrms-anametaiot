@@ -10,6 +10,7 @@ import Leave from "./pages/Leave";
 import Employees from "./pages/Employees";
 import Payroll from "./pages/Payroll";
 import Recruitment from "./pages/Recruitment";
+import AllCandidates from "./pages/AllCandidates";
 import Vendors from "./pages/Vendors";
 import MockTestTake from "./pages/MockTestTake";
 import Announcements from "./pages/Announcements";
@@ -70,6 +71,15 @@ export default function App() {
         element={
           <ProtectedRoute allow={[ROLES.HR_RECRUITER, ROLES.HR_OPERATIONS, ROLES.MANAGER]}>
             <Recruitment />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/all-candidates"
+        element={
+          <ProtectedRoute allow={[ROLES.HR_RECRUITER, ROLES.HR_OPERATIONS, ROLES.MANAGER]}>
+            <AllCandidates />
           </ProtectedRoute>
         }
       />

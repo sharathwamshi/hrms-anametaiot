@@ -60,6 +60,9 @@ def create_employee():
     if User.query.filter_by(email=payload["email"].lower()).first():
         return jsonify({"message": "Email already in use."}), 409
 
+    if User.query.filter_by(employee_code=payload["employee_code"]).first():
+        return jsonify({"message": f"Employee code '{payload['employee_code']}' is already in use. Please use a different code."}), 409
+
     user = User(
         employee_code=payload["employee_code"],
         full_name=payload["full_name"],
@@ -168,6 +171,8 @@ def convert_candidate_to_employee(candidate_id):
         return jsonify({"message": f"Missing fields: {', '.join(missing)}"}), 400
     if payload["role"] not in ALL_ROLES:
         return jsonify({"message": "Invalid role."}), 400
+    if User.query.filter_by(employee_code=payload["employee_code"]).first():
+        return jsonify({"message": f"Employee code '{payload['employee_code']}' is already in use. Please use a different code."}), 409
 
     accepted_offer = Offer.query.filter_by(candidate_id=candidate.id, status="accepted").first()
 

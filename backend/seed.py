@@ -11,7 +11,7 @@ from datetime import date
 import json
 from app import create_app
 from app.extensions import db
-from app.models import User, Department, LeaveType, LeaveBalance, TopicLibrary, MockTestTemplate, MockTestQuestion, CompanySettings, SalaryTemplate
+from app.models import User, Department, LeaveType, LeaveBalance, TopicLibrary, MockTestTemplate, MockTestQuestion, CompanySettings, SalaryTemplate, JobPosting, Candidate
 from app.roles import (
     MANAGER, CONTRACT_EMPLOYEE, HR_OPERATIONS, FINANCE_ACCOUNTS,
     OPERATIONS, HR_RECRUITER, EMPLOYEE,
@@ -160,6 +160,64 @@ def run():
                 ))
             db.session.commit()
             print(f"Seeded '{template_title}' with {len(JAVA_QUESTIONS)} questions.")
+
+        # A job posting with a defined interview pipeline (levels), approved
+        # and open, plus 10 candidates spread across stages and levels so the
+        # Candidates tab, the level tracking, and the dashboard widgets all
+        # have real data to show immediately.
+        job_title = "Backend Engineer"
+        job = JobPosting.query.filter_by(title=job_title).first()
+        if not job:
+            job = JobPosting(
+                title=job_title, department_id=eng.id, employment_type="full_time", openings=2,
+                description="Build and maintain our core platform services.",
+                salary_min=800000, salary_max=1400000, priority="urgent",
+                interview_levels="Screening, Tech L1, Tech L2, HR Round, Offer",
+                requisition_status="open", status="open",
+                created_by=created_users[HR_RECRUITER].id,
+                approved_by=created_users[MANAGER].id,
+            )
+            db.session.add(job)
+            db.session.flush()
+            print(f"Seeded job posting '{job_title}' with interview levels.")
+
+        CANDIDATE_SEED = [
+            # name, email, phone, source, skills, location, relocation, stage, level
+            ("Ritika Sharma", "ritika.sharma@example.com", "9845010001", "linkedin",
+             "Java, Spring Boot, SQL, Docker", "Bengaluru", False, "interview", "Tech L1"),
+            ("Aman Gupta", "aman.gupta@example.com", "9845010002", "referral",
+             "Python, Django, AWS", "Hyderabad", True, "screening", "Screening"),
+            ("Priyanka Reddy", "priyanka.reddy@example.com", "9845010003", "naukri",
+             "Java, Microservices, Kafka", "Bengaluru", False, "interview", "Tech L2"),
+            ("Rohan Verma", "rohan.verma@example.com", "9845010004", "walk-in",
+             "Node.js, MongoDB", "Pune", True, "applied", None),
+            ("Sneha Joshi", "sneha.joshi@example.com", "9845010005", "linkedin",
+             "Java, Spring Boot, Kubernetes", "Bengaluru", False, "offer", "HR Round"),
+            ("Vivek Nair", "vivek.nair@example.com", "9845010006", "referral",
+             "PHP, Laravel", "Chennai", True, "rejected", None),
+            ("Kavya Menon", "kavya.menon@example.com", "9845010007", "naukri",
+             "Java, SQL, REST APIs", "Bengaluru", False, "mock_test", None),
+            ("Arjun Pillai", "arjun.pillai@example.com", "9845010008", "linkedin",
+             "Python, FastAPI, PostgreSQL", "Mumbai", True, "interview", "Screening"),
+            ("Divya Krishnan", "divya.krishnan@example.com", "9845010009", "referral",
+             "Java, Spring Boot, SQL", "Bengaluru", False, "hired", "Offer"),
+            ("Sanjay Kumar", "sanjay.kumar@example.com", "9845010010", "naukri",
+             "Go, gRPC, Docker", "Bengaluru", True, "screening", None),
+        ]
+        if Candidate.query.filter_by(job_id=job.id).count() < len(CANDIDATE_SEED):
+            for name, email, phone, source, skills, location, relocation, stage, level in CANDIDATE_SEED:
+                if Candidate.query.filter_by(email_normalized=email).first():
+                    continue
+                db.session.add(Candidate(
+                    job_id=job.id, full_name=name, email=email, email_normalized=email,
+                    phone=phone, phone_normalized=phone, source=source, skills=skills,
+                    location=location, open_to_relocation=relocation,
+                    stage=stage, current_level=level,
+                    validation_status="auto_validated",
+                    added_by=created_users[HR_RECRUITER].id, assigned_to=created_users[HR_RECRUITER].id,
+                ))
+            db.session.commit()
+            print(f"Seeded {len(CANDIDATE_SEED)} candidates for '{job_title}'.")
 
         print("Seed complete. Demo login password for all users:", DEMO_PASSWORD)
         for code, name, email, role, designation in DEMO_USERS:

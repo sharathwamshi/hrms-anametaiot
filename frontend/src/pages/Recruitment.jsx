@@ -1,6 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import client from "../api/client";
-import { parseUtc } from "../utils/datetime";
 import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
 import Loader from "../components/Loader";
@@ -9,6 +8,7 @@ import CandidateDetailModal from "../components/CandidateDetailModal";
 import PostImageModal from "../components/PostImageModal";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
+import { parseUtc } from "../utils/datetime";
 
 const TABS_BY_ROLE = {
   [ROLES.HR_RECRUITER]: ["jobs", "candidates", "mocktests"],
@@ -50,9 +50,13 @@ function JobsTab({ canRecruit, canApprove }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: "", employment_type: "full_time", openings: 1, salary_min: "", salary_max: "", priority: "standard", description: "" });
+  const [form, setForm] = useState({ title: "", employment_type: "full_time", openings: 1, salary_min: "", salary_max: "", priority: "standard", description: "", interview_levels: "Screening, Tech L1, Tech L2, HR Round, Offer" });
   const [error, setError] = useState("");
   const [imageModal, setImageModal] = useState(null);
+  const [viewJob, setViewJob] = useState(null);
+  const [editJob, setEditJob] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+  const [editError, setEditError] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -69,7 +73,7 @@ function JobsTab({ canRecruit, canApprove }) {
     try {
       await client.post("/recruitment/jobs", form);
       setShowForm(false);
-      setForm({ title: "", employment_type: "full_time", openings: 1, salary_min: "", salary_max: "", priority: "standard", description: "" });
+      setForm({ title: "", employment_type: "full_time", openings: 1, salary_min: "", salary_max: "", priority: "standard", description: "", interview_levels: "Screening, Tech L1, Tech L2, HR Round, Offer" });
       load();
     } catch (err) {
       setError(err?.response?.data?.message || "Could not create job posting.");
@@ -91,6 +95,34 @@ function JobsTab({ canRecruit, canApprove }) {
     alert(`LinkedIn: ${data.linkedin.message}\n\nNaukri: ${data.naukri.message}`);
   };
 
+  const openView = async (id) => {
+    const { data } = await client.get(`/recruitment/jobs/${id}`);
+    setViewJob(data);
+  };
+
+  const openEdit = (j) => {
+    setEditError("");
+    setEditForm({
+      title: j.title, employment_type: j.employment_type, openings: j.openings,
+      salary_min: j.salary_min ?? "", salary_max: j.salary_max ?? "",
+      priority: j.priority, description: j.description || "",
+      interview_levels: (j.interview_levels || []).join(", "),
+    });
+    setEditJob(j);
+  };
+
+  const saveEdit = async (e) => {
+    e.preventDefault();
+    setEditError("");
+    try {
+      await client.put(`/recruitment/jobs/${editJob.id}`, editForm);
+      setEditJob(null);
+      load();
+    } catch (err) {
+      setEditError(err?.response?.data?.message || "Could not save changes.");
+    }
+  };
+
   return (
     <div className="card">
       <div className="card-title-row">
@@ -108,10 +140,19 @@ function JobsTab({ canRecruit, canApprove }) {
                     {j.openings} opening(s) &middot; {j.candidate_count} candidate(s) &middot; priority: {j.priority}
                     {j.salary_min && ` · ₹${j.salary_min.toLocaleString("en-IN")}–₹${j.salary_max.toLocaleString("en-IN")}`}
                   </div>
+                  {j.interview_levels?.length > 0 && (
+                    <div className="chip-row" style={{ marginTop: 6 }}>
+                      {j.interview_levels.map((lvl, i) => (
+                        <span key={lvl} className="chip">{i + 1}. {lvl}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <Badge status={j.requisition_status} />
               </div>
               <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+                <button className="btn btn-sm btn-outline" onClick={() => openView(j.id)}>View</button>
+                {canRecruit && <button className="btn btn-sm btn-outline" onClick={() => openEdit(j)}>Edit</button>}
                 {j.requisition_status === "pending_approval" && canApprove && (
                   <>
                     <button className="btn btn-sm btn-success" onClick={() => approve(j.id)}>Approve</button>
@@ -184,6 +225,10 @@ function JobsTab({ canRecruit, canApprove }) {
                 <label>Description</label>
                 <textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
               </div>
+              <div className="form-field">
+                <label>Interview Levels (comma-separated, in order)</label>
+                <input value={form.interview_levels} onChange={(e) => setForm({ ...form, interview_levels: e.target.value })} placeholder="Screening, Tech L1, Tech L2, HR Round, Offer" />
+              </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary">Submit for Approval</button>
@@ -199,6 +244,105 @@ function JobsTab({ canRecruit, canApprove }) {
           jobTitle={imageModal.title}
           onClose={() => setImageModal(null)}
         />
+      )}
+
+      {viewJob && (
+        <div className="modal-overlay" onClick={() => setViewJob(null)}>
+          <div className="modal-box" style={{ width: 560 }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex-between" style={{ marginBottom: 6 }}>
+              <h3>{viewJob.title}</h3>
+              <Badge status={viewJob.requisition_status} />
+            </div>
+            <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
+              {viewJob.department || "Unassigned"} &middot; {viewJob.employment_type} &middot; {viewJob.openings} opening(s) &middot; priority: {viewJob.priority}
+              {viewJob.salary_min && ` · ₹${viewJob.salary_min.toLocaleString("en-IN")}–₹${viewJob.salary_max.toLocaleString("en-IN")}`}
+            </div>
+
+            {viewJob.description && (
+              <div style={{ marginBottom: 12 }}>
+                <strong style={{ fontSize: 12.5 }}>Description</strong>
+                <p style={{ fontSize: 13, whiteSpace: "pre-wrap", marginTop: 4 }}>{viewJob.description}</p>
+              </div>
+            )}
+
+            {viewJob.interview_levels?.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <strong style={{ fontSize: 12.5 }}>Interview Levels</strong>
+                <div className="chip-row" style={{ marginTop: 6 }}>
+                  {viewJob.interview_levels.map((lvl, i) => (
+                    <span key={lvl} className="chip">{i + 1}. {lvl}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 16px", fontSize: 12.5, marginBottom: 12 }}>
+              <div><span className="muted">Candidates</span><div>{viewJob.candidate_count}</div></div>
+              <div><span className="muted">Created</span><div>{parseUtc(viewJob.created_at).toLocaleDateString("en-IN")}</div></div>
+            </div>
+
+            <div style={{ textAlign: "right" }}>
+              <button className="btn btn-outline" onClick={() => setViewJob(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editJob && (
+        <div className="modal-overlay" onClick={() => setEditJob(null)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginBottom: 16 }}>Edit Job Posting</h3>
+            {editError && <div className="login-error">{editError}</div>}
+            <form onSubmit={saveEdit}>
+              <div className="form-field">
+                <label>Title</label>
+                <input required value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} />
+              </div>
+              <div className="form-grid">
+                <div className="form-field">
+                  <label>Employment Type</label>
+                  <select value={editForm.employment_type} onChange={(e) => setEditForm({ ...editForm, employment_type: e.target.value })}>
+                    <option value="full_time">Full-time</option>
+                    <option value="contract">Contract</option>
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label>Openings</label>
+                  <input type="number" min={1} value={editForm.openings} onChange={(e) => setEditForm({ ...editForm, openings: Number(e.target.value) })} />
+                </div>
+              </div>
+              <div className="form-grid">
+                <div className="form-field">
+                  <label>Salary Min</label>
+                  <input type="number" value={editForm.salary_min} onChange={(e) => setEditForm({ ...editForm, salary_min: e.target.value })} />
+                </div>
+                <div className="form-field">
+                  <label>Salary Max</label>
+                  <input type="number" value={editForm.salary_max} onChange={(e) => setEditForm({ ...editForm, salary_max: e.target.value })} />
+                </div>
+              </div>
+              <div className="form-field">
+                <label>Priority</label>
+                <select value={editForm.priority} onChange={(e) => setEditForm({ ...editForm, priority: e.target.value })}>
+                  <option value="standard">Standard</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div className="form-field">
+                <label>Description</label>
+                <textarea rows={3} value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
+              </div>
+              <div className="form-field">
+                <label>Interview Levels (comma-separated, in order)</label>
+                <input value={editForm.interview_levels} onChange={(e) => setEditForm({ ...editForm, interview_levels: e.target.value })} placeholder="Screening, Tech L1, Tech L2, HR Round, Offer" />
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button type="button" className="btn btn-outline" onClick={() => setEditJob(null)}>Cancel</button>
+                <button type="submit" className="btn btn-primary">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -216,19 +360,27 @@ function CandidatesTab({ canRecruit }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [selectedCandidateId, setSelectedCandidateId] = useState(null);
-  const [form, setForm] = useState({ full_name: "", email: "", phone: "", source: "referral", skills: "" });
+  const [form, setForm] = useState({ full_name: "", email: "", phone: "", source: "referral", skills: "", location: "", open_to_relocation: false });
   const [resumeFile, setResumeFile] = useState(null);
   const [error, setError] = useState("");
   const [duplicateMatch, setDuplicateMatch] = useState(null);
 
   const loadJobs = async () => {
-    const { data } = await client.get("/recruitment/jobs", { params: { status: "open" } });
-    setJobs(data);
-    if (data.length && !selectedJob) setSelectedJob(data[0].id);
+    // Deliberately not filtering by the legacy `status` field here — it's
+    // redundant with `requisition_status` and, if it's ever anything other
+    // than the exact string "open" (stale data, a direct DB edit, a row
+    // that predates this field), the job and every one of its candidates
+    // would silently vanish from this screen with no error shown. Fetch
+    // everything and exclude only postings explicitly put on hold.
+    const { data } = await client.get("/recruitment/jobs");
+    const visible = data.filter((j) => j.requisition_status !== "on_hold");
+    setJobs(visible);
+    if (visible.length && !selectedJob) setSelectedJob(visible[0].id);
+    else if (!visible.length) setLoading(false); // no postings at all — stop spinning forever
   };
 
   const loadCandidates = async (jobId) => {
-    if (!jobId) return;
+    if (!jobId) { setLoading(false); return; } // was stuck on "Loading..." with no job selected
     setLoading(true);
     const { data } = await client.get(`/recruitment/jobs/${jobId}/candidates`);
     setCandidates(data);
@@ -236,7 +388,7 @@ function CandidatesTab({ canRecruit }) {
   };
 
   useEffect(() => { loadJobs(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (selectedJob) loadCandidates(selectedJob); }, [selectedJob]);
+  useEffect(() => { loadCandidates(selectedJob); }, [selectedJob]);
 
   const submitCandidate = async (e, duplicateAction) => {
     if (e) e.preventDefault();
@@ -254,7 +406,7 @@ function CandidatesTab({ canRecruit }) {
         await client.post("/recruitment/candidates", { ...form, job_id: selectedJob, duplicate_action: duplicateAction });
       }
       setShowAddForm(false);
-      setForm({ full_name: "", email: "", phone: "", source: "referral", skills: "" });
+      setForm({ full_name: "", email: "", phone: "", source: "referral", skills: "", location: "", open_to_relocation: false });
       setResumeFile(null);
       loadCandidates(selectedJob);
     } catch (err) {
@@ -291,6 +443,7 @@ function CandidatesTab({ canRecruit }) {
           <h3>Candidates</h3>
           {canRecruit && selectedJob && (
             <div style={{ display: "flex", gap: 6 }}>
+              <a className="btn btn-sm btn-outline" href="/api/recruitment/candidates/bulk-import/template" download>Download Template</a>
               <button className="btn btn-sm btn-outline" onClick={() => setShowBulk(true)}>Bulk Import</button>
               <button className="btn btn-sm btn-primary" onClick={() => setShowAddForm(true)}>+ Add Candidate</button>
             </div>
@@ -311,10 +464,13 @@ function CandidatesTab({ canRecruit }) {
                       <div style={{ display: "flex", gap: 4 }}>
                         <Badge status={c.validation_status} />
                         <Badge status={c.stage} />
+                        {c.current_level && <span className="chip orange">{c.current_level}</span>}
                       </div>
                     </div>
                     <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
                       {c.email || "no email"} &middot; {c.phone || "no phone"} &middot; source: {c.source || "—"}
+                      {c.location && <> &middot; {c.location}</>}
+                      {c.open_to_relocation && <span className="chip green" style={{ marginLeft: 6 }}>Open to relocation</span>}
                     </div>
                     {c.skills?.length > 0 && (
                       <div className="chip-row" style={{ marginTop: 6 }}>
@@ -378,6 +534,18 @@ function CandidatesTab({ canRecruit }) {
                 <label>Skills (comma-separated)</label>
                 <input value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} placeholder="Java, Spring Boot, SQL" />
               </div>
+              <div className="form-grid">
+                <div className="form-field">
+                  <label>Location</label>
+                  <input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Bengaluru" />
+                </div>
+                <div className="form-field" style={{ justifyContent: "flex-end" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input type="checkbox" checked={form.open_to_relocation} onChange={(e) => setForm({ ...form, open_to_relocation: e.target.checked })} />
+                    Open to relocation
+                  </label>
+                </div>
+              </div>
               <div className="form-field">
                 <label>Resume</label>
                 <input type="file" accept=".pdf,.doc,.docx" onChange={(e) => setResumeFile(e.target.files[0])} />
@@ -427,10 +595,10 @@ function MockTestsTab() {
   const [windowStart, setWindowStart] = useState("");
   const [windowEnd, setWindowEnd] = useState("");
   const [assignError, setAssignError] = useState("");
-  const [linksModal, setLinksModal] = useState(null);
   const [candidates, setCandidates] = useState([]);
   const [selectedCandidates, setSelectedCandidates] = useState([]);
   const [error, setError] = useState("");
+  const [linksModal, setLinksModal] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -475,10 +643,7 @@ function MockTestsTab() {
   };
 
   const loadCandidatesForAssign = async (jobId) => {
-    if (!jobId) {
-      setCandidates([]);
-      return;
-    }
+    if (!jobId) { setCandidates([]); return; }
     const { data } = await client.get(`/recruitment/jobs/${jobId}/candidates`);
     setCandidates(data.filter((c) => c.verification_status === "verified"));
   };
@@ -488,11 +653,6 @@ function MockTestsTab() {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
   };
 
-  // <input type="datetime-local"> gives back the browser's LOCAL wall-clock
-  // time with no timezone info (e.g. "2026-08-07T15:00" meaning 3pm IST).
-  // The backend stores and compares everything in UTC, so this must be
-  // converted before it's sent — otherwise "now" in IST looks like it's
-  // still in the future once the backend reads it as UTC.
   const toUtcBackendString = (localDatetimeValue) => {
     const local = new Date(localDatetimeValue);
     const pad = (n) => String(n).padStart(2, "0");
@@ -712,7 +872,6 @@ function MockTestsTab() {
 
 function TestLinksModal({ assignments, onClose }) {
   const [copiedId, setCopiedId] = useState(null);
-
   const linkFor = (a) => `${window.location.origin}/test/${a.access_token}`;
 
   const copy = async (a) => {
@@ -720,7 +879,6 @@ function TestLinksModal({ assignments, onClose }) {
     setCopiedId(a.id);
     setTimeout(() => setCopiedId(null), 2000);
   };
-
   const copyAll = async () => {
     const text = assignments.map((a) => `${a.candidate_name}: ${linkFor(a)}`).join("\n");
     await navigator.clipboard.writeText(text);
@@ -735,7 +893,6 @@ function TestLinksModal({ assignments, onClose }) {
         <p className="muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
           Share each link with the candidate — by email, WhatsApp, or however you'd normally reach them. No HRMS login is needed to take the test.
         </p>
-
         {assignments.map((a) => (
           <div key={a.id} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: "1px solid var(--color-border)" }}>
             <div style={{ fontWeight: 700, fontSize: 13 }}>{a.candidate_name}</div>
@@ -744,13 +901,10 @@ function TestLinksModal({ assignments, onClose }) {
                 readOnly value={linkFor(a)} onFocus={(e) => e.target.select()}
                 style={{ flex: 1, fontSize: 12, border: "1px solid var(--color-border)", borderRadius: 6, padding: "6px 8px", color: "var(--color-text-muted)" }}
               />
-              <button className="btn btn-sm btn-outline" onClick={() => copy(a)}>
-                {copiedId === a.id ? "Copied" : "Copy"}
-              </button>
+              <button className="btn btn-sm btn-outline" onClick={() => copy(a)}>{copiedId === a.id ? "Copied" : "Copy"}</button>
             </div>
           </div>
         ))}
-
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
           <button className="btn btn-outline" onClick={copyAll}>{copiedId === "all" ? "Copied All" : "Copy All Links"}</button>
           <button className="btn btn-primary" onClick={onClose}>Done</button>
