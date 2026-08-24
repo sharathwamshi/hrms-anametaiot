@@ -15,6 +15,7 @@ class SalaryStructure(db.Model):
 
     pf_employee = db.Column(db.Float, default=0)   # employee PF contribution
     esi_employee = db.Column(db.Float, default=0)
+    insurance = db.Column(db.Float, default=0)      # employee's share of group health/life insurance premium
     professional_tax = db.Column(db.Float, default=0)
     tds = db.Column(db.Float, default=0)
 
@@ -27,7 +28,7 @@ class SalaryStructure(db.Model):
 
     @property
     def total_deductions(self):
-        return round(self.pf_employee + self.esi_employee + self.professional_tax + self.tds, 2)
+        return round(self.pf_employee + self.esi_employee + self.insurance + self.professional_tax + self.tds, 2)
 
     @property
     def net(self):
@@ -41,6 +42,7 @@ class SalaryStructure(db.Model):
             "other_allowance": self.other_allowance,
             "pf_employee": self.pf_employee,
             "esi_employee": self.esi_employee,
+            "insurance": self.insurance,
             "professional_tax": self.professional_tax,
             "tds": self.tds,
             "gross": self.gross,

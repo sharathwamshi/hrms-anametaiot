@@ -16,7 +16,7 @@ from app.utils.security import roles_required
 from app.utils.agreement_parser import parse_agreement
 from app.utils.vendor_invoice_pdf import generate_vendor_invoice_pdf
 from app.utils.permissions import role_or_permission_required
-from app.roles import VENDOR_MANAGEMENT_ROLES, VENDOR_APPROVER_ROLES, HR_OPERATIONS
+from app.roles import VENDOR_MANAGEMENT_ROLES, VENDOR_APPROVER_ROLES, HR_OPERATIONS, CONTRACT_EMPLOYEE
 
 bp = Blueprint("vendors", __name__, url_prefix="/api/vendors")
 
@@ -288,43 +288,177 @@ def confirm_agreement():
 @bp.get("/hires")
 @jwt_required()
 def list_hires():
+    """With no vendor_id, this is the cross-vendor 'All Placements' list —
+    every candidate ever placed with any vendor, direct or contract, kept
+    entirely separate from AnametaIOT's own Employees directory."""
     vendor_id = request.args.get("vendor_id", type=int)
     status = request.args.get("status")
     billable_only = request.args.get("billable_only") == "true"
+    q = request.args.get("q", "").strip()
+    placement_type = request.args.get("placement_type")
+    billing_type = request.args.get("billing_type")
+    sort = request.args.get("sort", "assigned_desc")
 
     query = VendorHire.query
     if vendor_id:
         query = query.filter_by(vendor_id=vendor_id)
     if status:
         query = query.filter_by(status=status)
-    rows = query.order_by(VendorHire.assigned_at.desc()).all()
+    if placement_type:
+        query = query.filter_by(placement_type=placement_type)
+    if billing_type:
+        query = query.filter_by(billing_type=billing_type)
+    if q:
+        query = query.filter(VendorHire.candidate_name.ilike(f"%{q}%"))
+
+    sort_map = {
+        "assigned_desc": VendorHire.assigned_at.desc(),
+        "assigned_asc": VendorHire.assigned_at.asc(),
+        "name_asc": VendorHire.candidate_name.asc(),
+        "name_desc": VendorHire.candidate_name.desc(),
+    }
+    rows = query.order_by(sort_map.get(sort, VendorHire.assigned_at.desc())).all()
     data = [h.to_dict() for h in rows]
     if billable_only:
         data = [h for h in data if h["is_billable"]]
     return jsonify(data)
 
 
+@bp.get("/hires/export")
+@jwt_required()
+def export_hires():
+    """CSV export of the All Placements list, same filters as /hires."""
+    import csv
+    import io
+    from flask import Response
+
+    vendor_id = request.args.get("vendor_id", type=int)
+    status = request.args.get("status")
+    placement_type = request.args.get("placement_type")
+    billing_type = request.args.get("billing_type")
+    q = request.args.get("q", "").strip()
+
+    query = VendorHire.query
+    if vendor_id:
+        query = query.filter_by(vendor_id=vendor_id)
+    if status:
+        query = query.filter_by(status=status)
+    if placement_type:
+        query = query.filter_by(placement_type=placement_type)
+    if billing_type:
+        query = query.filter_by(billing_type=billing_type)
+    if q:
+        query = query.filter(VendorHire.candidate_name.ilike(f"%{q}%"))
+    rows = query.order_by(VendorHire.assigned_at.desc()).all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "Candidate", "Vendor", "Role", "Placement Type", "Billing Type", "CTC",
+        "Tenure Start", "Status", "Has Internal Login", "Assigned On",
+    ])
+    for h in rows:
+        writer.writerow([
+            h.candidate_name, h.vendor.name if h.vendor else "", h.role.role_name if h.role else "",
+            h.placement_type, h.billing_type, h.ctc, h.tenure_start_date.isoformat(),
+            h.status, "Yes" if h.employee_id else "No", h.assigned_at.isoformat(),
+        ])
+    return Response(
+        buf.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=vendor_placements_export.csv"},
+    )
+
+
+@bp.post("/hires/<int:hire_id>/bill-recurring")
+@roles_required(*VENDOR_MANAGEMENT_ROLES)
+def bill_hire_recurring(hire_id):
+    """Marks a continuous-billing placement as billed for a given month —
+    called once per month per active contract placement when its monthly
+    invoice is generated. Body: { period: 'YYYY-MM' } (defaults to current month)."""
+    hire = VendorHire.query.get_or_404(hire_id)
+    payload = request.get_json(silent=True) or {}
+    period = payload.get("period") or date.today().strftime("%Y-%m")
+
+    if not hire.is_due_for_recurring_billing(period):
+        return jsonify({"message": "This placement is not due for recurring billing this period."}), 400
+
+    hire.last_billed_month = period
+    db.session.commit()
+    return jsonify(hire.to_dict())
+
+
 @bp.post("/hires")
 @roles_required(*VENDOR_MANAGEMENT_ROLES)
 def assign_hire():
+    """Assigns a candidate to a vendor's rate-card role, starting the
+    tenure/billing clock. Two distinct placement types:
+
+    - "direct": the person joins the vendor's own payroll entirely. No
+      internal AnametaIOT account is created — they are not our employee.
+    - "contract": still placed with (and worked for) the vendor, but we
+      keep a limited internal login (role: Contract Employee) purely to
+      track their documents and payroll inside this tool — the exact
+      narrow scope that role already exists for. This does NOT make them
+      an AnametaIOT employee in any other sense (no department requisites,
+      no internal team membership) — it's a tracking record, not a hire.
+    """
     payload = request.get_json(silent=True) or {}
     required = ["vendor_id", "agreement_id", "agreement_role_id", "candidate_name", "ctc", "tenure_start_date"]
     missing = [f for f in required if not payload.get(f)]
     if missing:
         return jsonify({"message": f"Missing fields: {', '.join(missing)}"}), 400
 
+    placement_type = payload.get("placement_type", "direct")
+    if placement_type not in ("direct", "contract"):
+        return jsonify({"message": "placement_type must be 'direct' or 'contract'."}), 400
+    billing_type = payload.get("billing_type", "one_time" if placement_type == "direct" else "continuous")
+    if billing_type not in ("one_time", "continuous"):
+        return jsonify({"message": "billing_type must be 'one_time' or 'continuous'."}), 400
+
     Vendor.query.get_or_404(payload["vendor_id"])
     VendorAgreement.query.get_or_404(payload["agreement_id"])
     VendorAgreementRole.query.get_or_404(payload["agreement_role_id"])
+
+    employee_id = payload.get("employee_id")
+
+    if placement_type == "contract" and not employee_id:
+        # Create the internal "contract login" — tracked in our tool, but
+        # they work for the vendor, not for us.
+        email = (payload.get("contract_login_email") or "").strip().lower()
+        password = payload.get("contract_login_password")
+        if not email or not password:
+            return jsonify({"message": "A contract placement needs a login email and password (contract_login_email / contract_login_password)."}), 400
+        if User.query.filter_by(email=email).first():
+            return jsonify({"message": f"Email '{email}' is already in use by another account."}), 409
+
+        employee_code = None
+        for _ in range(5):
+            candidate_code = f"CT{uuid.uuid4().hex[:6].upper()}"
+            if not User.query.filter_by(employee_code=candidate_code).first():
+                employee_code = candidate_code
+                break
+        if not employee_code:
+            return jsonify({"message": "Could not generate a unique contract login code — please try again."}), 500
+
+        contract_user = User(
+            employee_code=employee_code, full_name=payload["candidate_name"], email=email,
+            role=CONTRACT_EMPLOYEE, date_of_joining=datetime.strptime(payload["tenure_start_date"], "%Y-%m-%d").date(),
+        )
+        contract_user.set_password(password)
+        db.session.add(contract_user)
+        db.session.flush()
+        employee_id = contract_user.id
 
     hire = VendorHire(
         vendor_id=payload["vendor_id"],
         agreement_id=payload["agreement_id"],
         agreement_role_id=payload["agreement_role_id"],
         candidate_id=payload.get("candidate_id"),
-        employee_id=payload.get("employee_id"),
+        employee_id=employee_id,
         candidate_name=payload["candidate_name"],
         ctc=float(payload["ctc"]),
+        placement_type=placement_type,
+        billing_type=billing_type,
         tenure_start_date=datetime.strptime(payload["tenure_start_date"], "%Y-%m-%d").date(),
         assigned_by=int(get_jwt_identity()),
     )
@@ -334,11 +468,12 @@ def assign_hire():
     # structure for the linked employee if one doesn't exist yet, using
     # the CTC as Basic. Finance can refine the actual breakdown afterward
     # from the Payroll page — this just makes sure payroll isn't blocked
-    # on a manual first step.
-    if payload.get("employee_id"):
-        existing = SalaryStructure.query.filter_by(user_id=payload["employee_id"]).first()
+    # on a manual first step. Only applies when there IS an internal login
+    # (contract placements) — a direct hire has no internal payroll at all.
+    if employee_id:
+        existing = SalaryStructure.query.filter_by(user_id=employee_id).first()
         if not existing:
-            db.session.add(SalaryStructure(user_id=payload["employee_id"], basic=float(payload["ctc"])))
+            db.session.add(SalaryStructure(user_id=employee_id, basic=float(payload["ctc"])))
 
     db.session.commit()
     return jsonify(hire.to_dict()), 201
@@ -464,6 +599,84 @@ def generate_invoice(vendor_id):
             ctc=item["ctc"], fee_pct=item["fee_pct"], fee_amount=item["fee_amount"],
         ))
         item["hire"].status = "invoiced"
+
+    filename = f"invoice_{invoice.id}_{uuid.uuid4().hex[:8]}.pdf"
+    rel_path = os.path.join("vendor_invoices", filename)
+    abs_path = os.path.join(current_app.config["UPLOAD_FOLDER"], rel_path)
+    generate_vendor_invoice_pdf(
+        abs_path, invoice.invoice_number, invoice.invoice_date.strftime("%d-%m-%Y"),
+        vendor.to_dict(), company.to_dict(),
+        [{"candidate_name": i["candidate_name"], "role_name": i["role_name"],
+          "ctc": i["ctc"], "fee_pct": i["fee_pct"], "fee_amount": i["fee_amount"]} for i in line_items_data],
+        subtotal, cgst, sgst, igst, total,
+    )
+    invoice.pdf_path = f"/static/uploads/{rel_path}"
+
+    db.session.commit()
+    return jsonify(invoice.to_dict(include_items=True)), 201
+
+
+@bp.post("/<int:vendor_id>/invoices/generate-recurring")
+@roles_required(*VENDOR_MANAGEMENT_ROLES)
+def generate_recurring_invoice(vendor_id):
+    """Monthly billing for continuous-billing (typically contract)
+    placements — completely separate from the one-time tenure-gated flow
+    above. Each eligible hire is billed a monthly fee (CTC/12 × the
+    role's service fee %) and marked with last_billed_month so the same
+    period is never double-charged; unlike a one-time hire, its status
+    stays 'active' so it continues billing every subsequent month."""
+    vendor = Vendor.query.get_or_404(vendor_id)
+    payload = request.get_json(silent=True) or {}
+    period = payload.get("period") or date.today().strftime("%Y-%m")
+    hire_ids = payload.get("hire_ids")
+
+    query = VendorHire.query.filter_by(vendor_id=vendor_id, status="active", billing_type="continuous")
+    if hire_ids:
+        query = query.filter(VendorHire.id.in_(hire_ids))
+    hires = [h for h in query.all() if h.is_due_for_recurring_billing(period)]
+
+    if not hires:
+        return jsonify({"message": f"No continuous placements are due for billing in {period}."}), 400
+
+    agreement = hires[0].agreement
+    subtotal = 0.0
+    line_items_data = []
+    for hire in hires:
+        fee_amount = round((hire.ctc / 12) * (hire.role.service_fee_pct / 100), 2)
+        subtotal += fee_amount
+        line_items_data.append({
+            "hire": hire, "candidate_name": hire.candidate_name,
+            "role_name": f"{hire.role.role_name} (monthly — {period})", "ctc": hire.ctc,
+            "fee_pct": hire.role.service_fee_pct, "fee_amount": fee_amount,
+        })
+
+    company = CompanySettings.query.first() or CompanySettings()
+    same_state = (vendor.state or "").strip().lower() == (company.state or "").strip().lower()
+    if same_state:
+        cgst = round(subtotal * 0.09, 2)
+        sgst = round(subtotal * 0.09, 2)
+        igst = 0.0
+    else:
+        cgst = sgst = 0.0
+        igst = round(subtotal * 0.18, 2)
+    total = round(subtotal + cgst + sgst + igst, 2)
+
+    invoice = VendorInvoice(
+        vendor_id=vendor.id, agreement_id=agreement.id,
+        invoice_number=_next_invoice_number(vendor), invoice_date=date.today(),
+        subtotal=subtotal, cgst_amount=cgst, sgst_amount=sgst, igst_amount=igst,
+        total_amount=total, status="draft", generated_by=int(get_jwt_identity()),
+    )
+    db.session.add(invoice)
+    db.session.flush()
+
+    for item in line_items_data:
+        db.session.add(VendorInvoiceItem(
+            invoice_id=invoice.id, hire_id=item["hire"].id,
+            candidate_name=item["candidate_name"], role_name=item["role_name"],
+            ctc=item["ctc"], fee_pct=item["fee_pct"], fee_amount=item["fee_amount"],
+        ))
+        item["hire"].last_billed_month = period  # stays "active" — bills again next period
 
     filename = f"invoice_{invoice.id}_{uuid.uuid4().hex[:8]}.pdf"
     rel_path = os.path.join("vendor_invoices", filename)

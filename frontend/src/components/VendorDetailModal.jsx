@@ -35,6 +35,8 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
   useEffect(() => { load(); }, [load]);
 
   const billableCount = hires.filter((h) => h.is_billable).length;
+  const currentPeriod = new Date().toISOString().slice(0, 7);
+  const recurringDueCount = hires.filter((h) => h.billing_type === "continuous" && h.status === "active" && h.last_billed_month !== currentPeriod).length;
 
   const generateInvoice = async () => {
     setError("");
@@ -44,6 +46,19 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
       load();
     } catch (err) {
       setError(err?.response?.data?.message || "Could not generate invoice.");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const generateRecurringInvoice = async () => {
+    setError("");
+    setGenerating(true);
+    try {
+      await client.post(`/vendors/${vendorId}/invoices/generate-recurring`, { period: currentPeriod });
+      load();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not generate the recurring invoice.");
     } finally {
       setGenerating(false);
     }
@@ -129,23 +144,34 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
           {hires.map((h) => (
             <div key={h.id} style={{ fontSize: 12, padding: "8px 0", borderBottom: "1px solid var(--color-border)" }}>
               <div className="flex-between">
-                <span>{h.candidate_name} — {h.role_name} — ₹{h.ctc.toLocaleString("en-IN")}</span>
+                <span>
+                  {h.candidate_name} — {h.role_name} — ₹{h.ctc.toLocaleString("en-IN")}
+                  {h.employee_id && <span className="chip" style={{ marginLeft: 6 }}>Contract Login</span>}
+                </span>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <span className="chip blue">{h.placement_type === "contract" ? "Contract" : "Direct"}</span>
+                  <span className="chip orange">{h.billing_type === "continuous" ? "Monthly" : "One-time"}</span>
                   {h.is_billable && <span className="chip green">Billable</span>}
                   <Badge status={h.status} />
                 </div>
               </div>
-              <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ flex: 1, height: 6, background: "var(--color-border)", borderRadius: 4, overflow: "hidden" }}>
-                  <div style={{ width: `${h.tenure_progress_pct}%`, height: "100%", background: h.tenure_progress_pct >= 100 ? "var(--color-success)" : "var(--color-primary-500)" }} />
+              {h.billing_type === "continuous" ? (
+                <div className="muted" style={{ fontSize: 10.5, marginTop: 4 }}>
+                  Last billed: {h.last_billed_month || "never"}
                 </div>
-                <span className="muted" style={{ fontSize: 10.5, whiteSpace: "nowrap" }}>
-                  {h.tenure_days_elapsed}/{h.tenure_days_required}d
-                </span>
-                {canManage && h.status === "active" && (
-                  <button className="btn btn-sm btn-outline" onClick={() => replaceHire(h.id)}>Replace</button>
-                )}
-              </div>
+              ) : (
+                <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ flex: 1, height: 6, background: "var(--color-border)", borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ width: `${h.tenure_progress_pct}%`, height: "100%", background: h.tenure_progress_pct >= 100 ? "var(--color-success)" : "var(--color-primary-500)" }} />
+                  </div>
+                  <span className="muted" style={{ fontSize: 10.5, whiteSpace: "nowrap" }}>
+                    {h.tenure_days_elapsed}/{h.tenure_days_required}d
+                  </span>
+                </div>
+              )}
+              {canManage && h.status === "active" && (
+                <button className="btn btn-sm btn-outline" style={{ marginTop: 6 }} onClick={() => replaceHire(h.id)}>Replace</button>
+              )}
             </div>
           ))}
         </div>
@@ -155,9 +181,14 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
           <div className="flex-between">
             <strong style={{ fontSize: 13 }}>Invoices</strong>
             {canManage && (
-              <button className="btn btn-sm btn-primary" disabled={!billableCount || generating} onClick={generateInvoice}>
-                {generating ? "Generating..." : `Generate Invoice${billableCount ? ` (${billableCount} billable)` : ""}`}
-              </button>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="btn btn-sm btn-outline" disabled={!recurringDueCount || generating} onClick={generateRecurringInvoice}>
+                  {generating ? "Generating..." : `Generate Monthly Invoice${recurringDueCount ? ` (${recurringDueCount} due)` : ""}`}
+                </button>
+                <button className="btn btn-sm btn-primary" disabled={!billableCount || generating} onClick={generateInvoice}>
+                  {generating ? "Generating..." : `Generate One-time Invoice${billableCount ? ` (${billableCount} billable)` : ""}`}
+                </button>
+              </div>
             )}
           </div>
           {invoices.length === 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>No invoices yet.</div>}

@@ -175,6 +175,10 @@ class VendorHire(db.Model):
     ctc = db.Column(db.Float, nullable=False)
     tenure_start_date = db.Column(db.Date, nullable=False)
 
+    placement_type = db.Column(db.String(20), default="direct")  # direct | contract
+    billing_type = db.Column(db.String(20), default="one_time")  # one_time | continuous
+    last_billed_month = db.Column(db.String(7), nullable=True)  # "YYYY-MM" — guards continuous billing against double-charging the same month
+
     status = db.Column(db.String(20), default="active")
     # active, replaced, invoiced (billed at least once), terminated
     replacement_of_hire_id = db.Column(db.Integer, db.ForeignKey("vendor_hires.id"), nullable=True)
@@ -186,6 +190,7 @@ class VendorHire(db.Model):
 
     role = db.relationship("VendorAgreementRole")
     agreement = db.relationship("VendorAgreement")
+    vendor = db.relationship("Vendor")
 
     @property
     def tenure_days_required(self):
@@ -197,13 +202,28 @@ class VendorHire(db.Model):
 
     @property
     def is_billable(self):
+        """One-time-billing hires only — a continuous-billing placement is
+        never eligible for this tenure-gated single fee; it's billed
+        recurring instead (see is_due_for_recurring_billing)."""
         from datetime import date
+        if self.billing_type != "one_time":
+            return False
         already_invoiced = any(i.invoice.status != "rejected" for i in self.invoice_items)
         return (
             self.status == "active"
             and not already_invoiced
             and date.today() >= self.tenure_end_date
         )
+
+    def is_due_for_recurring_billing(self, period):
+        """period: 'YYYY-MM'. Continuous-billing hires only — true once
+        their tenure has started for that period and they haven't already
+        been billed for it."""
+        if self.billing_type != "continuous" or self.status != "active":
+            return False
+        if self.last_billed_month == period:
+            return False
+        return self.tenure_start_date.strftime("%Y-%m") <= period
 
     def to_dict(self):
         from datetime import date
@@ -217,8 +237,12 @@ class VendorHire(db.Model):
             "service_fee_pct": self.role.service_fee_pct if self.role else None,
             "candidate_id": self.candidate_id,
             "employee_id": self.employee_id,
+            "vendor_name": self.vendor.name if self.vendor else None,
             "candidate_name": self.candidate_name,
             "ctc": self.ctc,
+            "placement_type": self.placement_type,
+            "billing_type": self.billing_type,
+            "last_billed_month": self.last_billed_month,
             "tenure_start_date": self.tenure_start_date.isoformat(),
             "tenure_end_date": self.tenure_end_date.isoformat(),
             "tenure_days_required": self.tenure_days_required,

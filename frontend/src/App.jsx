@@ -11,6 +11,7 @@ import Employees from "./pages/Employees";
 import Payroll from "./pages/Payroll";
 import Recruitment from "./pages/Recruitment";
 import AllCandidates from "./pages/AllCandidates";
+import AllPlacements from "./pages/AllPlacements";
 import Vendors from "./pages/Vendors";
 import MockTestTake from "./pages/MockTestTake";
 import Announcements from "./pages/Announcements";
@@ -78,7 +79,7 @@ export default function App() {
       <Route
         path="/all-candidates"
         element={
-          <ProtectedRoute allow={[ROLES.HR_RECRUITER, ROLES.HR_OPERATIONS, ROLES.MANAGER]}>
+          <ProtectedRoute allow={[ROLES.HR_RECRUITER, ROLES.HR_OPERATIONS, ROLES.MANAGER, ROLES.FINANCE_ACCOUNTS]}>
             <AllCandidates />
           </ProtectedRoute>
         }
@@ -89,6 +90,15 @@ export default function App() {
         element={
           <ProtectedRoute allow={[ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS, ROLES.MANAGER]}>
             <Vendors />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/all-placements"
+        element={
+          <ProtectedRoute allow={[ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS, ROLES.MANAGER]}>
+            <AllPlacements />
           </ProtectedRoute>
         }
       />

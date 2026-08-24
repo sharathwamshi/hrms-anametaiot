@@ -36,7 +36,7 @@ def upsert_structure(user_id):
 
     for field in [
         "basic", "hra", "special_allowance", "other_allowance",
-        "pf_employee", "esi_employee", "professional_tax", "tds",
+        "pf_employee", "esi_employee", "insurance", "professional_tax", "tds",
     ]:
         if field in payload:
             setattr(structure, field, float(payload[field]))
@@ -186,6 +186,7 @@ def create_template():
         other_allowance_pct=payload.get("other_allowance_pct", 10),
         pf_employee_pct=payload.get("pf_employee_pct", 6),
         esi_employee_pct=payload.get("esi_employee_pct", 0),
+        insurance_pct=payload.get("insurance_pct", 0),
         professional_tax_flat=payload.get("professional_tax_flat", 200),
         tds_pct=payload.get("tds_pct", 0),
         created_by=int(get_jwt_identity()),
@@ -202,7 +203,7 @@ def update_template(template_id):
     payload = request.get_json(silent=True) or {}
     for field in [
         "name", "description", "basic_pct", "hra_pct", "special_allowance_pct",
-        "other_allowance_pct", "pf_employee_pct", "esi_employee_pct",
+        "other_allowance_pct", "pf_employee_pct", "esi_employee_pct", "insurance_pct",
         "professional_tax_flat", "tds_pct",
     ]:
         if field in payload:
@@ -245,6 +246,7 @@ def apply_template(template_id, user_id):
     structure.other_allowance = round(monthly * template.other_allowance_pct / 100, 2)
     structure.pf_employee = round(monthly * template.pf_employee_pct / 100, 2)
     structure.esi_employee = round(monthly * template.esi_employee_pct / 100, 2)
+    structure.insurance = round(monthly * template.insurance_pct / 100, 2)
     structure.professional_tax = template.professional_tax_flat
     structure.tds = round(monthly * template.tds_pct / 100, 2)
 

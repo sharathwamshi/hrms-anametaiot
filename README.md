@@ -244,6 +244,42 @@ parsing, real invoice generation, tested against actual sample agreements and in
   invoices) with a direct download link, in addition to the existing in-app
   print-friendly view.
 
+### The recruiting-for-vendors model
+
+This is the core business model the recruitment and vendor modules are actually built
+around: AnametaIOT's own recruiters source candidates both for AnametaIOT itself **and**
+for client companies (vendors) — recruiting-as-a-service, the same relationship shown in
+this project's original sample agreements/invoices. Two things had to stay cleanly
+separated for this to work, and both are now enforced at the data model level, not just
+in the UI:
+
+- **Internal Hiring vs. Client Requisition** — every job posting now has a
+  `requisition_type`. "Internal" is AnametaIOT's own hiring, completely unchanged from
+  before. "Client" requires picking which vendor the requisition is for, and every
+  candidate sourced against it is tagged accordingly — filterable everywhere (Jobs, All
+  Candidates, exports) so the two pipelines are never visually or functionally mixed.
+- **Direct vs. Contract placement** — once someone is placed with a vendor
+  (`vendors/hires`), the placement is one of two types:
+  - **Direct** — they join the vendor's own payroll entirely. No AnametaIOT account is
+    ever created for them; they will never appear in the Employees directory.
+  - **Contract** — still placed with (and working for) the vendor, but a narrow internal
+    login is created (role: **Contract Employee**, which already existed for exactly this
+    scope) purely so they can access their Documents and Payroll inside this tool. This
+    does not make them an AnametaIOT employee in any other sense.
+- **Billing follows the placement type** — a **one-time** fee (the original tenure-gated
+  flow, unchanged) for direct hires, or a **continuous monthly** fee for contract
+  placements, computed as CTC/12 × the rate-card fee %, generated via a separate
+  "Generate Monthly Invoice" action and guarded against ever double-billing the same
+  month twice.
+- **All Placements** — a dedicated, vendor-agnostic list of everyone ever placed with any
+  vendor (`/all-placements`), completely separate from both the internal Employees
+  directory and the Candidates recruiting pipeline. Same search/filter/sort/CSV pattern
+  as All Candidates.
+- **Downloads** — CSV export is now available on All Candidates, per-job Candidates, and
+  All Placements. These go through an authenticated blob download (`utils/download.js`)
+  rather than a plain link, since the JWT lives in `localStorage`, not a cookie — a plain
+  `<a href>` to a protected endpoint would silently fail.
+
 ### Vendor onboarding, refined
 
 - **Vendor-first upload flow** — after an agreement is parsed, a vendor **dropdown** is

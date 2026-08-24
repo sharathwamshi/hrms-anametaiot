@@ -51,6 +51,7 @@ export default function PayslipDetailModal({ payslip, onClose }) {
             <div className="payslip-col-title">Deductions</div>
             <div className="payslip-row"><span>Provident Fund</span><span>{inr(structure?.pf_employee)}</span></div>
             <div className="payslip-row"><span>ESI</span><span>{inr(structure?.esi_employee)}</span></div>
+            <div className="payslip-row"><span>Insurance</span><span>{inr(structure?.insurance)}</span></div>
             <div className="payslip-row"><span>Professional Tax</span><span>{inr(structure?.professional_tax)}</span></div>
             <div className="payslip-row"><span>TDS</span><span>{inr(structure?.tds)}</span></div>
             <div className="payslip-row payslip-total"><span>Total Deductions</span><span>{inr(payslip.total_deductions)}</span></div>

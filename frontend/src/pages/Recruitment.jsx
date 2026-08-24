@@ -9,6 +9,7 @@ import PostImageModal from "../components/PostImageModal";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
 import { parseUtc } from "../utils/datetime";
+import { downloadFile } from "../utils/download";
 
 const TABS_BY_ROLE = {
   [ROLES.HR_RECRUITER]: ["jobs", "candidates", "mocktests"],
@@ -48,9 +49,10 @@ export default function Recruitment() {
 
 function JobsTab({ canRecruit, canApprove }) {
   const [jobs, setJobs] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: "", employment_type: "full_time", openings: 1, salary_min: "", salary_max: "", priority: "standard", description: "", interview_levels: "Screening, Tech L1, Tech L2, HR Round, Offer" });
+  const [form, setForm] = useState({ title: "", employment_type: "full_time", openings: 1, salary_min: "", salary_max: "", priority: "standard", description: "", interview_levels: "Screening, Tech L1, Tech L2, HR Round, Offer", requisition_type: "internal", vendor_id: "" });
   const [error, setError] = useState("");
   const [imageModal, setImageModal] = useState(null);
   const [viewJob, setViewJob] = useState(null);
@@ -65,15 +67,22 @@ function JobsTab({ canRecruit, canApprove }) {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    client.get("/vendors").then(({ data }) => setVendors(data)).catch(() => setVendors([]));
+  }, []);
 
   const createJob = async (e) => {
     e.preventDefault();
     setError("");
+    if (form.requisition_type === "client" && !form.vendor_id) {
+      setError("Select which vendor/client this requisition is for.");
+      return;
+    }
     try {
       await client.post("/recruitment/jobs", form);
       setShowForm(false);
-      setForm({ title: "", employment_type: "full_time", openings: 1, salary_min: "", salary_max: "", priority: "standard", description: "", interview_levels: "Screening, Tech L1, Tech L2, HR Round, Offer" });
+      setForm({ title: "", employment_type: "full_time", openings: 1, salary_min: "", salary_max: "", priority: "standard", description: "", interview_levels: "Screening, Tech L1, Tech L2, HR Round, Offer", requisition_type: "internal", vendor_id: "" });
       load();
     } catch (err) {
       setError(err?.response?.data?.message || "Could not create job posting.");
@@ -107,6 +116,7 @@ function JobsTab({ canRecruit, canApprove }) {
       salary_min: j.salary_min ?? "", salary_max: j.salary_max ?? "",
       priority: j.priority, description: j.description || "",
       interview_levels: (j.interview_levels || []).join(", "),
+      requisition_type: j.requisition_type || "internal", vendor_id: j.vendor_id || "",
     });
     setEditJob(j);
   };
@@ -136,6 +146,11 @@ function JobsTab({ canRecruit, canApprove }) {
               <div className="flex-between">
                 <div>
                   <strong>{j.title}</strong> <span className="muted">({j.department || "Unassigned"})</span>
+                  {j.requisition_type === "client" ? (
+                    <span className="chip orange" style={{ marginLeft: 6 }}>Client: {j.vendor_name}</span>
+                  ) : (
+                    <span className="chip" style={{ marginLeft: 6 }}>Internal Hiring</span>
+                  )}
                   <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
                     {j.openings} opening(s) &middot; {j.candidate_count} candidate(s) &middot; priority: {j.priority}
                     {j.salary_min && ` · ₹${j.salary_min.toLocaleString("en-IN")}–₹${j.salary_max.toLocaleString("en-IN")}`}
@@ -187,6 +202,35 @@ function JobsTab({ canRecruit, canApprove }) {
             <h3 style={{ marginBottom: 16 }}>New Job Requisition</h3>
             {error && <div className="login-error">{error}</div>}
             <form onSubmit={createJob}>
+              <div className="form-field">
+                <label>Requisition Type</label>
+                <div style={{ display: "flex", gap: 16, padding: "6px 0" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+                    <input type="radio" checked={form.requisition_type === "internal"}
+                      onChange={() => setForm({ ...form, requisition_type: "internal", vendor_id: "" })} />
+                    Internal Hiring <span className="muted">(AnametaIOT's own team)</span>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+                    <input type="radio" checked={form.requisition_type === "client"}
+                      onChange={() => setForm({ ...form, requisition_type: "client" })} />
+                    Client Requisition <span className="muted">(recruiting for a vendor/client)</span>
+                  </label>
+                </div>
+              </div>
+              {form.requisition_type === "client" && (
+                <div className="form-field">
+                  <label>Client / Vendor</label>
+                  <select required value={form.vendor_id} onChange={(e) => setForm({ ...form, vendor_id: e.target.value })}>
+                    <option value="">Select who this requisition is for...</option>
+                    {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                  </select>
+                  {vendors.length === 0 && (
+                    <p className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>
+                      No vendors on file yet — add one from the Vendors page first.
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="form-field">
                 <label>Title</label>
                 <input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
@@ -294,6 +338,30 @@ function JobsTab({ canRecruit, canApprove }) {
             <h3 style={{ marginBottom: 16 }}>Edit Job Posting</h3>
             {editError && <div className="login-error">{editError}</div>}
             <form onSubmit={saveEdit}>
+              <div className="form-field">
+                <label>Requisition Type</label>
+                <div style={{ display: "flex", gap: 16, padding: "6px 0" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+                    <input type="radio" checked={editForm.requisition_type === "internal"}
+                      onChange={() => setEditForm({ ...editForm, requisition_type: "internal", vendor_id: "" })} />
+                    Internal Hiring
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+                    <input type="radio" checked={editForm.requisition_type === "client"}
+                      onChange={() => setEditForm({ ...editForm, requisition_type: "client" })} />
+                    Client Requisition
+                  </label>
+                </div>
+              </div>
+              {editForm.requisition_type === "client" && (
+                <div className="form-field">
+                  <label>Client / Vendor</label>
+                  <select required value={editForm.vendor_id} onChange={(e) => setEditForm({ ...editForm, vendor_id: e.target.value })}>
+                    <option value="">Select who this requisition is for...</option>
+                    {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                  </select>
+                </div>
+              )}
               <div className="form-field">
                 <label>Title</label>
                 <input required value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} />
@@ -441,13 +509,20 @@ function CandidatesTab({ canRecruit }) {
       <div className="card">
         <div className="card-title-row">
           <h3>Candidates</h3>
-          {canRecruit && selectedJob && (
-            <div style={{ display: "flex", gap: 6 }}>
-              <a className="btn btn-sm btn-outline" href="/api/recruitment/candidates/bulk-import/template" download>Download Template</a>
-              <button className="btn btn-sm btn-outline" onClick={() => setShowBulk(true)}>Bulk Import</button>
-              <button className="btn btn-sm btn-primary" onClick={() => setShowAddForm(true)}>+ Add Candidate</button>
-            </div>
-          )}
+          <div style={{ display: "flex", gap: 6 }}>
+            {selectedJob && (
+              <button className="btn btn-sm btn-outline" onClick={() => downloadFile(`/recruitment/jobs/${selectedJob}/candidates/export`, `job_${selectedJob}_candidates.csv`)}>
+                Download CSV
+              </button>
+            )}
+            {canRecruit && selectedJob && (
+              <>
+                <button className="btn btn-sm btn-outline" onClick={() => downloadFile("/recruitment/candidates/bulk-import/template", "candidate_bulk_import_template.xlsx")}>Download Template</button>
+                <button className="btn btn-sm btn-outline" onClick={() => setShowBulk(true)}>Bulk Import</button>
+                <button className="btn btn-sm btn-primary" onClick={() => setShowAddForm(true)}>+ Add Candidate</button>
+              </>
+            )}
+          </div>
         </div>
         {loading ? <Loader /> : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

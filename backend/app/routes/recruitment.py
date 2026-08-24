@@ -30,9 +30,15 @@ VALID_STAGES = ["applied", "screening", "mock_test", "interview", "offer", "hire
 @jwt_required()
 def list_jobs():
     status = request.args.get("status")
+    requisition_type = request.args.get("requisition_type")
+    vendor_id = request.args.get("vendor_id", type=int)
     query = JobPosting.query
     if status:
         query = query.filter_by(status=status)
+    if requisition_type:
+        query = query.filter_by(requisition_type=requisition_type)
+    if vendor_id:
+        query = query.filter_by(vendor_id=vendor_id)
     rows = query.order_by(JobPosting.created_at.desc()).all()
     return jsonify([j.to_dict() for j in rows])
 
@@ -49,6 +55,16 @@ def create_job():
     payload = request.get_json(silent=True) or {}
     if not payload.get("title"):
         return jsonify({"message": "Job title is required."}), 400
+
+    requisition_type = payload.get("requisition_type", "internal")
+    if requisition_type not in ("internal", "client"):
+        return jsonify({"message": "requisition_type must be 'internal' or 'client'."}), 400
+    vendor_id = payload.get("vendor_id")
+    if requisition_type == "client" and not vendor_id:
+        return jsonify({"message": "A client requisition must specify which vendor/client it's for."}), 400
+    if requisition_type == "internal":
+        vendor_id = None  # never allow a stray vendor_id to leak onto an internal requisition
+
     job = JobPosting(
         title=payload["title"], department_id=payload.get("department_id"),
         employment_type=payload.get("employment_type", "full_time"), openings=payload.get("openings", 1),
@@ -58,6 +74,7 @@ def create_job():
                           if payload.get("auto_close_date") else None),
         screening_questions=payload.get("screening_questions", ""),
         interview_levels=payload.get("interview_levels", ""),
+        requisition_type=requisition_type, vendor_id=vendor_id,
         requisition_status="pending_approval", status="open",
         created_by=int(get_jwt_identity()),
     )
@@ -72,9 +89,14 @@ def update_job(job_id):
     job = JobPosting.query.get_or_404(job_id)
     payload = request.get_json(silent=True) or {}
     for field in ["title", "employment_type", "openings", "description", "status", "department_id",
-                   "salary_min", "salary_max", "priority", "screening_questions", "interview_levels"]:
+                   "salary_min", "salary_max", "priority", "screening_questions", "interview_levels",
+                   "requisition_type", "vendor_id"]:
         if field in payload:
             setattr(job, field, payload[field])
+    if job.requisition_type == "internal":
+        job.vendor_id = None
+    elif job.requisition_type == "client" and not job.vendor_id:
+        return jsonify({"message": "A client requisition must specify which vendor/client it's for."}), 400
     if payload.get("auto_close_date"):
         job.auto_close_date = datetime.strptime(payload["auto_close_date"], "%Y-%m-%d").date()
     db.session.commit()
@@ -382,27 +404,20 @@ def job_candidates(job_id):
     return jsonify([c.to_dict() for c in rows])
 
 
-@bp.get("/candidates")
-@jwt_required()
-def list_all_candidates():
-    """Flat, searchable, sortable list of every candidate across every job —
-    backs the 'All Candidates' tab. Query params:
-      q        — matches name, email, or phone (case-insensitive substring)
-      stage    — exact stage filter
-      job_id   — exact job filter
-      source   — exact source filter
-      level    — exact current_level filter
-      sort     — one of: created_desc (default), created_asc, name_asc, name_desc,
-                 stage_asc, job_asc
-    """
-    q = request.args.get("q", "").strip()
-    stage = request.args.get("stage")
-    job_id = request.args.get("job_id", type=int)
-    source = request.args.get("source")
-    level = request.args.get("level")
-    sort = request.args.get("sort", "created_desc")
+def _build_candidate_query(args):
+    """Shared filter/sort logic for the All Candidates list and its CSV
+    export — kept in one place so the two can never drift out of sync."""
+    q = args.get("q", "").strip()
+    stage = args.get("stage")
+    job_id = args.get("job_id", type=int)
+    source = args.get("source")
+    level = args.get("level")
+    requisition_type = args.get("requisition_type")
+    sort = args.get("sort", "created_desc")
 
     query = Candidate.query
+    if requisition_type:
+        query = query.join(JobPosting).filter(JobPosting.requisition_type == requisition_type)
     if q:
         like = f"%{q}%"
         query = query.filter(
@@ -425,11 +440,90 @@ def list_all_candidates():
         "stage_asc": Candidate.stage.asc(),
     }
     if sort == "job_asc":
-        rows = query.join(JobPosting).order_by(JobPosting.title.asc()).all()
-    else:
-        rows = query.order_by(sort_map.get(sort, Candidate.created_at.desc())).all()
+        if not requisition_type:  # avoid a duplicate join if we already joined above
+            query = query.join(JobPosting)
+        return query.order_by(JobPosting.title.asc()).all()
+    return query.order_by(sort_map.get(sort, Candidate.created_at.desc())).all()
 
+
+@bp.get("/candidates")
+@jwt_required()
+def list_all_candidates():
+    """Flat, searchable, sortable list of every candidate across every job —
+    backs the 'All Candidates' page. Query params:
+      q                — matches name, email, or phone (case-insensitive substring)
+      stage            — exact stage filter
+      job_id           — exact job filter
+      source           — exact source filter
+      level            — exact current_level filter
+      requisition_type — "internal" or "client" — keeps AnametaIOT's own
+                          hiring pipeline visually/functionally separate from
+                          candidates being sourced for a vendor/client
+      sort             — one of: created_desc (default), created_asc, name_asc,
+                          name_desc, stage_asc, job_asc
+    """
+    rows = _build_candidate_query(request.args)
     return jsonify([c.to_dict() for c in rows])
+
+
+@bp.get("/candidates/export")
+@jwt_required()
+def export_all_candidates():
+    """Same filters as /candidates, returned as a downloadable CSV."""
+    import csv
+    import io
+    from flask import Response
+
+    rows = _build_candidate_query(request.args)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "Name", "Email", "Phone", "Job", "Requisition Type", "Vendor", "Source",
+        "Skills", "Location", "Open to Relocation", "Stage", "Current Level",
+        "Validation Status", "Verification Status", "Added On",
+    ])
+    for c in rows:
+        d = c.to_dict()
+        writer.writerow([
+            d["full_name"], d["email"], d["phone"], d.get("job_title"),
+            c.job.requisition_type if c.job else "", c.job.vendor.name if (c.job and c.job.vendor) else "",
+            d["source"], ", ".join(d["skills"]), d.get("location"),
+            "Yes" if d.get("open_to_relocation") else "No", d["stage"], d.get("current_level"),
+            d["validation_status"], d["verification_status"], d["created_at"],
+        ])
+    return Response(
+        buf.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=candidates_export.csv"},
+    )
+
+
+@bp.get("/jobs/<int:job_id>/candidates/export")
+@jwt_required()
+def export_job_candidates(job_id):
+    """CSV export for one job's candidate pipeline (used from the Candidates tab)."""
+    import csv
+    import io
+    from flask import Response
+
+    JobPosting.query.get_or_404(job_id)
+    rows = Candidate.query.filter_by(job_id=job_id).order_by(Candidate.created_at.desc()).all()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "Name", "Email", "Phone", "Source", "Skills", "Location", "Open to Relocation",
+        "Stage", "Current Level", "Validation Status", "Verification Status", "Added On",
+    ])
+    for c in rows:
+        d = c.to_dict()
+        writer.writerow([
+            d["full_name"], d["email"], d["phone"], d["source"], ", ".join(d["skills"]),
+            d.get("location"), "Yes" if d.get("open_to_relocation") else "No",
+            d["stage"], d.get("current_level"), d["validation_status"], d["verification_status"], d["created_at"],
+        ])
+    return Response(
+        buf.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=job_{job_id}_candidates.csv"},
+    )
 
 
 @bp.get("/candidates/dashboard-stats")

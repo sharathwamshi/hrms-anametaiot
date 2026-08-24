@@ -23,6 +23,7 @@ class SalaryTemplate(db.Model):
     # caveat already documented there)
     pf_employee_pct = db.Column(db.Float, default=6)
     esi_employee_pct = db.Column(db.Float, default=0)
+    insurance_pct = db.Column(db.Float, default=0)  # employee's share of group health/life insurance premium
     professional_tax_flat = db.Column(db.Float, default=200)
     tds_pct = db.Column(db.Float, default=0)
 
@@ -40,6 +41,7 @@ class SalaryTemplate(db.Model):
             "other_allowance_pct": self.other_allowance_pct,
             "pf_employee_pct": self.pf_employee_pct,
             "esi_employee_pct": self.esi_employee_pct,
+            "insurance_pct": self.insurance_pct,
             "professional_tax_flat": self.professional_tax_flat,
             "tds_pct": self.tds_pct,
             "earnings_total_pct": round(

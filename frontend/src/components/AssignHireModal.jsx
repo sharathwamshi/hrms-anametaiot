@@ -11,6 +11,10 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
   const [manualName, setManualName] = useState("");
   const [ctc, setCtc] = useState("");
   const [tenureStart, setTenureStart] = useState(new Date().toISOString().slice(0, 10));
+  const [placementType, setPlacementType] = useState("direct");
+  const [billingType, setBillingType] = useState("one_time");
+  const [contractEmail, setContractEmail] = useState("");
+  const [contractPassword, setContractPassword] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -21,6 +25,14 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
     if (roles.length && !roleId) setRoleId(roles[0].id);
   }, [agreementId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const changePlacementType = (type) => {
+    setPlacementType(type);
+    setBillingType(type === "contract" ? "continuous" : "one_time");
+    setSelectedEmployee(null);
+    setEmployeeQuery("");
+    setManualName("");
+  };
+
   const searchEmployees = async (q) => {
     setEmployeeQuery(q);
     if (q.length < 2) { setEmployees([]); return; }
@@ -30,9 +42,9 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
 
   const assign = async () => {
     setError("");
-    const candidateName = selectedEmployee ? selectedEmployee.full_name : manualName;
+    const candidateName = placementType === "direct" && selectedEmployee ? selectedEmployee.full_name : manualName;
     if (!candidateName.trim()) {
-      setError("Select an employee or enter a name.");
+      setError(placementType === "contract" ? "Enter the candidate's name." : "Select an employee or enter a name.");
       return;
     }
     if (!ctc || Number(ctc) <= 0) {
@@ -43,13 +55,24 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
       setError("Select a rate-card role.");
       return;
     }
+    if (placementType === "contract" && (!contractEmail.trim() || !contractPassword.trim())) {
+      setError("A contract placement needs a login email and password — this is how they'll access their Documents and Payroll here.");
+      return;
+    }
     setSaving(true);
     try {
-      await client.post("/vendors/hires", {
+      const body = {
         vendor_id: vendor.id, agreement_id: Number(agreementId), agreement_role_id: Number(roleId),
-        employee_id: selectedEmployee?.id, candidate_name: candidateName,
-        ctc: Number(ctc), tenure_start_date: tenureStart,
-      });
+        candidate_name: candidateName, ctc: Number(ctc), tenure_start_date: tenureStart,
+        placement_type: placementType, billing_type: billingType,
+      };
+      if (placementType === "direct") {
+        body.employee_id = selectedEmployee?.id;
+      } else {
+        body.contract_login_email = contractEmail.trim();
+        body.contract_login_password = contractPassword;
+      }
+      await client.post("/vendors/hires", body);
       onAssigned();
     } catch (err) {
       setError(err?.response?.data?.message || "Could not assign this hire.");
@@ -63,7 +86,7 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
       <div className="modal-box" onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginBottom: 6 }}>Assign Hire to {vendor.name}</h3>
         <p className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
-          Starts the tenure clock for vendor billing. If linked to an existing employee, their payroll starter structure is created automatically.
+          Starts the tenure/billing clock. This person is placed with the vendor — they are never added to AnametaIOT's own Employees directory.
         </p>
         {error && <div className="login-error">{error}</div>}
 
@@ -71,6 +94,20 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
           <div className="callout warn">This vendor has no active agreement to assign against.</div>
         ) : (
           <>
+            <div className="form-field">
+              <label>Placement Type</label>
+              <div style={{ display: "flex", gap: 16, padding: "6px 0" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+                  <input type="radio" checked={placementType === "direct"} onChange={() => changePlacementType("direct")} />
+                  Direct <span className="muted">(joins the vendor's own payroll — no login here)</span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+                  <input type="radio" checked={placementType === "contract"} onChange={() => changePlacementType("contract")} />
+                  Contract <span className="muted">(tracked here with a Contract Employee login)</span>
+                </label>
+              </div>
+            </div>
+
             <div className="form-grid">
               <div className="form-field">
                 <label>Agreement</label>
@@ -89,28 +126,61 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
             </div>
 
             <div className="form-field">
-              <label>Employee (search directory)</label>
-              <input
-                value={selectedEmployee ? selectedEmployee.full_name : employeeQuery}
-                onChange={(e) => { setSelectedEmployee(null); searchEmployees(e.target.value); }}
-                placeholder="Type a name..."
-              />
-              {employees.length > 0 && !selectedEmployee && (
-                <div style={{ border: "1px solid var(--color-border)", borderRadius: 6, marginTop: 4, maxHeight: 140, overflowY: "auto" }}>
-                  {employees.map((emp) => (
-                    <div key={emp.id} onClick={() => { setSelectedEmployee(emp); setEmployees([]); }}
-                      style={{ padding: "6px 10px", cursor: "pointer", fontSize: 12.5 }}>
-                      {emp.full_name} — {emp.employee_code}
-                    </div>
-                  ))}
-                </div>
-              )}
+              <label>Billing</label>
+              <select value={billingType} onChange={(e) => setBillingType(e.target.value)}>
+                <option value="one_time">One-time fee (billed once tenure completes)</option>
+                <option value="continuous">Continuous (billed monthly for as long as active)</option>
+              </select>
             </div>
-            {!selectedEmployee && (
-              <div className="form-field">
-                <label>Or enter candidate name directly (not yet an Employee record)</label>
-                <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="e.g. someone still being onboarded" />
-              </div>
+
+            {placementType === "direct" ? (
+              <>
+                <div className="form-field">
+                  <label>Employee (search directory)</label>
+                  <input
+                    value={selectedEmployee ? selectedEmployee.full_name : employeeQuery}
+                    onChange={(e) => { setSelectedEmployee(null); searchEmployees(e.target.value); }}
+                    placeholder="Type a name..."
+                  />
+                  {employees.length > 0 && !selectedEmployee && (
+                    <div style={{ border: "1px solid var(--color-border)", borderRadius: 6, marginTop: 4, maxHeight: 140, overflowY: "auto" }}>
+                      {employees.map((emp) => (
+                        <div key={emp.id} onClick={() => { setSelectedEmployee(emp); setEmployees([]); }}
+                          style={{ padding: "6px 10px", cursor: "pointer", fontSize: 12.5 }}>
+                          {emp.full_name} — {emp.employee_code}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {!selectedEmployee && (
+                  <div className="form-field">
+                    <label>Or enter candidate name directly (not yet an Employee record)</label>
+                    <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="e.g. someone still being onboarded" />
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="form-field">
+                  <label>Candidate Name</label>
+                  <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Full name" />
+                </div>
+                <div className="callout" style={{ marginBottom: 10 }}>
+                  This creates a limited internal login (role: Contract Employee) so they can access their
+                  Documents and Payroll here — it does not make them an AnametaIOT employee for any other purpose.
+                </div>
+                <div className="form-grid">
+                  <div className="form-field">
+                    <label>Contract Login Email</label>
+                    <input type="email" value={contractEmail} onChange={(e) => setContractEmail(e.target.value)} placeholder="name@example.com" />
+                  </div>
+                  <div className="form-field">
+                    <label>Contract Login Password</label>
+                    <input type="password" value={contractPassword} onChange={(e) => setContractPassword(e.target.value)} placeholder="Set an initial password" />
+                  </div>
+                </div>
+              </>
             )}
 
             <div className="form-grid">

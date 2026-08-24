@@ -5,7 +5,7 @@ import Badge from "../components/Badge";
 import Loader from "../components/Loader";
 import PayslipDetailModal from "../components/PayslipDetailModal";
 import { useAuth } from "../context/AuthContext";
-import { ROLES } from "../config/roles";
+import { ROLES, ROLE_LABELS } from "../config/roles";
 
 const PAYROLL_ADMIN_ROLES = [ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS];
 const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -13,7 +13,7 @@ const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct"
 const EMPTY_TEMPLATE = {
   name: "", description: "",
   basic_pct: 50, hra_pct: 20, special_allowance_pct: 20, other_allowance_pct: 10,
-  pf_employee_pct: 6, esi_employee_pct: 0, professional_tax_flat: 200, tds_pct: 0,
+  pf_employee_pct: 6, esi_employee_pct: 0, insurance_pct: 0, professional_tax_flat: 200, tds_pct: 0,
 };
 
 export default function Payroll() {
@@ -27,10 +27,12 @@ export default function Payroll() {
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [year, setYear] = useState(new Date().getFullYear());
   const [structureModal, setStructureModal] = useState(false);
-  const [empId, setEmpId] = useState("");
+  const [empQuery, setEmpQuery] = useState("");
+  const [empResults, setEmpResults] = useState([]);
+  const [selectedEmp, setSelectedEmp] = useState(null);
   const [structure, setStructure] = useState({
     basic: 0, hra: 0, special_allowance: 0, other_allowance: 0,
-    pf_employee: 0, esi_employee: 0, professional_tax: 0, tds: 0,
+    pf_employee: 0, esi_employee: 0, insurance: 0, professional_tax: 0, tds: 0,
   });
   const [structError, setStructError] = useState("");
   const [selectedPayslip, setSelectedPayslip] = useState(null);
@@ -67,16 +69,43 @@ export default function Payroll() {
     load();
   };
 
+  const searchEmployees = async (q) => {
+    setEmpQuery(q);
+    setSelectedEmp(null);
+    if (q.length < 2) { setEmpResults([]); return; }
+    const { data } = await client.get("/employees", { params: { q } });
+    setEmpResults(data);
+  };
+
+  const pickEmployeeForStructure = async (emp) => {
+    setSelectedEmp(emp);
+    setEmpResults([]);
+    try {
+      const { data } = await client.get(`/payroll/structure/${emp.id}`);
+      setStructure({
+        basic: data.basic || 0, hra: data.hra || 0, special_allowance: data.special_allowance || 0,
+        other_allowance: data.other_allowance || 0, pf_employee: data.pf_employee || 0,
+        esi_employee: data.esi_employee || 0, insurance: data.insurance || 0,
+        professional_tax: data.professional_tax || 0, tds: data.tds || 0,
+      });
+    } catch {
+      // no existing structure yet — leave the form at its defaults for a fresh entry
+      setStructure({ basic: 0, hra: 0, special_allowance: 0, other_allowance: 0, pf_employee: 0, esi_employee: 0, insurance: 0, professional_tax: 0, tds: 0 });
+    }
+  };
+
   const saveStructure = async (e) => {
     e.preventDefault();
     setStructError("");
-    if (!empId) {
-      setStructError("Enter an employee ID.");
+    if (!selectedEmp) {
+      setStructError("Search and select an employee first.");
       return;
     }
     try {
-      await client.post(`/payroll/structure/${empId}`, structure);
+      await client.post(`/payroll/structure/${selectedEmp.id}`, structure);
       setStructureModal(false);
+      setSelectedEmp(null);
+      setEmpQuery("");
     } catch (err) {
       setStructError(err?.response?.data?.message || "Could not save salary structure.");
     }
@@ -181,8 +210,29 @@ export default function Payroll() {
             {structError && <div className="login-error">{structError}</div>}
             <form onSubmit={saveStructure}>
               <div className="form-field">
-                <label>Employee ID</label>
-                <input required type="number" value={empId} onChange={(e) => setEmpId(e.target.value)} placeholder="e.g. 7 (see Employees page)" />
+                <label>Employee</label>
+                <input
+                  value={selectedEmp ? selectedEmp.full_name : empQuery}
+                  onChange={(e) => searchEmployees(e.target.value)}
+                  placeholder="Search by name — internal employees and contract logins both appear"
+                />
+                {empResults.length > 0 && !selectedEmp && (
+                  <div style={{ border: "1px solid var(--color-border)", borderRadius: 6, marginTop: 4, maxHeight: 160, overflowY: "auto" }}>
+                    {empResults.map((emp) => (
+                      <div key={emp.id} onClick={() => pickEmployeeForStructure(emp)}
+                        style={{ padding: "6px 10px", cursor: "pointer", fontSize: 12.5, display: "flex", justifyContent: "space-between" }}>
+                        <span>{emp.full_name} — {emp.employee_code}</span>
+                        <span className="muted">{ROLE_LABELS[emp.role] || emp.role}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {selectedEmp && (
+                  <p className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>
+                    {ROLE_LABELS[selectedEmp.role] || selectedEmp.role}
+                    {selectedEmp.role === ROLES.CONTRACT_EMPLOYEE && " — placed with a vendor, tracked here for payroll only"}
+                  </p>
+                )}
               </div>
               <div className="form-grid">
                 {Object.keys(structure).map((field) => (
@@ -197,8 +247,8 @@ export default function Payroll() {
                 ))}
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button type="button" className="btn btn-outline" onClick={() => setStructureModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save Structure</button>
+                <button type="button" className="btn btn-outline" onClick={() => { setStructureModal(false); setSelectedEmp(null); setEmpQuery(""); setEmpResults([]); }}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={!selectedEmp}>Save Structure</button>
               </div>
             </form>
           </div>
@@ -280,6 +330,7 @@ function TemplatesTab() {
                 <span className="chip blue">Other {t.other_allowance_pct}%</span>
                 <span className="chip">PF {t.pf_employee_pct}%</span>
                 <span className="chip">ESI {t.esi_employee_pct}%</span>
+                {t.insurance_pct > 0 && <span className="chip">Insurance {t.insurance_pct}%</span>}
                 <span className="chip">PT ₹{t.professional_tax_flat}</span>
                 {t.tds_pct > 0 && <span className="chip">TDS {t.tds_pct}%</span>}
               </div>
@@ -344,9 +395,15 @@ function TemplatesTab() {
               </div>
               <div className="form-grid">
                 <div className="form-field">
+                  <label>Insurance (% of CTC)</label>
+                  <input type="number" value={form.insurance_pct} onChange={(e) => setForm({ ...form, insurance_pct: Number(e.target.value) })} />
+                </div>
+                <div className="form-field">
                   <label>Professional Tax (flat, monthly)</label>
                   <input type="number" value={form.professional_tax_flat} onChange={(e) => setForm({ ...form, professional_tax_flat: Number(e.target.value) })} />
                 </div>
+              </div>
+              <div className="form-grid">
                 <div className="form-field">
                   <label>TDS (% of CTC)</label>
                   <input type="number" value={form.tds_pct} onChange={(e) => setForm({ ...form, tds_pct: Number(e.target.value) })} />
@@ -417,16 +474,22 @@ function ApplyTemplateModal({ template, onClose }) {
           <>
             <div className="form-field">
               <label>Employee</label>
-              <input value={selected ? selected.full_name : query} onChange={(e) => search(e.target.value)} placeholder="Search by name..." />
+              <input value={selected ? selected.full_name : query} onChange={(e) => search(e.target.value)} placeholder="Search by name — internal employees and contract logins both appear" />
               {employees.length > 0 && !selected && (
                 <div style={{ border: "1px solid var(--color-border)", borderRadius: 6, marginTop: 4, maxHeight: 140, overflowY: "auto" }}>
                   {employees.map((emp) => (
                     <div key={emp.id} onClick={() => { setSelected(emp); setEmployees([]); }}
-                      style={{ padding: "6px 10px", cursor: "pointer", fontSize: 12.5 }}>
-                      {emp.full_name} — {emp.employee_code}
+                      style={{ padding: "6px 10px", cursor: "pointer", fontSize: 12.5, display: "flex", justifyContent: "space-between" }}>
+                      <span>{emp.full_name} — {emp.employee_code}</span>
+                      <span className="muted">{ROLE_LABELS[emp.role] || emp.role}</span>
                     </div>
                   ))}
                 </div>
+              )}
+              {selected && selected.role === ROLES.CONTRACT_EMPLOYEE && (
+                <p className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>
+                  Placed with a vendor — tracked here for payroll only.
+                </p>
               )}
             </div>
             <div className="form-field">

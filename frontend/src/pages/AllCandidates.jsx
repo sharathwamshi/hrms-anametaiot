@@ -5,6 +5,7 @@ import Badge from "../components/Badge";
 import Loader from "../components/Loader";
 import CandidateDetailModal from "../components/CandidateDetailModal";
 import { parseUtc } from "../utils/datetime";
+import { downloadFile } from "../utils/download";
 
 export default function AllCandidates() {
   const [candidates, setCandidates] = useState([]);
@@ -15,6 +16,7 @@ export default function AllCandidates() {
   const [stage, setStage] = useState("");
   const [jobId, setJobId] = useState("");
   const [source, setSource] = useState("");
+  const [requisitionType, setRequisitionType] = useState("");
   const [sort, setSort] = useState("created_desc");
 
   const load = async () => {
@@ -24,6 +26,7 @@ export default function AllCandidates() {
     if (stage) params.stage = stage;
     if (jobId) params.job_id = jobId;
     if (source) params.source = source;
+    if (requisitionType) params.requisition_type = requisitionType;
     const { data } = await client.get("/recruitment/candidates", { params });
     setCandidates(data);
     setLoading(false);
@@ -37,7 +40,18 @@ export default function AllCandidates() {
     const t = setTimeout(load, 300); // debounce search-as-you-type
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, stage, jobId, source, sort]);
+  }, [q, stage, jobId, source, requisitionType, sort]);
+
+  const exportCsv = () => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (stage) params.set("stage", stage);
+    if (jobId) params.set("job_id", jobId);
+    if (source) params.set("source", source);
+    if (requisitionType) params.set("requisition_type", requisitionType);
+    params.set("sort", sort);
+    downloadFile(`/recruitment/candidates/export?${params.toString()}`, "candidates_export.csv");
+  };
 
   const initials = (name = "") => name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 
@@ -46,7 +60,10 @@ export default function AllCandidates() {
       <div className="card">
         <div className="card-title-row">
           <h3>All Candidates</h3>
-          <span className="muted" style={{ fontSize: 12 }}>{candidates.length} result(s)</span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <span className="muted" style={{ fontSize: 12 }}>{candidates.length} result(s)</span>
+            <button className="btn btn-sm btn-outline" onClick={exportCsv}>Download CSV</button>
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
@@ -55,9 +72,14 @@ export default function AllCandidates() {
             placeholder="Search name, email, or phone..."
             style={{ flex: 1, minWidth: 220, border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" }}
           />
+          <select value={requisitionType} onChange={(e) => setRequisitionType(e.target.value)} style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" }}>
+            <option value="">Internal + Client</option>
+            <option value="internal">Internal Hiring only</option>
+            <option value="client">Client Requisitions only</option>
+          </select>
           <select value={jobId} onChange={(e) => setJobId(e.target.value)} style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" }}>
             <option value="">All jobs</option>
-            {jobs.map((j) => <option key={j.id} value={j.id}>{j.title}</option>)}
+            {jobs.map((j) => <option key={j.id} value={j.id}>{j.title}{j.requisition_type === "client" ? ` (${j.vendor_name})` : ""}</option>)}
           </select>
           <select value={stage} onChange={(e) => setStage(e.target.value)} style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" }}>
             <option value="">All stages</option>
@@ -101,7 +123,10 @@ export default function AllCandidates() {
                         <strong>{c.full_name}</strong>
                       </div>
                     </td>
-                    <td>{c.job_title || "—"}</td>
+                    <td>
+                      {c.job_title || "—"}
+                      {c.requisition_type === "client" && <div className="chip orange" style={{ marginTop: 3, display: "inline-block" }}>{c.vendor_name}</div>}
+                    </td>
                     <td className="muted" style={{ fontSize: 12 }}>{c.email || "—"}<br />{c.phone || "—"}</td>
                     <td>
                       {c.location || "—"}

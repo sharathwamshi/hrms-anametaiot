@@ -99,6 +99,7 @@ def generate_payslip_pdf(
         ["Deductions", "Amount"],
         ["Provident Fund", f"{structure.get('pf_employee', 0):,.2f}"],
         ["ESI", f"{structure.get('esi_employee', 0):,.2f}"],
+        ["Insurance", f"{structure.get('insurance', 0):,.2f}"],
         ["Professional Tax", f"{structure.get('professional_tax', 0):,.2f}"],
         ["TDS", f"{structure.get('tds', 0):,.2f}"],
         ["Total Deductions", f"{total_deductions:,.2f}"],

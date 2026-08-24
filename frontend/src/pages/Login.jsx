@@ -71,12 +71,6 @@ export default function Login() {
               {submitting ? "Signing in..." : "Sign in"}
             </button>
           </form>
-
-          <div className="login-demo-hint">
-            <strong>Demo logins</strong> (password: Welcome@123)<br />
-            manager@anametaiot.com · contract@anametaiot.com · hrops@anametaiot.com<br />
-            finance@anametaiot.com · operations@anametaiot.com · recruiter@anametaiot.com · employee@anametaiot.com
-          </div>
         </div>
       </div>
     </div>

@@ -132,34 +132,6 @@ CREATE TABLE employee_permissions (
 	FOREIGN KEY(granted_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
-CREATE TABLE job_postings (
-	id INTEGER NOT NULL AUTO_INCREMENT, 
-	title VARCHAR(150) NOT NULL, 
-	department_id INTEGER, 
-	employment_type VARCHAR(30), 
-	openings INTEGER, 
-	description TEXT, 
-	salary_min FLOAT, 
-	salary_max FLOAT, 
-	priority VARCHAR(20), 
-	auto_close_date DATE, 
-	requisition_status VARCHAR(20), 
-	approved_by INTEGER, 
-	approved_at DATETIME, 
-	screening_questions TEXT, 
-	post_image_url VARCHAR(255), 
-	linkedin_post_url VARCHAR(255), 
-	naukri_post_url VARCHAR(255), 
-	interview_levels TEXT, 
-	status VARCHAR(20), 
-	created_by INTEGER, 
-	created_at DATETIME, 
-	PRIMARY KEY (id), 
-	FOREIGN KEY(department_id) REFERENCES departments (id), 
-	FOREIGN KEY(approved_by) REFERENCES users (id), 
-	FOREIGN KEY(created_by) REFERENCES users (id)
-) ENGINE=InnoDB;
-
 CREATE TABLE leave_balances (
 	id INTEGER NOT NULL AUTO_INCREMENT, 
 	user_id INTEGER NOT NULL, 
@@ -222,6 +194,7 @@ CREATE TABLE salary_structures (
 	other_allowance FLOAT, 
 	pf_employee FLOAT, 
 	esi_employee FLOAT, 
+	insurance FLOAT, 
 	professional_tax FLOAT, 
 	tds FLOAT, 
 	effective_from DATE, 
@@ -240,6 +213,7 @@ CREATE TABLE salary_templates (
 	other_allowance_pct FLOAT, 
 	pf_employee_pct FLOAT, 
 	esi_employee_pct FLOAT, 
+	insurance_pct FLOAT, 
 	professional_tax_flat FLOAT, 
 	tds_pct FLOAT, 
 	created_by INTEGER, 
@@ -268,6 +242,57 @@ CREATE TABLE vendors (
 	created_at DATETIME, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE job_postings (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	title VARCHAR(150) NOT NULL, 
+	department_id INTEGER, 
+	employment_type VARCHAR(30), 
+	openings INTEGER, 
+	description TEXT, 
+	salary_min FLOAT, 
+	salary_max FLOAT, 
+	priority VARCHAR(20), 
+	auto_close_date DATE, 
+	requisition_status VARCHAR(20), 
+	approved_by INTEGER, 
+	approved_at DATETIME, 
+	screening_questions TEXT, 
+	post_image_url VARCHAR(255), 
+	linkedin_post_url VARCHAR(255), 
+	naukri_post_url VARCHAR(255), 
+	interview_levels TEXT, 
+	requisition_type VARCHAR(20), 
+	vendor_id INTEGER, 
+	status VARCHAR(20), 
+	created_by INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(department_id) REFERENCES departments (id), 
+	FOREIGN KEY(approved_by) REFERENCES users (id), 
+	FOREIGN KEY(vendor_id) REFERENCES vendors (id), 
+	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE vendor_agreements (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	vendor_id INTEGER NOT NULL, 
+	title VARCHAR(150), 
+	file_path VARCHAR(255) NOT NULL, 
+	effective_from DATE, 
+	effective_to DATE, 
+	termination_notice_days INTEGER, 
+	confidentiality_days INTEGER, 
+	feedback_days INTEGER, 
+	status VARCHAR(20), 
+	parsed_with_ai BOOL, 
+	raw_extracted_text TEXT, 
+	uploaded_by INTEGER, 
+	uploaded_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(vendor_id) REFERENCES vendors (id), 
+	FOREIGN KEY(uploaded_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE candidates (
@@ -326,24 +351,42 @@ CREATE TABLE mock_test_templates (
 	FOREIGN KEY(created_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
-CREATE TABLE vendor_agreements (
+CREATE TABLE vendor_agreement_roles (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	agreement_id INTEGER NOT NULL, 
+	role_name VARCHAR(120) NOT NULL, 
+	service_fee_pct FLOAT NOT NULL, 
+	replacement_days INTEGER, 
+	tenure_days INTEGER, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(agreement_id) REFERENCES vendor_agreements (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE vendor_invoices (
 	id INTEGER NOT NULL AUTO_INCREMENT, 
 	vendor_id INTEGER NOT NULL, 
-	title VARCHAR(150), 
-	file_path VARCHAR(255) NOT NULL, 
-	effective_from DATE, 
-	effective_to DATE, 
-	termination_notice_days INTEGER, 
-	confidentiality_days INTEGER, 
-	feedback_days INTEGER, 
+	agreement_id INTEGER, 
+	invoice_number VARCHAR(50) NOT NULL, 
+	invoice_date DATE NOT NULL, 
+	subtotal FLOAT, 
+	cgst_amount FLOAT, 
+	sgst_amount FLOAT, 
+	igst_amount FLOAT, 
+	total_amount FLOAT, 
 	status VARCHAR(20), 
-	parsed_with_ai BOOL, 
-	raw_extracted_text TEXT, 
-	uploaded_by INTEGER, 
-	uploaded_at DATETIME, 
+	approved_by INTEGER, 
+	approved_at DATETIME, 
+	approval_comment VARCHAR(255), 
+	paid_at DATETIME, 
+	pdf_path VARCHAR(255), 
+	generated_by INTEGER, 
+	generated_at DATETIME, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(vendor_id) REFERENCES vendors (id), 
-	FOREIGN KEY(uploaded_by) REFERENCES users (id)
+	FOREIGN KEY(agreement_id) REFERENCES vendor_agreements (id), 
+	UNIQUE (invoice_number), 
+	FOREIGN KEY(approved_by) REFERENCES users (id), 
+	FOREIGN KEY(generated_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE candidate_audit_log (
@@ -457,42 +500,31 @@ CREATE TABLE screening_calls (
 	FOREIGN KEY(triggered_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
-CREATE TABLE vendor_agreement_roles (
-	id INTEGER NOT NULL AUTO_INCREMENT, 
-	agreement_id INTEGER NOT NULL, 
-	role_name VARCHAR(120) NOT NULL, 
-	service_fee_pct FLOAT NOT NULL, 
-	replacement_days INTEGER, 
-	tenure_days INTEGER, 
-	PRIMARY KEY (id), 
-	FOREIGN KEY(agreement_id) REFERENCES vendor_agreements (id)
-) ENGINE=InnoDB;
-
-CREATE TABLE vendor_invoices (
+CREATE TABLE vendor_hires (
 	id INTEGER NOT NULL AUTO_INCREMENT, 
 	vendor_id INTEGER NOT NULL, 
-	agreement_id INTEGER, 
-	invoice_number VARCHAR(50) NOT NULL, 
-	invoice_date DATE NOT NULL, 
-	subtotal FLOAT, 
-	cgst_amount FLOAT, 
-	sgst_amount FLOAT, 
-	igst_amount FLOAT, 
-	total_amount FLOAT, 
+	agreement_id INTEGER NOT NULL, 
+	agreement_role_id INTEGER NOT NULL, 
+	candidate_id INTEGER, 
+	employee_id INTEGER, 
+	candidate_name VARCHAR(150) NOT NULL, 
+	ctc FLOAT NOT NULL, 
+	tenure_start_date DATE NOT NULL, 
+	placement_type VARCHAR(20), 
+	billing_type VARCHAR(20), 
+	last_billed_month VARCHAR(7), 
 	status VARCHAR(20), 
-	approved_by INTEGER, 
-	approved_at DATETIME, 
-	approval_comment VARCHAR(255), 
-	paid_at DATETIME, 
-	pdf_path VARCHAR(255), 
-	generated_by INTEGER, 
-	generated_at DATETIME, 
+	replacement_of_hire_id INTEGER, 
+	assigned_by INTEGER, 
+	assigned_at DATETIME, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(vendor_id) REFERENCES vendors (id), 
 	FOREIGN KEY(agreement_id) REFERENCES vendor_agreements (id), 
-	UNIQUE (invoice_number), 
-	FOREIGN KEY(approved_by) REFERENCES users (id), 
-	FOREIGN KEY(generated_by) REFERENCES users (id)
+	FOREIGN KEY(agreement_role_id) REFERENCES vendor_agreement_roles (id), 
+	FOREIGN KEY(candidate_id) REFERENCES candidates (id), 
+	FOREIGN KEY(employee_id) REFERENCES users (id), 
+	FOREIGN KEY(replacement_of_hire_id) REFERENCES vendor_hires (id), 
+	FOREIGN KEY(assigned_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE interview_panelists (
@@ -529,30 +561,6 @@ CREATE TABLE mock_test_results (
 	PRIMARY KEY (id), 
 	UNIQUE (assignment_id), 
 	FOREIGN KEY(assignment_id) REFERENCES mock_test_assignments (id)
-) ENGINE=InnoDB;
-
-CREATE TABLE vendor_hires (
-	id INTEGER NOT NULL AUTO_INCREMENT, 
-	vendor_id INTEGER NOT NULL, 
-	agreement_id INTEGER NOT NULL, 
-	agreement_role_id INTEGER NOT NULL, 
-	candidate_id INTEGER, 
-	employee_id INTEGER, 
-	candidate_name VARCHAR(150) NOT NULL, 
-	ctc FLOAT NOT NULL, 
-	tenure_start_date DATE NOT NULL, 
-	status VARCHAR(20), 
-	replacement_of_hire_id INTEGER, 
-	assigned_by INTEGER, 
-	assigned_at DATETIME, 
-	PRIMARY KEY (id), 
-	FOREIGN KEY(vendor_id) REFERENCES vendors (id), 
-	FOREIGN KEY(agreement_id) REFERENCES vendor_agreements (id), 
-	FOREIGN KEY(agreement_role_id) REFERENCES vendor_agreement_roles (id), 
-	FOREIGN KEY(candidate_id) REFERENCES candidates (id), 
-	FOREIGN KEY(employee_id) REFERENCES users (id), 
-	FOREIGN KEY(replacement_of_hire_id) REFERENCES vendor_hires (id), 
-	FOREIGN KEY(assigned_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE vendor_invoice_items (

@@ -24,12 +24,15 @@ class JobPosting(db.Model):
     linkedin_post_url = db.Column(db.String(255), nullable=True)
     naukri_post_url = db.Column(db.String(255), nullable=True)
     interview_levels = db.Column(db.Text, nullable=True)  # comma-separated, e.g. "Screening, Tech L1, Tech L2, HR, Offer"
+    requisition_type = db.Column(db.String(20), default="internal")  # internal | client
+    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=True)  # set only when requisition_type="client"
 
     status = db.Column(db.String(20), default="open")
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     department = db.relationship("Department")
+    vendor = db.relationship("Vendor")
     candidates = db.relationship("Candidate", backref="job", cascade="all, delete-orphan")
 
     def to_dict(self):
@@ -45,6 +48,9 @@ class JobPosting(db.Model):
             "screening_questions": self.screening_questions, "post_image_url": self.post_image_url,
             "linkedin_post_url": self.linkedin_post_url, "naukri_post_url": self.naukri_post_url,
             "interview_levels": [l.strip() for l in (self.interview_levels or "").split(",") if l.strip()],
+            "requisition_type": self.requisition_type or "internal",
+            "vendor_id": self.vendor_id,
+            "vendor_name": self.vendor.name if self.vendor else None,
             "status": self.status, "candidate_count": len(self.candidates),
             "created_at": self.created_at.isoformat(),
         }
@@ -103,6 +109,8 @@ class Candidate(db.Model):
         data = {
             "id": self.id, "job_id": self.job_id,
             "job_title": self.job.title if self.job else None,
+            "requisition_type": self.job.requisition_type if self.job else None,
+            "vendor_name": self.job.vendor.name if (self.job and self.job.vendor) else None,
             "full_name": self.full_name, "email": self.email, "phone": self.phone,
             "resume_url": self.resume_url, "resume_file_path": self.resume_file_path,
             "source": self.source,
