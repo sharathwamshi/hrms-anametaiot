@@ -64,13 +64,27 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
     }
   };
 
-  const replaceHire = async (hireId) => {
+  const replaceHire = async (hire) => {
     const name = window.prompt("Replacement candidate's name:");
     if (!name) return;
-    const ctc = window.prompt("Replacement CTC:");
+    const ctc = window.prompt("Replacement CTC:", hire.ctc);
     if (!ctc) return;
-    await client.post(`/vendors/hires/${hireId}/replace`, { candidate_name: name, ctc: Number(ctc) });
-    load();
+    const body = { candidate_name: name, ctc: Number(ctc) };
+    if (hire.placement_type === "contract") {
+      // A contract replacement is a different person, so they get their own limited login.
+      const email = window.prompt("Login email for the replacement (contract placements need one):");
+      if (!email) return;
+      const password = window.prompt("Initial password for the replacement:");
+      if (!password) return;
+      body.contract_login_email = email;
+      body.contract_login_password = password;
+    }
+    try {
+      await client.post(`/vendors/hires/${hire.id}/replace`, body);
+      load();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not replace this placement.");
+    }
   };
 
   const submitForApproval = async (invoiceId) => { await client.post(`/vendors/invoices/${invoiceId}/submit-for-approval`); load(); };
@@ -147,6 +161,7 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
                 <span>
                   {h.candidate_name} — {h.role_name} — ₹{h.ctc.toLocaleString("en-IN")}
                   {h.employee_id && <span className="chip" style={{ marginLeft: 6 }}>Contract Login</span>}
+                  {h.recruiter_name && <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>· sourced by {h.recruiter_name}</span>}
                 </span>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <span className="chip blue">{h.placement_type === "contract" ? "Contract" : "Direct"}</span>
@@ -169,8 +184,8 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
                   </span>
                 </div>
               )}
-              {canManage && h.status === "active" && (
-                <button className="btn btn-sm btn-outline" style={{ marginTop: 6 }} onClick={() => replaceHire(h.id)}>Replace</button>
+              {canManage && (h.status === "active" || h.status === "invoiced") && (
+                <button className="btn btn-sm btn-outline" style={{ marginTop: 6 }} onClick={() => replaceHire(h)}>Replace</button>
               )}
             </div>
           ))}

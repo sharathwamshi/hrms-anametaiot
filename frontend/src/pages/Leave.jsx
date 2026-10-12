@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ExportButton from "../components/ExportButton";
 import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
@@ -108,7 +109,7 @@ export default function Leave() {
 
       {isApprover && (
         <div className="card">
-          <div className="card-title-row"><h3>Pending Approvals</h3></div>
+          <div className="card-title-row"><h3>Pending Approvals</h3><ExportButton filename="Leave_Pending_Approvals" /></div>
           <div className="table-wrap">
             <table className="data-table">
               <thead>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ExportButton from "../components/ExportButton";
 import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
@@ -6,10 +7,13 @@ import Loader from "../components/Loader";
 import CandidateDetailModal from "../components/CandidateDetailModal";
 import { parseUtc } from "../utils/datetime";
 import { downloadFile } from "../utils/download";
+import { fetchRecruiterOptions } from "../utils/recruiters";
 
 export default function AllCandidates() {
   const [candidates, setCandidates] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [recruiters, setRecruiters] = useState([]);
+  const [recruiterId, setRecruiterId] = useState("");
   const [loading, setLoading] = useState(true);
   const [selectedCandidateId, setSelectedCandidateId] = useState(null);
   const [q, setQ] = useState("");
@@ -27,6 +31,7 @@ export default function AllCandidates() {
     if (jobId) params.job_id = jobId;
     if (source) params.source = source;
     if (requisitionType) params.requisition_type = requisitionType;
+    if (recruiterId) params.recruiter_id = recruiterId;
     const { data } = await client.get("/recruitment/candidates", { params });
     setCandidates(data);
     setLoading(false);
@@ -34,13 +39,14 @@ export default function AllCandidates() {
 
   useEffect(() => {
     client.get("/recruitment/jobs").then(({ data }) => setJobs(data));
+    fetchRecruiterOptions().then(setRecruiters);
   }, []);
 
   useEffect(() => {
     const t = setTimeout(load, 300); // debounce search-as-you-type
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, stage, jobId, source, requisitionType, sort]);
+  }, [q, stage, jobId, source, requisitionType, recruiterId, sort]);
 
   const exportCsv = () => {
     const params = new URLSearchParams();
@@ -49,6 +55,7 @@ export default function AllCandidates() {
     if (jobId) params.set("job_id", jobId);
     if (source) params.set("source", source);
     if (requisitionType) params.set("requisition_type", requisitionType);
+    if (recruiterId) params.set("recruiter_id", recruiterId);
     params.set("sort", sort);
     downloadFile(`/recruitment/candidates/export?${params.toString()}`, "candidates_export.csv");
   };
@@ -62,6 +69,7 @@ export default function AllCandidates() {
           <h3>All Candidates</h3>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <span className="muted" style={{ fontSize: 12 }}>{candidates.length} result(s)</span>
+            <ExportButton filename="All_Candidates" />
             <button className="btn btn-sm btn-outline" onClick={exportCsv}>Download CSV</button>
           </div>
         </div>
@@ -77,6 +85,12 @@ export default function AllCandidates() {
             <option value="internal">Internal Hiring only</option>
             <option value="client">Client Requisitions only</option>
           </select>
+          {recruiters.length > 0 && (
+            <select value={recruiterId} onChange={(e) => setRecruiterId(e.target.value)} style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" }}>
+              <option value="">All recruiters</option>
+              {recruiters.map((r) => <option key={r.id} value={r.id}>{r.name}{r.active ? "" : " (inactive)"}</option>)}
+            </select>
+          )}
           <select value={jobId} onChange={(e) => setJobId(e.target.value)} style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" }}>
             <option value="">All jobs</option>
             {jobs.map((j) => <option key={j.id} value={j.id}>{j.title}{j.requisition_type === "client" ? ` (${j.vendor_name})` : ""}</option>)}
@@ -109,12 +123,12 @@ export default function AllCandidates() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Candidate</th><th>Job</th><th>Contact</th><th>Location</th>
+                  <th>Candidate</th><th>Job</th><th>Recruiter</th><th>Contact</th><th>Location</th>
                   <th>Skills</th><th>Source</th><th>Stage</th><th>Level</th><th>Validation</th><th>Added</th>
                 </tr>
               </thead>
               <tbody>
-                {candidates.length === 0 && <tr className="empty-row"><td colSpan={10}>No candidates match these filters.</td></tr>}
+                {candidates.length === 0 && <tr className="empty-row"><td colSpan={11}>No candidates match these filters.</td></tr>}
                 {candidates.map((c) => (
                   <tr key={c.id} onClick={() => setSelectedCandidateId(c.id)} style={{ cursor: "pointer" }}>
                     <td>
@@ -127,6 +141,7 @@ export default function AllCandidates() {
                       {c.job_title || "—"}
                       {c.requisition_type === "client" && <div className="chip orange" style={{ marginTop: 3, display: "inline-block" }}>{c.vendor_name}</div>}
                     </td>
+                    <td>{c.recruiter_name || "—"}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{c.email || "—"}<br />{c.phone || "—"}</td>
                     <td>
                       {c.location || "—"}

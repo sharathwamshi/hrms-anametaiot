@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ExportButton from "../components/ExportButton";
 import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
@@ -1008,7 +1009,7 @@ function FeedTab() {
 
   return (
     <div className="card">
-      <div className="card-title-row"><h3>Newly Added Candidates (last 14 days)</h3></div>
+      <div className="card-title-row"><h3>Newly Added Candidates (last 14 days)</h3><ExportButton filename="Newly_Added_Candidates" /></div>
       {loading ? <Loader /> : (
         <div className="table-wrap">
           <table className="data-table">

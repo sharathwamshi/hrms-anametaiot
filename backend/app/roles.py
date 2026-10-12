@@ -51,6 +51,9 @@ RECRUITMENT_ROLES = [HR_RECRUITER, HR_OPERATIONS]
 
 # Roles that manage vendor agreements, hires, and invoices day-to-day.
 VENDOR_MANAGEMENT_ROLES = [FINANCE_ACCOUNTS, HR_OPERATIONS]
+# Who may see the in-house recruiter overview (Finance needs it for payroll/incentive
+# attribution; a Manager only ever sees their own direct reports).
+RECRUITER_OVERVIEW_ROLES = [FINANCE_ACCOUNTS, HR_OPERATIONS, MANAGER]
 
 # Roles that approve a vendor invoice before it's considered official.
 VENDOR_APPROVER_ROLES = [MANAGER, HR_OPERATIONS]

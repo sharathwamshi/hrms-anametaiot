@@ -13,6 +13,22 @@ def create_app(config_class=Config):
     bcrypt.init_app(app)
     cors.init_app(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}}, supports_credentials=True)
 
+    from app.models import User
+
+    # A removed/deactivated person must lose access IMMEDIATELY, not when their 12-hour
+    # access token happens to expire. Checked on every authenticated request (one indexed
+    # lookup). Refresh tokens are left to /auth/refresh, which has its own is_active check.
+    @jwt.token_in_blocklist_loader
+    def _account_no_longer_active(_jwt_header, jwt_payload):
+        if jwt_payload.get("type") != "access":
+            return False
+        user = db.session.get(User, int(jwt_payload["sub"]))
+        return user is None or not user.is_active
+
+    @jwt.revoked_token_loader
+    def _revoked_response(_jwt_header, _jwt_payload):
+        return jsonify({"message": "This account is no longer active."}), 401
+
     from app.routes.auth import bp as auth_bp
     from app.routes.employees import bp as employees_bp
     from app.routes.attendance import bp as attendance_bp
@@ -26,6 +42,8 @@ def create_app(config_class=Config):
     from app.routes.vendors import bp as vendors_bp
     from app.routes.dashboard import bp as dashboard_bp
     from app.routes.misc import bp as misc_bp
+    from app.routes.notifications import bp as notifications_bp
+    from app.routes.exports import bp as exports_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(employees_bp)
@@ -40,6 +58,8 @@ def create_app(config_class=Config):
     app.register_blueprint(vendors_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(misc_bp)
+    app.register_blueprint(notifications_bp)
+    app.register_blueprint(exports_bp)
 
     # Serve uploaded files (resumes, generated job-post images)
     from flask import send_from_directory

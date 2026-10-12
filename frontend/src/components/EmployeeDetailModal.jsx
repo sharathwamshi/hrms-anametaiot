@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import client from "../api/client";
 import Badge from "./Badge";
+import RemoveEmployeeModal from "./RemoveEmployeeModal";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, ROLE_LABELS } from "../config/roles";
 
@@ -16,6 +17,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
   const [error, setError] = useState("");
+  const [removing, setRemoving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,6 +90,21 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   }
 
   const emp = snapshot.employee;
+  // Admin can remove anyone; a Manager only their own direct reports; nobody removes themselves.
+  const canRemove = (isAdmin || isOwnReport) && emp.id !== user.id && emp.is_active;
+  // A Manager can only undo a removal they made themselves.
+  const canRestore = !emp.is_active && (isAdmin || (isOwnReport && emp.removed_by === user.id));
+
+  const restore = async () => {
+    setError("");
+    try {
+      await client.post(`/employees/${emp.id}/restore`);
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not restore this person.");
+    }
+  };
   const grantedKeys = permissions.map((p) => p.permission_key);
 
   return (
@@ -101,6 +118,20 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
           {emp.employee_code} · {ROLE_LABELS[emp.role] || emp.role} · {emp.department || "—"}
         </div>
         {error && <div className="login-error">{error}</div>}
+
+        {!emp.is_active && (
+          <div className="callout warn" style={{ marginBottom: 14, fontSize: 12.5 }}>
+            <div className="flex-between">
+              <div>
+                <strong>Removed</strong>
+                {emp.removed_at ? ` on ${new Date(emp.removed_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+                {emp.removed_by_name ? ` by ${emp.removed_by_name}` : ""}
+                {emp.removal_reason ? <div style={{ marginTop: 4 }}>Reason: “{emp.removal_reason}”</div> : null}
+              </div>
+              {canRestore && <button className="btn btn-sm btn-outline" onClick={restore}>Restore</button>}
+            </div>
+          </div>
+        )}
 
         {/* Info */}
         <div className="card" style={{ marginBottom: 14, padding: 14 }}>
@@ -199,10 +230,23 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
           </div>
         )}
 
-        <div style={{ textAlign: "right", marginTop: 16 }}>
+        <div className="flex-between" style={{ marginTop: 16 }}>
+          <div>
+            {canRemove && (
+              <button className="btn btn-danger btn-sm" onClick={() => setRemoving(true)}>Remove from system</button>
+            )}
+          </div>
           <button className="btn btn-outline" onClick={onClose}>Close</button>
         </div>
       </div>
+
+      {removing && (
+        <RemoveEmployeeModal
+          employee={emp}
+          onClose={() => setRemoving(false)}
+          onRemoved={() => { setRemoving(false); onChanged?.(); onClose(); }}
+        />
+      )}
     </div>
   );
 }

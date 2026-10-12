@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ExportButton from "../components/ExportButton";
 import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
@@ -25,11 +26,15 @@ export default function Employees() {
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
+  const [showRemoved, setShowRemoved] = useState(false);
 
-  const load = async (query = "") => {
+  const load = async (query = "", removed = showRemoved) => {
     setLoading(true);
+    const params = {};
+    if (query) params.q = query;
+    if (removed) params.status = "removed";
     const [empRes, deptRes] = await Promise.all([
-      client.get("/employees", { params: query ? { q: query } : {} }),
+      client.get("/employees", { params }),
       client.get("/employees/departments"),
     ]);
     setEmployees(empRes.data);
@@ -41,6 +46,25 @@ export default function Employees() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const toggleRemoved = () => {
+    const next = !showRemoved;
+    setShowRemoved(next);
+    load(q, next);
+  };
+
+  // HR Operations can restore anyone; a Manager only someone they removed themselves.
+  const canRestoreRow = (emp) => isHrOps || (isManager && emp.manager_id === user.id && emp.removed_by === user.id);
+  const restoreRow = async (e, emp) => {
+    e.stopPropagation();
+    try {
+      await client.post(`/employees/${emp.id}/restore`);
+      load(q, true);
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not restore this person.");
+    }
+  };
+  const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—");
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -74,12 +98,22 @@ export default function Employees() {
             />
             <button type="submit" className="btn btn-outline btn-sm">Search</button>
           </form>
-          {canOnboard && (
-            <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>
-              + {isManager ? "Add to My Team" : "Add Employee"}
-            </button>
-          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <ExportButton filename={showRemoved ? "Removed_Employees" : "Employees"} title="Employees" />
+            {canOnboard && (
+              <button className={`btn btn-sm ${showRemoved ? "btn-primary" : "btn-outline"}`} onClick={toggleRemoved}>
+                {showRemoved ? "← Back to active" : isManager ? "Removed from my team" : "Removed employees"}
+              </button>
+            )}
+            {canOnboard && !showRemoved && (
+              <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>
+                + {isManager ? "Add to My Team" : "Add Employee"}
+              </button>
+            )}
+          </div>
         </div>
+
+        {error && !showForm && <div className="login-error" style={{ marginTop: 10 }}>{error}</div>}
 
         {loading ? (
           <Loader />
@@ -87,23 +121,36 @@ export default function Employees() {
           <div className="table-wrap">
             <table className="data-table">
               <thead>
-                <tr>
-                  <th>Code</th><th>Name</th><th>Role</th><th>Department</th><th>Designation</th><th>Manager</th><th>Status</th>
-                </tr>
+                {showRemoved ? (
+                  <tr><th>Code</th><th>Name</th><th>Role</th><th>Removed on</th><th>Removed by</th><th>Reason</th><th></th></tr>
+                ) : (
+                  <tr><th>Code</th><th>Name</th><th>Role</th><th>Department</th><th>Designation</th><th>Manager</th><th>Status</th></tr>
+                )}
               </thead>
               <tbody>
                 {employees.length === 0 && (
-                  <tr className="empty-row"><td colSpan={7}>No employees found.</td></tr>
+                  <tr className="empty-row"><td colSpan={7}>{showRemoved ? "No removed employees." : "No employees found."}</td></tr>
                 )}
                 {employees.map((emp) => (
                   <tr key={emp.id} onClick={() => setSelectedEmployeeId(emp.id)} style={{ cursor: "pointer" }}>
                     <td>{emp.employee_code}</td>
                     <td>{emp.full_name}</td>
                     <td>{ROLE_LABELS[emp.role] || emp.role}</td>
-                    <td>{emp.department || "—"}</td>
-                    <td>{emp.designation || "—"}</td>
-                    <td>{emp.manager_name || "—"}</td>
-                    <td><Badge status={emp.is_active ? "present" : "absent"} /></td>
+                    {showRemoved ? (
+                      <>
+                        <td>{fmtDate(emp.removed_at)}</td>
+                        <td>{emp.removed_by_name || "—"}</td>
+                        <td className="muted" style={{ maxWidth: 260 }}>{emp.removal_reason || "—"}</td>
+                        <td>{canRestoreRow(emp) && <button className="btn btn-sm btn-outline" onClick={(e) => restoreRow(e, emp)}>Restore</button>}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td>{emp.department || "—"}</td>
+                        <td>{emp.designation || "—"}</td>
+                        <td>{emp.manager_name || "—"}</td>
+                        <td><Badge status={emp.is_active ? "present" : "absent"} /></td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -181,7 +228,7 @@ export default function Employees() {
         <EmployeeDetailModal
           employeeId={selectedEmployeeId}
           onClose={() => setSelectedEmployeeId(null)}
-          onChanged={() => load(q)}
+          onChanged={() => load(q, showRemoved)}
         />
       )}
     </AppLayout>

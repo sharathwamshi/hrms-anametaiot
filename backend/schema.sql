@@ -41,6 +41,9 @@ CREATE TABLE users (
 	date_of_joining DATE, 
 	avatar_url VARCHAR(255), 
 	is_active BOOL, 
+	removed_at DATETIME, 
+	removed_by INTEGER, 
+	removal_reason VARCHAR(255), 
 	self_verify_rights BOOL, 
 	self_verify_granted_by INTEGER, 
 	revalidation_interval_days INTEGER, 
@@ -51,6 +54,7 @@ CREATE TABLE users (
 	UNIQUE (email), 
 	FOREIGN KEY(department_id) REFERENCES departments (id), 
 	FOREIGN KEY(manager_id) REFERENCES users (id), 
+	FOREIGN KEY(removed_by) REFERENCES users (id), 
 	FOREIGN KEY(self_verify_granted_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
@@ -79,21 +83,16 @@ CREATE TABLE assets (
 	FOREIGN KEY(assigned_to) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
-CREATE TABLE attendance (
+CREATE TABLE attendance_regularization_reasons (
 	id INTEGER NOT NULL AUTO_INCREMENT, 
-	user_id INTEGER NOT NULL, 
-	work_date DATE NOT NULL, 
-	clock_in DATETIME, 
-	clock_out DATETIME, 
-	clock_in_note VARCHAR(255), 
-	clock_out_note VARCHAR(255), 
-	status VARCHAR(20), 
-	total_hours FLOAT, 
-	is_regularized BOOL, 
-	regularization_reason VARCHAR(255), 
+	label VARCHAR(100) NOT NULL, 
+	description VARCHAR(255), 
+	is_active BOOL, 
+	created_by INTEGER, 
+	created_at DATETIME, 
 	PRIMARY KEY (id), 
-	CONSTRAINT uq_attendance_user_date UNIQUE (user_id, work_date), 
-	FOREIGN KEY(user_id) REFERENCES users (id)
+	UNIQUE (label), 
+	FOREIGN KEY(created_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE company_settings (
@@ -103,10 +102,23 @@ CREATE TABLE company_settings (
 	gstin VARCHAR(20), 
 	pan VARCHAR(20), 
 	state VARCHAR(50), 
+	selfie_required BOOL NOT NULL DEFAULT '0', 
 	updated_by INTEGER, 
 	updated_at DATETIME, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(updated_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE device_tokens (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	user_id INTEGER NOT NULL, 
+	token VARCHAR(255) NOT NULL, 
+	platform VARCHAR(20), 
+	created_at DATETIME, 
+	last_seen_at DATETIME, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_device_token UNIQUE (token), 
+	FOREIGN KEY(user_id) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE employee_documents (
@@ -130,6 +142,18 @@ CREATE TABLE employee_permissions (
 	CONSTRAINT uq_employee_permission UNIQUE (user_id, permission_key), 
 	FOREIGN KEY(user_id) REFERENCES users (id), 
 	FOREIGN KEY(granted_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE holidays (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	name VARCHAR(150) NOT NULL, 
+	holiday_date DATE NOT NULL, 
+	description VARCHAR(255), 
+	created_by INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	UNIQUE (holiday_date), 
+	FOREIGN KEY(created_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE leave_balances (
@@ -162,6 +186,19 @@ CREATE TABLE leave_requests (
 	FOREIGN KEY(user_id) REFERENCES users (id), 
 	FOREIGN KEY(leave_type_id) REFERENCES leave_types (id), 
 	FOREIGN KEY(reviewed_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE office_locations (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	name VARCHAR(150) NOT NULL, 
+	latitude FLOAT NOT NULL, 
+	longitude FLOAT NOT NULL, 
+	radius_meters INTEGER NOT NULL, 
+	is_active BOOL, 
+	created_by INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(created_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE payslips (
@@ -244,6 +281,44 @@ CREATE TABLE vendors (
 	FOREIGN KEY(created_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE attendance (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	user_id INTEGER NOT NULL, 
+	work_date DATE NOT NULL, 
+	clock_in DATETIME, 
+	clock_out DATETIME, 
+	clock_in_note VARCHAR(255), 
+	clock_out_note VARCHAR(255), 
+	status VARCHAR(20), 
+	total_hours FLOAT, 
+	is_regularized BOOL, 
+	regularization_reason VARCHAR(255), 
+	regularization_status VARCHAR(20), 
+	regularization_reason_id INTEGER, 
+	regularization_note VARCHAR(255), 
+	regularization_requested_at DATETIME, 
+	regularization_reviewed_by INTEGER, 
+	regularization_reviewed_at DATETIME, 
+	regularization_review_comment VARCHAR(255), 
+	clock_in_lat FLOAT, 
+	clock_in_lng FLOAT, 
+	clock_in_within_geofence BOOL, 
+	clock_out_lat FLOAT, 
+	clock_out_lng FLOAT, 
+	clock_out_within_geofence BOOL, 
+	clock_in_selfie VARCHAR(255), 
+	clock_out_selfie VARCHAR(255), 
+	edited_by INTEGER, 
+	edited_at DATETIME, 
+	edit_note VARCHAR(255), 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_attendance_user_date UNIQUE (user_id, work_date), 
+	FOREIGN KEY(user_id) REFERENCES users (id), 
+	FOREIGN KEY(regularization_reason_id) REFERENCES attendance_regularization_reasons (id), 
+	FOREIGN KEY(regularization_reviewed_by) REFERENCES users (id), 
+	FOREIGN KEY(edited_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
 CREATE TABLE job_postings (
 	id INTEGER NOT NULL AUTO_INCREMENT, 
 	title VARCHAR(150) NOT NULL, 
@@ -293,6 +368,29 @@ CREATE TABLE vendor_agreements (
 	PRIMARY KEY (id), 
 	FOREIGN KEY(vendor_id) REFERENCES vendors (id), 
 	FOREIGN KEY(uploaded_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE attendance_sessions (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	attendance_id INTEGER NOT NULL, 
+	session_no INTEGER NOT NULL, 
+	clock_in DATETIME NOT NULL, 
+	clock_out DATETIME, 
+	clock_in_note VARCHAR(255), 
+	clock_out_note VARCHAR(255), 
+	clock_in_lat FLOAT, 
+	clock_in_lng FLOAT, 
+	clock_in_within_geofence BOOL, 
+	clock_out_lat FLOAT, 
+	clock_out_lng FLOAT, 
+	clock_out_within_geofence BOOL, 
+	clock_in_selfie VARCHAR(255), 
+	clock_out_selfie VARCHAR(255), 
+	reentry_reason VARCHAR(255), 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_attendance_session_no UNIQUE (attendance_id, session_no), 
+	FOREIGN KEY(attendance_id) REFERENCES attendance (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE candidates (
@@ -517,6 +615,7 @@ CREATE TABLE vendor_hires (
 	replacement_of_hire_id INTEGER, 
 	assigned_by INTEGER, 
 	assigned_at DATETIME, 
+	recruiter_id INTEGER, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(vendor_id) REFERENCES vendors (id), 
 	FOREIGN KEY(agreement_id) REFERENCES vendor_agreements (id), 
@@ -524,7 +623,8 @@ CREATE TABLE vendor_hires (
 	FOREIGN KEY(candidate_id) REFERENCES candidates (id), 
 	FOREIGN KEY(employee_id) REFERENCES users (id), 
 	FOREIGN KEY(replacement_of_hire_id) REFERENCES vendor_hires (id), 
-	FOREIGN KEY(assigned_by) REFERENCES users (id)
+	FOREIGN KEY(assigned_by) REFERENCES users (id), 
+	FOREIGN KEY(recruiter_id) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE interview_panelists (

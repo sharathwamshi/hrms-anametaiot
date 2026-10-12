@@ -377,7 +377,25 @@ export default function CandidateDetailModal({ candidateId, onClose, onChanged }
           ))}
         </div>
 
-        {candidate.stage === "hired" && !candidate.linked_employee_id && canRecruit && (
+        {candidate.stage === "hired" && candidate.requisition_type === "client" && (
+          <div className="callout note" style={{ marginBottom: 14 }}>
+            {candidate.placement ? (
+              <span>
+                <strong>Placed with {candidate.placement.vendor_name}</strong> as a{" "}
+                {candidate.placement.placement_type === "contract" ? "contract" : "direct"} placement
+                ({candidate.placement.billing_type === "continuous" ? "billed monthly" : "one-time fee"}).
+                {candidate.recruiter_name && <> Sourced by {candidate.recruiter_name}.</>}
+              </span>
+            ) : (
+              <span>
+                <strong>Hired for a client requisition{candidate.vendor_name ? ` (${candidate.vendor_name})` : ""}.</strong>{" "}
+                This person joins the vendor, not AnametaIOT — Finance / HR Ops record the placement under
+                Vendors → Assign Hire{candidate.recruiter_name ? `, and it is credited to ${candidate.recruiter_name}` : ""}.
+              </span>
+            )}
+          </div>
+        )}
+        {candidate.stage === "hired" && candidate.requisition_type !== "client" && !candidate.linked_employee_id && canRecruit && (
           <div className="callout note" style={{ marginBottom: 14 }}>
             <div className="flex-between">
               <span><strong>Ready to onboard.</strong> {acceptedOffer ? "Offer accepted." : "No accepted offer on file yet."}</span>

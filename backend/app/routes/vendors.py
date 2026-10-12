@@ -285,41 +285,40 @@ def confirm_agreement():
 # Vendor hires — assigning a hired person to a vendor rate-card role
 # ============================================================================
 
+def _build_hire_query(args):
+    """Shared filters for the All Placements list and its CSV export."""
+    q = args.get("q", "").strip()
+    query = VendorHire.query
+    for field in ("vendor_id", "recruiter_id"):
+        val = args.get(field, type=int)
+        if val:
+            query = query.filter(getattr(VendorHire, field) == val)
+    for field in ("status", "placement_type", "billing_type"):
+        val = args.get(field)
+        if val:
+            query = query.filter(getattr(VendorHire, field) == val)
+    if q:
+        query = query.filter(VendorHire.candidate_name.ilike(f"%{q}%"))
+    return query
+
+
 @bp.get("/hires")
 @jwt_required()
 def list_hires():
     """With no vendor_id, this is the cross-vendor 'All Placements' list —
     every candidate ever placed with any vendor, direct or contract, kept
-    entirely separate from AnametaIOT's own Employees directory."""
-    vendor_id = request.args.get("vendor_id", type=int)
-    status = request.args.get("status")
-    billable_only = request.args.get("billable_only") == "true"
-    q = request.args.get("q", "").strip()
-    placement_type = request.args.get("placement_type")
-    billing_type = request.args.get("billing_type")
+    entirely separate from AnametaIOT's own Employees directory. Filters:
+    q, vendor_id, recruiter_id, status, placement_type, billing_type."""
     sort = request.args.get("sort", "assigned_desc")
-
-    query = VendorHire.query
-    if vendor_id:
-        query = query.filter_by(vendor_id=vendor_id)
-    if status:
-        query = query.filter_by(status=status)
-    if placement_type:
-        query = query.filter_by(placement_type=placement_type)
-    if billing_type:
-        query = query.filter_by(billing_type=billing_type)
-    if q:
-        query = query.filter(VendorHire.candidate_name.ilike(f"%{q}%"))
-
     sort_map = {
         "assigned_desc": VendorHire.assigned_at.desc(),
         "assigned_asc": VendorHire.assigned_at.asc(),
         "name_asc": VendorHire.candidate_name.asc(),
         "name_desc": VendorHire.candidate_name.desc(),
     }
-    rows = query.order_by(sort_map.get(sort, VendorHire.assigned_at.desc())).all()
+    rows = _build_hire_query(request.args).order_by(sort_map.get(sort, VendorHire.assigned_at.desc())).all()
     data = [h.to_dict() for h in rows]
-    if billable_only:
+    if request.args.get("billable_only") == "true":
         data = [h for h in data if h["is_billable"]]
     return jsonify(data)
 
@@ -332,36 +331,19 @@ def export_hires():
     import io
     from flask import Response
 
-    vendor_id = request.args.get("vendor_id", type=int)
-    status = request.args.get("status")
-    placement_type = request.args.get("placement_type")
-    billing_type = request.args.get("billing_type")
-    q = request.args.get("q", "").strip()
-
-    query = VendorHire.query
-    if vendor_id:
-        query = query.filter_by(vendor_id=vendor_id)
-    if status:
-        query = query.filter_by(status=status)
-    if placement_type:
-        query = query.filter_by(placement_type=placement_type)
-    if billing_type:
-        query = query.filter_by(billing_type=billing_type)
-    if q:
-        query = query.filter(VendorHire.candidate_name.ilike(f"%{q}%"))
-    rows = query.order_by(VendorHire.assigned_at.desc()).all()
-
+    rows = _build_hire_query(request.args).order_by(VendorHire.assigned_at.desc()).all()
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow([
-        "Candidate", "Vendor", "Role", "Placement Type", "Billing Type", "CTC",
+        "Candidate", "Vendor", "Role", "Recruiter", "Placement Type", "Billing Type", "CTC",
         "Tenure Start", "Status", "Has Internal Login", "Assigned On",
     ])
     for h in rows:
         writer.writerow([
             h.candidate_name, h.vendor.name if h.vendor else "", h.role.role_name if h.role else "",
-            h.placement_type, h.billing_type, h.ctc, h.tenure_start_date.isoformat(),
-            h.status, "Yes" if h.employee_id else "No", h.assigned_at.isoformat(),
+            h.recruiter.full_name if h.recruiter else "", h.placement_type, h.billing_type, h.ctc,
+            h.tenure_start_date.isoformat(), h.status, "Yes" if h.employee_id else "No",
+            h.assigned_at.isoformat(),
         ])
     return Response(
         buf.getvalue(), mimetype="text/csv",
@@ -385,6 +367,31 @@ def bill_hire_recurring(hire_id):
     hire.last_billed_month = period
     db.session.commit()
     return jsonify(hire.to_dict())
+
+
+def _create_contract_login(full_name, email, password, start_date):
+    """Creates the narrow internal login (role: Contract Employee) used to
+    track a contract placement's documents and payroll. Returns (user, None)
+    on success or (None, (json_response, status)) on a validation problem."""
+    email = (email or "").strip().lower()
+    if not email or not password:
+        return None, (jsonify({"message": "A contract placement needs a login email and password (contract_login_email / contract_login_password)."}), 400)
+    if User.query.filter_by(email=email).first():
+        return None, (jsonify({"message": f"Email '{email}' is already in use by another account."}), 409)
+    employee_code = None
+    for _ in range(5):
+        code = f"CT{uuid.uuid4().hex[:6].upper()}"
+        if not User.query.filter_by(employee_code=code).first():
+            employee_code = code
+            break
+    if not employee_code:
+        return None, (jsonify({"message": "Could not generate a unique contract login code — please try again."}), 500)
+    user = User(employee_code=employee_code, full_name=full_name, email=email,
+                role=CONTRACT_EMPLOYEE, date_of_joining=start_date)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.flush()
+    return user, None
 
 
 @bp.post("/hires")
@@ -421,46 +428,52 @@ def assign_hire():
 
     employee_id = payload.get("employee_id")
 
+    # --- Candidate link: keeps the pipeline and the placement list consistent ---
+    recruiter_id = payload.get("recruiter_id")
+    candidate_id = payload.get("candidate_id")
+    if candidate_id:
+        cand = Candidate.query.get(candidate_id)
+        if not cand:
+            return jsonify({"message": "That candidate no longer exists."}), 404
+        job = cand.job
+        if not job or job.requisition_type != "client" or job.vendor_id != int(payload["vendor_id"]):
+            return jsonify({"message": "This candidate was not sourced for this vendor's client requisition, so they cannot be placed with it."}), 400
+        if cand.stage != "hired":
+            return jsonify({"message": f"Only hired candidates can be placed with a vendor (this one is at '{cand.stage}')."}), 400
+        already = VendorHire.query.filter(
+            VendorHire.candidate_id == cand.id, VendorHire.status.in_(["active", "invoiced"])
+        ).first()
+        if already:
+            return jsonify({"message": "This candidate is already placed with a vendor."}), 409
+        recruiter_id = recruiter_id or cand.added_by
+    if recruiter_id and not User.query.get(recruiter_id):
+        return jsonify({"message": "The selected recruiter does not exist."}), 400
+
+    tenure_start = datetime.strptime(payload["tenure_start_date"], "%Y-%m-%d").date()
     if placement_type == "contract" and not employee_id:
         # Create the internal "contract login" — tracked in our tool, but
         # they work for the vendor, not for us.
-        email = (payload.get("contract_login_email") or "").strip().lower()
-        password = payload.get("contract_login_password")
-        if not email or not password:
-            return jsonify({"message": "A contract placement needs a login email and password (contract_login_email / contract_login_password)."}), 400
-        if User.query.filter_by(email=email).first():
-            return jsonify({"message": f"Email '{email}' is already in use by another account."}), 409
-
-        employee_code = None
-        for _ in range(5):
-            candidate_code = f"CT{uuid.uuid4().hex[:6].upper()}"
-            if not User.query.filter_by(employee_code=candidate_code).first():
-                employee_code = candidate_code
-                break
-        if not employee_code:
-            return jsonify({"message": "Could not generate a unique contract login code — please try again."}), 500
-
-        contract_user = User(
-            employee_code=employee_code, full_name=payload["candidate_name"], email=email,
-            role=CONTRACT_EMPLOYEE, date_of_joining=datetime.strptime(payload["tenure_start_date"], "%Y-%m-%d").date(),
+        contract_user, err = _create_contract_login(
+            payload["candidate_name"], payload.get("contract_login_email"),
+            payload.get("contract_login_password"), tenure_start,
         )
-        contract_user.set_password(password)
-        db.session.add(contract_user)
-        db.session.flush()
+        if err:
+            return err
         employee_id = contract_user.id
 
     hire = VendorHire(
         vendor_id=payload["vendor_id"],
         agreement_id=payload["agreement_id"],
         agreement_role_id=payload["agreement_role_id"],
-        candidate_id=payload.get("candidate_id"),
+        candidate_id=candidate_id,
         employee_id=employee_id,
         candidate_name=payload["candidate_name"],
         ctc=float(payload["ctc"]),
         placement_type=placement_type,
         billing_type=billing_type,
-        tenure_start_date=datetime.strptime(payload["tenure_start_date"], "%Y-%m-%d").date(),
+        tenure_start_date=tenure_start,
         assigned_by=int(get_jwt_identity()),
+        recruiter_id=recruiter_id,
     )
     db.session.add(hire)
 
@@ -488,6 +501,27 @@ def replace_hire(hire_id):
     payload = request.get_json(silent=True) or {}
     if not payload.get("candidate_name"):
         return jsonify({"message": "candidate_name for the replacement is required."}), 400
+    if original.status not in ("active", "invoiced"):
+        # An invoiced/paid placement is still replaceable — the replacement
+        # guarantee exists precisely for someone who leaves after billing.
+        return jsonify({"message": f"This placement is already '{original.status}' and cannot be replaced again."}), 400
+
+    tenure_start = datetime.strptime(
+        payload.get("tenure_start_date", date.today().isoformat()), "%Y-%m-%d"
+    ).date()
+    employee_id = payload.get("employee_id")
+    # A replacement keeps the original's deal (direct/contract, one-time/monthly).
+    # A contract replacement is a different person, so they need their own login.
+    if original.placement_type == "contract" and not employee_id:
+        login_user, err = _create_contract_login(
+            payload["candidate_name"], payload.get("contract_login_email"),
+            payload.get("contract_login_password"), tenure_start,
+        )
+        if err:
+            return err
+        employee_id = login_user.id
+        if not SalaryStructure.query.filter_by(user_id=employee_id).first():
+            db.session.add(SalaryStructure(user_id=employee_id, basic=float(payload.get("ctc", original.ctc))))
 
     original.status = "replaced"
     replacement = VendorHire(
@@ -495,14 +529,15 @@ def replace_hire(hire_id):
         agreement_id=original.agreement_id,
         agreement_role_id=original.agreement_role_id,
         candidate_id=payload.get("candidate_id"),
-        employee_id=payload.get("employee_id"),
+        employee_id=employee_id,
         candidate_name=payload["candidate_name"],
         ctc=float(payload.get("ctc", original.ctc)),
-        tenure_start_date=datetime.strptime(
-            payload.get("tenure_start_date", date.today().isoformat()), "%Y-%m-%d"
-        ).date(),
+        placement_type=original.placement_type,
+        billing_type=original.billing_type,
+        tenure_start_date=tenure_start,
         replacement_of_hire_id=original.id,
         assigned_by=int(get_jwt_identity()),
+        recruiter_id=payload.get("recruiter_id") or original.recruiter_id,
     )
     db.session.add(replacement)
     db.session.commit()

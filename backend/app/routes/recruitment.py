@@ -15,7 +15,7 @@ from app.utils.permissions import role_or_permission_required
 from app.utils.audit import log_action
 from app.utils.dedupe import find_duplicate, normalize_email, normalize_phone
 from app.utils.image_gen import generate_job_post_image
-from app.roles import RECRUITMENT_ROLES, HR_OPERATIONS, HR_RECRUITER, MANAGER, ADMIN_ROLES
+from app.roles import RECRUITMENT_ROLES, RECRUITER_OVERVIEW_ROLES, HR_OPERATIONS, HR_RECRUITER, MANAGER, ADMIN_ROLES
 
 bp = Blueprint("recruitment", __name__, url_prefix="/api/recruitment")
 
@@ -413,11 +413,27 @@ def _build_candidate_query(args):
     source = args.get("source")
     level = args.get("level")
     requisition_type = args.get("requisition_type")
+    vendor_id = args.get("vendor_id", type=int)
+    recruiter_id = args.get("recruiter_id", type=int)
+    unplaced = args.get("unplaced") == "true"
     sort = args.get("sort", "created_desc")
 
     query = Candidate.query
+    needs_job_join = bool(requisition_type or vendor_id)
+    if needs_job_join:
+        query = query.join(JobPosting)
     if requisition_type:
-        query = query.join(JobPosting).filter(JobPosting.requisition_type == requisition_type)
+        query = query.filter(JobPosting.requisition_type == requisition_type)
+    if vendor_id:
+        query = query.filter(JobPosting.vendor_id == vendor_id)
+    if recruiter_id:
+        query = query.filter(Candidate.added_by == recruiter_id)
+    if unplaced:
+        from app.models import VendorHire
+        placed_ids = db.session.query(VendorHire.candidate_id).filter(
+            VendorHire.candidate_id.isnot(None), VendorHire.status.in_(["active", "invoiced"])
+        )
+        query = query.filter(Candidate.id.notin_(placed_ids))
     if q:
         like = f"%{q}%"
         query = query.filter(
@@ -440,7 +456,7 @@ def _build_candidate_query(args):
         "stage_asc": Candidate.stage.asc(),
     }
     if sort == "job_asc":
-        if not requisition_type:  # avoid a duplicate join if we already joined above
+        if not needs_job_join:  # avoid a duplicate join if we already joined above
             query = query.join(JobPosting)
         return query.order_by(JobPosting.title.asc()).all()
     return query.order_by(sort_map.get(sort, Candidate.created_at.desc())).all()
@@ -478,7 +494,7 @@ def export_all_candidates():
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow([
-        "Name", "Email", "Phone", "Job", "Requisition Type", "Vendor", "Source",
+        "Name", "Email", "Phone", "Job", "Requisition Type", "Vendor", "Recruiter", "Source",
         "Skills", "Location", "Open to Relocation", "Stage", "Current Level",
         "Validation Status", "Verification Status", "Added On",
     ])
@@ -487,7 +503,7 @@ def export_all_candidates():
         writer.writerow([
             d["full_name"], d["email"], d["phone"], d.get("job_title"),
             c.job.requisition_type if c.job else "", c.job.vendor.name if (c.job and c.job.vendor) else "",
-            d["source"], ", ".join(d["skills"]), d.get("location"),
+            d.get("recruiter_name") or "", d["source"], ", ".join(d["skills"]), d.get("location"),
             "Yes" if d.get("open_to_relocation") else "No", d["stage"], d.get("current_level"),
             d["validation_status"], d["verification_status"], d["created_at"],
         ])
@@ -721,6 +737,114 @@ def set_revalidation_interval(user_id):
     recruiter.revalidation_interval_days = int(days)
     db.session.commit()
     return jsonify(recruiter.to_dict())
+
+
+# ============================================================================
+# Recruiter overview — the in-house recruiters behind the candidates/placements
+# ============================================================================
+
+def _recruiter_ids_in_scope():
+    """In-house recruiters = everyone with the Recruiter role, plus anyone (e.g. an
+    HR Operations user) who has actually added a candidate or sourced a placement.
+    That way a former recruiter's past placements never fall off Finance's view."""
+    from app.models import VendorHire
+    ids = {u.id for u in User.query.filter_by(role=HR_RECRUITER).all()}
+    ids |= {r[0] for r in db.session.query(Candidate.added_by).filter(Candidate.added_by.isnot(None)).distinct()}
+    ids |= {r[0] for r in db.session.query(VendorHire.recruiter_id).filter(VendorHire.recruiter_id.isnot(None)).distinct()}
+    return ids
+
+
+def _recruiter_summary(user):
+    """One recruiter's row for the Finance overview: who they are, what they sourced,
+    what got placed (and how), and what that has earned in vendor fees."""
+    from app.models import VendorHire, VendorInvoice, VendorInvoiceItem
+
+    cands = Candidate.query.filter_by(added_by=user.id)
+    hires = VendorHire.query.filter_by(recruiter_id=user.id)
+
+    def fees(statuses):
+        total = (
+            db.session.query(db.func.coalesce(db.func.sum(VendorInvoiceItem.fee_amount), 0))
+            .join(VendorHire, VendorHire.id == VendorInvoiceItem.hire_id)
+            .join(VendorInvoice, VendorInvoice.id == VendorInvoiceItem.invoice_id)
+            .filter(VendorHire.recruiter_id == user.id, VendorInvoice.status.in_(statuses))
+            .scalar()
+        )
+        return round(float(total or 0), 2)
+
+    structure = getattr(user, "salary_structure", None)
+    manager = User.query.get(user.manager_id) if user.manager_id else None
+    return {
+        "id": user.id, "full_name": user.full_name, "employee_code": user.employee_code,
+        "email": user.email, "role": user.role, "is_active": user.is_active,
+        "manager_name": manager.full_name if manager else None,
+        "date_of_joining": user.date_of_joining.isoformat() if user.date_of_joining else None,
+        "has_salary_structure": structure is not None,
+        "monthly_gross": structure.gross if structure else None,
+        "candidates_added": cands.count(),
+        "candidates_active": cands.filter(Candidate.stage.notin_(["hired", "rejected"])).count(),
+        "candidates_hired": cands.filter(Candidate.stage == "hired").count(),
+        "placements_total": hires.count(),
+        "placements_active": hires.filter(VendorHire.status.in_(["active", "invoiced"])).count(),
+        "placements_direct": hires.filter(VendorHire.placement_type == "direct").count(),
+        "placements_contract": hires.filter(VendorHire.placement_type == "contract").count(),
+        "fees_billed": fees(["approved", "paid"]),
+        "fees_pending": fees(["draft", "pending_approval"]),
+    }
+
+
+def _scoped_recruiters():
+    """Finance / HR Operations see every recruiter; a Manager only their own reports."""
+    claims = get_jwt()
+    users = User.query.filter(User.id.in_(_recruiter_ids_in_scope())).order_by(User.is_active.desc(), User.full_name.asc()).all()
+    if claims.get("role") == MANAGER:
+        me = int(get_jwt_identity())
+        users = [u for u in users if u.manager_id == me]
+    return users
+
+
+@bp.get("/recruiters")
+@roles_required(*RECRUITER_OVERVIEW_ROLES)
+def recruiters_overview():
+    from app.models import VendorHire
+    users = _scoped_recruiters()
+    unattributed = VendorHire.query.filter(VendorHire.recruiter_id.is_(None)).count()
+    return jsonify({
+        "recruiters": [_recruiter_summary(u) for u in users],
+        # Placements recorded by hand with no source candidate — Finance should
+        # know how many are not credited to any recruiter.
+        "unattributed_placements": unattributed,
+    })
+
+
+@bp.get("/recruiters/export")
+@roles_required(*RECRUITER_OVERVIEW_ROLES)
+def export_recruiters():
+    import csv
+    import io
+    from flask import Response
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "Name", "Employee Code", "Email", "Status", "Manager", "Joined", "Monthly Gross",
+        "Candidates Added", "Active Candidates", "Hired", "Placements", "Direct", "Contract",
+        "Fees Billed", "Fees Pending",
+    ])
+    for u in _scoped_recruiters():
+        r = _recruiter_summary(u)
+        writer.writerow([
+            r["full_name"], r["employee_code"], r["email"], "Active" if r["is_active"] else "Inactive",
+            r["manager_name"] or "", r["date_of_joining"] or "",
+            r["monthly_gross"] if r["monthly_gross"] is not None else "",
+            r["candidates_added"], r["candidates_active"], r["candidates_hired"],
+            r["placements_total"], r["placements_direct"], r["placements_contract"],
+            r["fees_billed"], r["fees_pending"],
+        ])
+    return Response(
+        buf.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=recruiters_export.csv"},
+    )
 
 
 # ============================================================================

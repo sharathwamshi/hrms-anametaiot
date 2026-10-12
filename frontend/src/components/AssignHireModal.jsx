@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import client from "../api/client";
+import { fetchRecruiterOptions } from "../utils/recruiters";
 
 export default function AssignHireModal({ vendor, onClose, onAssigned }) {
   const activeAgreements = vendor.agreements.filter((a) => a.status === "active");
@@ -15,8 +16,32 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
   const [billingType, setBillingType] = useState("one_time");
   const [contractEmail, setContractEmail] = useState("");
   const [contractPassword, setContractPassword] = useState("");
+  const [hiredCandidates, setHiredCandidates] = useState([]);
+  const [candidateId, setCandidateId] = useState("");
+  const [recruiters, setRecruiters] = useState([]);
+  const [recruiterId, setRecruiterId] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // People AnametaIOT's recruiters hired for THIS vendor's client requisitions and
+  // that are not placed yet — picking one carries the recruiter credit automatically.
+  useEffect(() => {
+    client
+      .get("/recruitment/candidates", { params: { vendor_id: vendor.id, stage: "hired", unplaced: "true" } })
+      .then(({ data }) => setHiredCandidates(data))
+      .catch(() => setHiredCandidates([]));
+    fetchRecruiterOptions().then(setRecruiters);
+  }, [vendor.id]);
+
+  const pickCandidate = (id) => {
+    setCandidateId(id);
+    setSelectedEmployee(null);
+    setEmployeeQuery("");
+    const c = hiredCandidates.find((x) => x.id === Number(id));
+    setManualName(c ? c.full_name : "");
+    if (c && !contractEmail) setContractEmail(c.email || "");
+  };
+  const pickedCandidate = hiredCandidates.find((x) => x.id === Number(candidateId));
 
   const selectedAgreement = activeAgreements.find((a) => a.id === Number(agreementId));
   const roles = selectedAgreement?.roles || [];
@@ -30,7 +55,7 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
     setBillingType(type === "contract" ? "continuous" : "one_time");
     setSelectedEmployee(null);
     setEmployeeQuery("");
-    setManualName("");
+    if (!candidateId) setManualName("");
   };
 
   const searchEmployees = async (q) => {
@@ -66,6 +91,8 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
         candidate_name: candidateName, ctc: Number(ctc), tenure_start_date: tenureStart,
         placement_type: placementType, billing_type: billingType,
       };
+      if (candidateId) body.candidate_id = Number(candidateId);
+      else if (recruiterId) body.recruiter_id = Number(recruiterId);
       if (placementType === "direct") {
         body.employee_id = selectedEmployee?.id;
       } else {
@@ -108,6 +135,37 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
               </div>
             </div>
 
+            <div className="form-field">
+              <label>Sourced Candidate</label>
+              <select value={candidateId} onChange={(e) => pickCandidate(e.target.value)}>
+                <option value="">— Not from the pipeline (enter details by hand) —</option>
+                {hiredCandidates.map((c) => (
+                  <option key={c.id} value={c.id}>{c.full_name} · {c.job_title}{c.recruiter_name ? ` · sourced by ${c.recruiter_name}` : ""}</option>
+                ))}
+              </select>
+              {pickedCandidate ? (
+                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  {pickedCandidate.recruiter_name
+                    ? `This placement will be credited to ${pickedCandidate.recruiter_name}, who sourced this candidate.`
+                    : "This candidate has no recruiter on record."}
+                </div>
+              ) : hiredCandidates.length === 0 ? (
+                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  No hired, unplaced candidates for this vendor's client requisitions right now.
+                </div>
+              ) : null}
+            </div>
+
+            {!candidateId && recruiters.length > 0 && (
+              <div className="form-field">
+                <label>Credit to Recruiter (optional)</label>
+                <select value={recruiterId} onChange={(e) => setRecruiterId(e.target.value)}>
+                  <option value="">— Unassigned —</option>
+                  {recruiters.map((r) => <option key={r.id} value={r.id}>{r.name}{r.active ? "" : " (inactive)"}</option>)}
+                </select>
+              </div>
+            )}
+
             <div className="form-grid">
               <div className="form-field">
                 <label>Agreement</label>
@@ -133,7 +191,12 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
               </select>
             </div>
 
-            {placementType === "direct" ? (
+            {placementType === "direct" && candidateId ? (
+              <div className="form-field">
+                <label>Candidate Name</label>
+                <input value={manualName} readOnly />
+              </div>
+            ) : placementType === "direct" ? (
               <>
                 <div className="form-field">
                   <label>Employee (search directory)</label>
@@ -164,7 +227,7 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
               <>
                 <div className="form-field">
                   <label>Candidate Name</label>
-                  <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Full name" />
+                  <input value={manualName} readOnly={!!candidateId} onChange={(e) => setManualName(e.target.value)} placeholder="Full name" />
                 </div>
                 <div className="callout" style={{ marginBottom: 10 }}>
                   This creates a limited internal login (role: Contract Employee) so they can access their

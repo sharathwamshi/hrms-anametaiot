@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import ExportButton from "../components/ExportButton";
 import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
 import Loader from "../components/Loader";
 import PayslipDetailModal from "../components/PayslipDetailModal";
+import PayrollPeopleTab from "../components/PayrollPeopleTab";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, ROLE_LABELS } from "../config/roles";
 
@@ -36,6 +38,8 @@ export default function Payroll() {
   });
   const [structError, setStructError] = useState("");
   const [selectedPayslip, setSelectedPayslip] = useState(null);
+  const [coverage, setCoverage] = useState(null);
+  const [coverageVersion, setCoverageVersion] = useState(0);
 
   const load = async () => {
     setLoading(true);
@@ -54,11 +58,17 @@ export default function Payroll() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    client.get("/payroll/coverage", { params: { month, year } }).then(({ data }) => setCoverage(data.summary)).catch(() => {});
+  }, [isAdmin, month, year, coverageVersion]);
+
   const generate = async () => {
     setGenerating(true);
     try {
       await client.post("/payroll/generate", { month, year });
       load();
+      setCoverageVersion((v) => v + 1);
     } finally {
       setGenerating(false);
     }
@@ -103,6 +113,7 @@ export default function Payroll() {
     }
     try {
       await client.post(`/payroll/structure/${selectedEmp.id}`, structure);
+      setCoverageVersion((v) => v + 1);
       setStructureModal(false);
       setSelectedEmp(null);
       setEmpQuery("");
@@ -117,6 +128,9 @@ export default function Payroll() {
         <div className="tag-list section-gap">
           <button className={`btn btn-sm ${tab === "payslips" ? "btn-primary" : "btn-outline"}`} onClick={() => setTab("payslips")}>Payslips</button>
           <button className={`btn btn-sm ${tab === "templates" ? "btn-primary" : "btn-outline"}`} onClick={() => setTab("templates")}>Salary Templates</button>
+          <button className={`btn btn-sm ${tab === "people" ? "btn-primary" : "btn-outline"}`} onClick={() => setTab("people")}>
+            People{coverage && coverage.missing_structure > 0 ? ` (${coverage.missing_structure} to set up)` : ""}
+          </button>
         </div>
       )}
 
@@ -145,6 +159,12 @@ export default function Payroll() {
                   {generating ? "Generating..." : "Generate Payslips"}
                 </button>
               </div>
+              {coverage && coverage.missing_structure > 0 && (
+                <div className="callout warn" style={{ marginTop: 12 }}>
+                  {coverage.missing_structure} active {coverage.missing_structure === 1 ? "person has" : "people have"} no salary structure and will be
+                  skipped. <a href="#people" onClick={(e) => { e.preventDefault(); setTab("people"); }}>Review in the People tab</a>.
+                </div>
+              )}
               <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
                 Generates draft payslips (with a downloadable PDF for each) for every employee with a salary
                 structure defined, using this month's attendance and approved leave to compute loss-of-pay.
@@ -153,7 +173,7 @@ export default function Payroll() {
           )}
 
           <div className="card">
-            <div className="card-title-row"><h3>{isAdmin ? "All Payslips" : "My Payslips"}</h3></div>
+            <div className="card-title-row"><h3>{isAdmin ? "All Payslips" : "My Payslips"}</h3><ExportButton filename={isAdmin ? "All_Payslips" : "My_Payslips"} /></div>
             <p className="muted" style={{ fontSize: 11.5, marginTop: -8, marginBottom: 12 }}>Click a row to view, print, or download a full payslip.</p>
             {loading ? (
               <Loader />
@@ -202,6 +222,13 @@ export default function Payroll() {
       )}
 
       {isAdmin && tab === "templates" && <TemplatesTab />}
+      {isAdmin && tab === "people" && (
+        <PayrollPeopleTab
+          month={month} year={year} version={coverageVersion}
+          onSetStructure={(p) => { setStructureModal(true); pickEmployeeForStructure(p); }}
+          onOpenPayslips={() => setTab("payslips")}
+        />
+      )}
 
       {structureModal && (
         <div className="modal-overlay" onClick={() => setStructureModal(false)}>

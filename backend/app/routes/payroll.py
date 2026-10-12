@@ -6,7 +6,7 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from app.extensions import db
-from app.models import SalaryStructure, Payslip, User, Attendance, LeaveRequest, SalaryTemplate, CompanySettings
+from app.models import SalaryStructure, Payslip, User, Attendance, LeaveRequest, SalaryTemplate, CompanySettings, Holiday
 from app.utils.security import roles_required
 from app.utils.payslip_pdf import generate_payslip_pdf
 from app.roles import PAYROLL_ROLES
@@ -56,6 +56,9 @@ def generate_payslips():
     generated_by = int(get_jwt_identity())
 
     days_in_month = calendar.monthrange(year, month)[1]
+    holiday_days = Holiday.query.filter(
+        db.extract("month", Holiday.holiday_date) == month, db.extract("year", Holiday.holiday_date) == year
+    ).count()
     results = []
 
     for user in User.query.filter_by(is_active=True).all():
@@ -81,7 +84,7 @@ def generate_payslips():
             .scalar()
         )
 
-        paid_days = min(days_in_month, present_days + approved_leave_days)
+        paid_days = min(days_in_month, present_days + approved_leave_days + holiday_days)
         lop_days = max(0, days_in_month - paid_days)
         per_day_gross = structure.gross / days_in_month if days_in_month else 0
         lop_deduction = round(per_day_gross * lop_days, 2)
@@ -124,6 +127,68 @@ def generate_payslips():
 
     db.session.commit()
     return jsonify([p.to_dict() for p in results])
+
+
+@bp.get("/coverage")
+@roles_required(*PAYROLL_ROLES)
+def payroll_coverage():
+    """Every active in-house user (any role: recruiters, managers, contract logins,
+    employees...) with their payroll status for a month. "Run Payroll" silently skips
+    anyone without a salary structure, so this is how Finance sees who would be missed.
+    Filters: q, role, department_id, payroll (missing | set | processed | paid)."""
+    month = request.args.get("month", type=int) or date.today().month
+    year = request.args.get("year", type=int) or date.today().year
+    q = request.args.get("q", "").strip()
+    role = request.args.get("role")
+    department_id = request.args.get("department_id", type=int)
+    payroll = request.args.get("payroll")
+
+    query = User.query.filter_by(is_active=True)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(db.or_(User.full_name.ilike(like), User.employee_code.ilike(like)))
+    if role:
+        query = query.filter_by(role=role)
+    if department_id:
+        query = query.filter_by(department_id=department_id)
+    users = query.order_by(User.full_name.asc()).all()
+
+    structures = {s.user_id: s for s in SalaryStructure.query.all()}
+    slips = {p.user_id: p for p in Payslip.query.filter_by(month=month, year=year).all()}
+    managers = {u.id: u.full_name for u in User.query.filter(User.id.in_({u.manager_id for u in users if u.manager_id})).all()}
+
+    people = []
+    for u in users:
+        st, slip = structures.get(u.id), slips.get(u.id)
+        state = "paid" if slip and slip.status == "paid" else "processed" if slip and slip.status == "processed" else "set" if st else "missing"
+        if payroll and payroll != state:
+            continue
+        people.append({
+            "id": u.id, "full_name": u.full_name, "employee_code": u.employee_code, "email": u.email,
+            "role": u.role, "designation": u.designation,
+            "department": u.department.name if u.department else None,
+            "manager_name": managers.get(u.manager_id),
+            "has_structure": st is not None,
+            "monthly_gross": st.gross if st else None,
+            "monthly_net": round(st.gross - st.total_deductions, 2) if st else None,
+            "payslip_id": slip.id if slip else None,
+            "payslip_status": slip.status if slip else None,
+            "payroll_state": state,
+        })
+
+    # Summary is always over everyone active, regardless of the list filters
+    all_active = User.query.filter_by(is_active=True).count()
+    missing = User.query.filter_by(is_active=True).filter(~User.id.in_(list(structures) or [0])).count()
+    return jsonify({
+        "month": month, "year": year, "people": people,
+        "summary": {
+            "total_active": all_active,
+            "with_structure": all_active - missing,
+            "missing_structure": missing,
+            "payslips_processed": sum(1 for p in slips.values() if p.status == "processed"),
+            "payslips_paid": sum(1 for p in slips.values() if p.status == "paid"),
+        },
+    })
 
 
 @bp.get("/payslips/<int:user_id>")

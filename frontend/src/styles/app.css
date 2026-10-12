@@ -812,3 +812,47 @@ table.data-table {
   }
   .no-print { display: none !important; }
 }
+
+/* ===== Attendance calendar + day detail (web parity with the mobile app) ===== */
+.att-cal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.att-cal-nav { display: inline-flex; align-items: center; gap: 8px; }
+.att-cal-nav strong { min-width: 150px; text-align: center; font-size: 15px; }
+.att-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.att-sum > div { background: var(--color-bg); border-radius: var(--radius-md); padding: 10px 12px; }
+.att-sum b { display: block; font-size: 19px; color: var(--color-primary-700); }
+.att-sum span { font-size: 11.5px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: .3px; }
+.att-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.att-dow { text-align: center; font-size: 11.5px; font-weight: 700; color: var(--color-text-muted); padding: 4px 0; }
+.att-day { position: relative; min-height: 74px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: #fff; padding: 6px 8px; text-align: left; cursor: pointer; font: inherit; color: inherit; transition: box-shadow .12s, border-color .12s; }
+.att-day:hover { border-color: var(--color-primary-500); box-shadow: var(--shadow-sm); }
+.att-day.blank { border: 0; background: transparent; cursor: default; min-height: 0; }
+.att-day .n { font-weight: 700; font-size: 13px; }
+.att-day .t { display: block; font-size: 10.5px; margin-top: 4px; line-height: 1.35; }
+.att-day.today { outline: 2px solid var(--color-primary-500); }
+.att-day.present { background: var(--color-success-100); border-color: #b7e4cc; }
+.att-day.half_day { background: var(--color-warning-100); border-color: #f5d79a; }
+.att-day.absent { background: var(--color-danger-100); border-color: #f6c1bc; }
+.att-day.regularized { background: var(--color-brand-orange-100); border-color: #f7cfae; }
+.att-day.leave { background: var(--color-brand-blue-50); border-color: #cfe0fb; }
+.att-day.holiday { background: #fff7e0; border-color: #f1dc9b; }
+.att-day.weekend { background: #f7f7fa; color: #98a2b3; }
+.att-day.future { opacity: .55; }
+.att-dot { position: absolute; top: 7px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--color-danger); }
+.att-dot.pending { background: var(--color-warning); }
+.att-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; font-size: 12px; color: var(--color-text-muted); }
+.att-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; border: 1px solid rgba(0,0,0,.08); }
+.att-session { border-left: 3px solid var(--color-primary-500); padding: 4px 0 4px 12px; margin: 10px 0; }
+.att-session .when { font-weight: 700; font-size: 14px; }
+.att-session .meta { font-size: 12.5px; color: var(--color-text-muted); margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.att-session .why { margin-top: 5px; font-size: 12.5px; color: var(--color-brand-orange-700); font-style: italic; }
+.att-chip { display: inline-block; border-radius: 99px; padding: 1px 9px; font-size: 11.5px; font-weight: 600; background: var(--color-primary-50); color: var(--color-primary-700); }
+.att-chip.green { background: var(--color-success-100); color: #067647; }
+.att-chip.red { background: var(--color-danger-100); color: #b42318; }
+.att-chip.amber { background: var(--color-warning-100); color: #b54708; }
+.att-edit-row { display: grid; grid-template-columns: 28px 1fr 1fr 32px; gap: 8px; align-items: end; margin-bottom: 10px; }
+.att-edit-row .no { font-weight: 800; color: var(--color-primary-700); padding-bottom: 10px; }
+.att-edit-row input { border: 1px solid var(--color-border); border-radius: 6px; padding: 8px 8px; font-size: 13px; width: 100%; }
+.att-modal-wide { width: 640px; }
+.att-person-row { cursor: pointer; }
+.att-person-row:hover td { background: var(--color-primary-50); }
+@media (max-width: 720px) { .att-day { min-height: 56px; padding: 4px; } .att-day .t { display: none; } }

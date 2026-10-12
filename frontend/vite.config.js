@@ -5,6 +5,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // Allow the dev server to be opened through a tunnel (ngrok etc.) — Vite blocks unknown
+    // hosts by default. A leading dot allows the domain and all its subdomains.
+    allowedHosts: [".ngrok-free.app", ".ngrok-free.dev", ".ngrok.app", ".ngrok.io", ".trycloudflare.com", ".loca.lt"],
     proxy: {
       "/api": {
         // Use 127.0.0.1 instead of "localhost" — Node 18+ resolves

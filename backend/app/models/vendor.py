@@ -13,6 +13,9 @@ class CompanySettings(db.Model):
     gstin = db.Column(db.String(20), nullable=True)
     pan = db.Column(db.String(20), nullable=True)
     state = db.Column(db.String(50), default="Karnataka")
+    # Attendance policy: when on, every clock-in/out must include a selfie.
+    # Off by default.
+    selfie_required = db.Column(db.Boolean, default=False, nullable=False, server_default="0")
     updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -185,8 +188,13 @@ class VendorHire(db.Model):
 
     assigned_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     assigned_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # The in-house recruiter who sourced this person (auto-filled from the
+    # candidate's owner when placed from the pipeline) — separate from
+    # assigned_by, which is whoever in Finance/HR Ops recorded the placement.
+    recruiter_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
 
     invoice_items = db.relationship("VendorInvoiceItem", backref="hire")
+    recruiter = db.relationship("User", foreign_keys=[recruiter_id])
 
     role = db.relationship("VendorAgreementRole")
     agreement = db.relationship("VendorAgreement")
@@ -238,6 +246,8 @@ class VendorHire(db.Model):
             "candidate_id": self.candidate_id,
             "employee_id": self.employee_id,
             "vendor_name": self.vendor.name if self.vendor else None,
+            "recruiter_id": self.recruiter_id,
+            "recruiter_name": self.recruiter.full_name if self.recruiter else None,
             "candidate_name": self.candidate_name,
             "ctc": self.ctc,
             "placement_type": self.placement_type,

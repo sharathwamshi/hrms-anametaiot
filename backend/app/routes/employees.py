@@ -3,11 +3,56 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 from app.extensions import db
-from app.models import User, Department
+from app.models import User, Department, DeviceToken, LeaveRequest
 from app.utils.security import roles_required
 from app.roles import ALL_ROLES, HR_OPERATIONS, HR_RECRUITER, MANAGER
 
 bp = Blueprint("employees", __name__, url_prefix="/api/employees")
+
+
+MAX_REMOVAL_REASON = 255
+
+
+def _remove_user(user, actor_id, actor_role, reason):
+    """Removes (deactivates) a person, with the same safeguards wherever it's triggered.
+    Returns an error response, or None on success (caller commits).
+
+    Never a hard delete: payslips, attendance, leave, documents, placements and 40+ other
+    records reference a user and must be retained for compliance."""
+    if user.id == actor_id:
+        return jsonify({"message": "You can't remove your own account."}), 400
+    if actor_role == MANAGER:
+        if user.manager_id != actor_id:
+            return jsonify({"message": "You can only remove your own direct reports."}), 403
+        if user.role == HR_OPERATIONS:
+            return jsonify({"message": "Only HR Operations can remove an HR Operations user."}), 403
+    if not user.is_active:
+        return jsonify({"message": f"{user.full_name} has already been removed."}), 400
+
+    reason = (reason or "").strip()
+    if len(reason) < 3:
+        return jsonify({"message": "Please give a reason for removing this person.", "reason_required": True}), 400
+    if len(reason) > MAX_REMOVAL_REASON:
+        return jsonify({"message": f"Please keep the reason under {MAX_REMOVAL_REASON} characters.", "reason_required": True}), 400
+
+    reports = User.query.filter_by(manager_id=user.id, is_active=True).count()
+    if reports:
+        who = "HR Operations can reassign them" if actor_role == MANAGER else "reassign them first"
+        return jsonify({
+            "message": f"{user.full_name} still has {reports} active direct report{'s' if reports != 1 else ''} — {who} before removing this person.",
+            "active_reports": reports,
+        }), 409
+
+    user.is_active = False
+    user.removed_at = datetime.utcnow()
+    user.removed_by = actor_id
+    user.removal_reason = reason
+    # Stop pushes to their phone, and don't leave their pending leave stuck in approvers' queues.
+    DeviceToken.query.filter_by(user_id=user.id).delete()
+    for leave in LeaveRequest.query.filter_by(user_id=user.id, status="pending").all():
+        leave.status = "cancelled"
+        leave.review_comment = "Cancelled automatically — employee was removed."
+    return None
 
 
 @bp.get("")
@@ -17,7 +62,17 @@ def list_employees():
     department_id = request.args.get("department_id", type=int)
     role = request.args.get("role")
 
-    query = User.query.filter_by(is_active=True)
+    if request.args.get("status") == "removed":
+        # Removed people: HR Operations sees everyone's, a Manager only their own reports'.
+        claims, actor_id = get_jwt(), int(get_jwt_identity())
+        if claims.get("role") == HR_OPERATIONS:
+            query = User.query.filter_by(is_active=False)
+        elif claims.get("role") == MANAGER:
+            query = User.query.filter_by(is_active=False, manager_id=actor_id)
+        else:
+            return jsonify({"message": "You do not have permission to view removed employees."}), 403
+    else:
+        query = User.query.filter_by(is_active=True)
     if q:
         like = f"%{q}%"
         query = query.filter(db.or_(User.full_name.ilike(like), User.employee_code.ilike(like)))
@@ -26,7 +81,10 @@ def list_employees():
     if role:
         query = query.filter_by(role=role)
 
-    rows = query.order_by(User.full_name.asc()).all()
+    if request.args.get("status") == "removed":
+        rows = query.order_by(User.removed_at.desc(), User.full_name.asc()).all()
+    else:
+        rows = query.order_by(User.full_name.asc()).all()
     return jsonify([u.to_dict() for u in rows])
 
 
@@ -111,20 +169,51 @@ def update_employee(emp_id):
     if payload.get("date_of_joining"):
         user.date_of_joining = datetime.strptime(payload["date_of_joining"], "%Y-%m-%d").date()
     if "is_active" in payload and not is_manager:
-        user.is_active = bool(payload["is_active"])
+        if payload["is_active"] and not user.is_active:
+            user.is_active = True
+            user.removed_at = user.removed_by = user.removal_reason = None
+        elif not payload["is_active"] and user.is_active:
+            err = _remove_user(user, actor_id, claims.get("role"), payload.get("removal_reason") or "Deactivated by HR Operations")
+            if err:
+                db.session.rollback()
+                return err
 
     db.session.commit()
     return jsonify(user.to_dict())
 
 
 @bp.delete("/<int:emp_id>")
-@roles_required(HR_OPERATIONS)
-def deactivate_employee(emp_id):
-    """Soft delete — HRMS records must be retained for compliance."""
+@roles_required(HR_OPERATIONS, MANAGER)
+def remove_employee(emp_id):
+    """Remove a person. HR Operations can remove anyone; a Manager only their own direct
+    reports. Requires a reason, which is recorded with who/when. Reversible via /restore."""
     user = User.query.get_or_404(emp_id)
-    user.is_active = False
+    claims = get_jwt()
+    payload = request.get_json(silent=True) or {}
+    err = _remove_user(user, int(get_jwt_identity()), claims.get("role"), payload.get("reason"))
+    if err:
+        db.session.rollback()
+        return err
     db.session.commit()
-    return jsonify({"message": "Employee deactivated."})
+    return jsonify({"message": f"{user.full_name} has been removed.", "employee": user.to_dict()})
+
+
+@bp.post("/<int:emp_id>/restore")
+@roles_required(HR_OPERATIONS, MANAGER)
+def restore_employee(emp_id):
+    """Undo a removal. HR Operations can restore anyone; a Manager only someone THEY removed
+    (so a manager can't overturn an HR Operations decision)."""
+    user = User.query.get_or_404(emp_id)
+    claims = get_jwt()
+    actor_id = int(get_jwt_identity())
+    if user.is_active:
+        return jsonify({"message": f"{user.full_name} is not removed."}), 400
+    if claims.get("role") == MANAGER and not (user.manager_id == actor_id and user.removed_by == actor_id):
+        return jsonify({"message": "You can only restore a direct report that you removed yourself. Ask HR Operations."}), 403
+    user.is_active = True
+    user.removed_at = user.removed_by = user.removal_reason = None
+    db.session.commit()
+    return jsonify({"message": f"{user.full_name} has been restored.", "employee": user.to_dict()})
 
 
 @bp.get("/departments")
@@ -163,6 +252,12 @@ def convert_candidate_to_employee(candidate_id):
         return jsonify({"message": "Only a candidate at the Hired stage can be converted."}), 400
     if candidate.linked_employee_id:
         return jsonify({"message": "This candidate has already been converted to an employee."}), 400
+    if candidate.job and candidate.job.requisition_type == "client":
+        # Sourced for a vendor's role, not for AnametaIOT: they must never become
+        # an internal employee. They are placed with the vendor instead (Vendors ->
+        # Assign Hire), which creates a limited Contract Employee login only when
+        # the placement is a contract one.
+        return jsonify({"message": "This candidate was sourced for a client requisition. Place them with the vendor instead of converting them to an AnametaIOT employee."}), 400
 
     payload = request.get_json(silent=True) or {}
     required = ["employee_code", "password", "role"]

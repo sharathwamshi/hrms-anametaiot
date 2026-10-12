@@ -93,6 +93,7 @@ class Candidate(db.Model):
 
     added_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     assigned_to = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    recruiter = db.relationship("User", foreign_keys=[added_by])
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     interviews = db.relationship("Interview", backref="candidate", cascade="all, delete-orphan")
@@ -129,12 +130,22 @@ class Candidate(db.Model):
             "referral_bonus_status": self.referral_bonus_status,
             "bgv_status": self.bgv_status, "linked_employee_id": self.linked_employee_id,
             "added_by": self.added_by, "assigned_to": self.assigned_to,
+            "recruiter_name": self.recruiter.full_name if self.recruiter else None,
             "created_at": self.created_at.isoformat(),
         }
         if include_detail:
             data["screening_calls"] = [c.to_dict() for c in self.screening_calls]
             data["notes_thread"] = [n.to_dict() for n in self.notes_thread]
             data["audit_log"] = [a.to_dict() for a in self.audit_log]
+            # Where this person ended up if they were placed with a vendor.
+            from app.models.vendor import VendorHire
+            hire = (VendorHire.query.filter(VendorHire.candidate_id == self.id, VendorHire.status.in_(["active", "invoiced"]))
+                    .order_by(VendorHire.assigned_at.desc()).first())
+            data["placement"] = None if not hire else {
+                "id": hire.id, "vendor_name": hire.vendor.name if hire.vendor else None,
+                "placement_type": hire.placement_type, "billing_type": hire.billing_type,
+                "status": hire.status, "tenure_start_date": hire.tenure_start_date.isoformat(),
+            }
         return data
 
 

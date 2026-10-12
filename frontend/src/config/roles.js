@@ -20,11 +20,11 @@ export const ROLE_LABELS = {
 
 // Which nav items each role sees. Every role gets Dashboard + Profile.
 export const NAV_BY_ROLE = {
-  [ROLES.HR_OPERATIONS]: ["dashboard", "employees", "attendance", "leave", "payroll", "recruitment", "allCandidates", "vendors", "allPlacements", "announcements", "assets", "documents", "profile"],
-  [ROLES.MANAGER]: ["dashboard", "attendance", "leave", "employees", "recruitment", "allCandidates", "vendors", "allPlacements", "documents", "profile"],
-  [ROLES.FINANCE_ACCOUNTS]: ["dashboard", "payroll", "vendors", "allPlacements", "documents", "profile"],
+  [ROLES.HR_OPERATIONS]: ["dashboard", "employees", "attendance", "leave", "payroll", "recruitment", "allCandidates", "recruiters", "vendors", "allPlacements", "announcements", "assets", "documents", "profile"],
+  [ROLES.MANAGER]: ["dashboard", "attendance", "leave", "employees", "recruitment", "allCandidates", "recruiters", "vendors", "allPlacements", "documents", "profile"],
+  [ROLES.FINANCE_ACCOUNTS]: ["dashboard", "attendance", "leave", "payroll", "allCandidates", "recruiters", "vendors", "allPlacements", "documents", "profile"],
   [ROLES.OPERATIONS]: ["dashboard", "attendance", "assets", "employees", "documents", "profile"],
-  [ROLES.HR_RECRUITER]: ["dashboard", "recruitment", "allCandidates", "documents", "profile"],
+  [ROLES.HR_RECRUITER]: ["dashboard", "attendance", "leave", "recruitment", "allCandidates", "documents", "profile"],
   [ROLES.EMPLOYEE]: ["dashboard", "attendance", "leave", "payroll", "documents", "profile"],
   [ROLES.CONTRACT_EMPLOYEE]: ["dashboard", "documents", "payroll", "profile"],
 };
@@ -37,6 +37,7 @@ export const NAV_ITEMS = {
   payroll: { path: "/payroll", label: "Payroll", icon: "\u20B9" },
   recruitment: { path: "/recruitment", label: "Recruitment", icon: "\u2605" },
   allCandidates: { path: "/all-candidates", label: "All Candidates", icon: "\u25A4" },
+  recruiters: { path: "/recruiters", label: "Recruiters", icon: "\u2691" },
   allPlacements: { path: "/all-placements", label: "All Placements", icon: "\u{1F517}" },
   vendors: { path: "/vendors", label: "Vendors", icon: "\u{1F3E2}" },
   announcements: { path: "/announcements", label: "Announcements", icon: "\u266A" },

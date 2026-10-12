@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ExportButton from "../components/ExportButton";
 import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
@@ -267,14 +268,17 @@ function InvoicesTab() {
     <div className="card">
       <div className="card-title-row">
         <h3>All Vendor Invoices</h3>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "6px 10px" }}>
-          <option value="">All statuses</option>
-          <option value="draft">Draft</option>
-          <option value="pending_approval">Pending Approval</option>
-          <option value="approved">Approved</option>
-          <option value="rejected">Rejected</option>
-          <option value="paid">Paid</option>
-        </select>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <ExportButton filename="Vendor_Invoices" />
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "6px 10px" }}>
+            <option value="">All statuses</option>
+            <option value="draft">Draft</option>
+            <option value="pending_approval">Pending Approval</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="paid">Paid</option>
+          </select>
+        </div>
       </div>
       {loading ? <Loader /> : (
         <div className="table-wrap">

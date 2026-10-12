@@ -10,7 +10,16 @@ class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key")
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "dev-jwt-secret")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=12)
+    JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
     JWT_TOKEN_LOCATION = ["headers"]
+
+    # Shared secret the attendance-reminder cron job sends as X-Internal-Secret.
+    # Set this in production; the default is only for local dev.
+    INTERNAL_TASK_SECRET = os.environ.get("INTERNAL_TASK_SECRET", "dev-internal-secret")
+
+    # Set to send real pushes via Expo's push service; leave unset in dev/test
+    # and pushes are just skipped (logged, not sent) — nothing else breaks.
+    EXPO_PUSH_ENABLED = os.environ.get("EXPO_PUSH_ENABLED", "true").lower() == "true"
 
     DB_HOST = os.environ.get("DB_HOST", "localhost")
     DB_PORT = os.environ.get("DB_PORT", "3306")
@@ -28,6 +37,8 @@ class Config:
 
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB uploads
     UPLOAD_FOLDER = os.path.join(basedir, "app", "static", "uploads")
+    # Attendance selfies live OUTSIDE the publicly-served static/uploads tree.
+    SELFIE_FOLDER = os.environ.get("SELFIE_FOLDER", os.path.join(basedir, "app", "private_uploads", "selfies"))
 
     COMPANY_NAME = os.environ.get("COMPANY_NAME", "AnametaIOT HRMS")
     POWERED_BY = os.environ.get("POWERED_BY", "+veGroww")

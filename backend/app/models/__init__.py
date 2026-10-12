@@ -1,5 +1,5 @@
 from app.models.user import User, Department
-from app.models.attendance import Attendance
+from app.models.attendance import Attendance, AttendanceRegularizationReason, Holiday, OfficeLocation, DeviceToken, AttendanceSession
 from app.models.leave import LeaveType, LeaveBalance, LeaveRequest
 from app.models.payroll import SalaryStructure, Payslip
 from app.models.payroll_template import SalaryTemplate

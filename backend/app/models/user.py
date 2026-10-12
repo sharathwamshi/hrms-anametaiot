@@ -37,6 +37,14 @@ class User(db.Model):
     avatar_url = db.Column(db.String(255))
     is_active = db.Column(db.Boolean, default=True)
 
+    # Removal audit trail. People are never hard-deleted (payslips, attendance, leave,
+    # placements and 40+ other records point at them and must be kept), so "removing" a
+    # person deactivates them and records who did it, when, and why.
+    removed_at = db.Column(db.DateTime, nullable=True)
+    removed_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    removal_reason = db.Column(db.String(255), nullable=True)
+    remover = db.relationship("User", remote_side=[id], foreign_keys=[removed_by])
+
     # --- Recruiter-specific policy fields (meaningful only when role == hr_recruiter) ---
     self_verify_rights = db.Column(db.Boolean, default=False)
     self_verify_granted_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
@@ -67,6 +75,10 @@ class User(db.Model):
             "date_of_joining": self.date_of_joining.isoformat() if self.date_of_joining else None,
             "avatar_url": self.avatar_url,
             "is_active": self.is_active,
+            "removed_at": self.removed_at.isoformat() + "Z" if self.removed_at else None,
+            "removed_by": self.removed_by,
+            "removed_by_name": self.remover.full_name if self.remover else None,
+            "removal_reason": self.removal_reason,
             "self_verify_rights": self.self_verify_rights,
             "revalidation_interval_days": self.revalidation_interval_days,
         }
