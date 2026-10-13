@@ -5,7 +5,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from app.extensions import db
 from app.models import User, Department, DeviceToken, LeaveRequest
 from app.utils.security import roles_required
-from app.roles import ALL_ROLES, HR_OPERATIONS, HR_RECRUITER, MANAGER
+from app.roles import ALL_ROLES, HR_OPERATIONS, HR_RECRUITER, MANAGER, SUPER_ADMIN
 
 bp = Blueprint("employees", __name__, url_prefix="/api/employees")
 
@@ -21,6 +21,8 @@ def _remove_user(user, actor_id, actor_role, reason):
     records reference a user and must be retained for compliance."""
     if user.id == actor_id:
         return jsonify({"message": "You can't remove your own account."}), 400
+    if user.role == SUPER_ADMIN and actor_role != SUPER_ADMIN:
+        return jsonify({"message": "Only a Super Admin can remove a Super Admin."}), 403
     if actor_role == MANAGER:
         if user.manager_id != actor_id:
             return jsonify({"message": "You can only remove your own direct reports."}), 403
@@ -65,7 +67,7 @@ def list_employees():
     if request.args.get("status") == "removed":
         # Removed people: HR Operations sees everyone's, a Manager only their own reports'.
         claims, actor_id = get_jwt(), int(get_jwt_identity())
-        if claims.get("role") == HR_OPERATIONS:
+        if claims.get("role") in (HR_OPERATIONS, SUPER_ADMIN):
             query = User.query.filter_by(is_active=False)
         elif claims.get("role") == MANAGER:
             query = User.query.filter_by(is_active=False, manager_id=actor_id)
@@ -96,7 +98,7 @@ def get_employee(emp_id):
 
 
 @bp.post("")
-@roles_required(HR_OPERATIONS, MANAGER)
+@roles_required(HR_OPERATIONS, MANAGER, SUPER_ADMIN)
 def create_employee():
     """HR Operations can onboard anyone into any reporting line. A Manager can
     onboard someone directly into their own team — the new hire's manager_id is
@@ -114,6 +116,8 @@ def create_employee():
 
     if payload["role"] not in ALL_ROLES:
         return jsonify({"message": "Invalid role."}), 400
+    if payload["role"] == SUPER_ADMIN and claims.get("role") != SUPER_ADMIN:
+        return jsonify({"message": "Only a Super Admin can create another Super Admin."}), 403
 
     if User.query.filter_by(email=payload["email"].lower()).first():
         return jsonify({"message": "Email already in use."}), 409
@@ -141,7 +145,7 @@ def create_employee():
 
 
 @bp.put("/<int:emp_id>")
-@roles_required(HR_OPERATIONS, MANAGER)
+@roles_required(HR_OPERATIONS, MANAGER, SUPER_ADMIN)
 def update_employee(emp_id):
     """HR Operations can edit anyone. A Manager can only edit their own direct
     reports, and cannot reassign a report to a different manager (that stays an
@@ -151,6 +155,12 @@ def update_employee(emp_id):
     claims = get_jwt()
     actor_id = int(get_jwt_identity())
     is_manager = claims.get("role") == MANAGER
+    if claims.get("role") != SUPER_ADMIN:
+        # Only a Super Admin may touch a Super Admin, or hand out the role.
+        if user.role == SUPER_ADMIN:
+            return jsonify({"message": "Only a Super Admin can change a Super Admin."}), 403
+        if (request.get_json(silent=True) or {}).get("role") == SUPER_ADMIN:
+            return jsonify({"message": "Only a Super Admin can grant the Super Admin role."}), 403
 
     if is_manager:
         if user.manager_id != actor_id:
@@ -183,7 +193,7 @@ def update_employee(emp_id):
 
 
 @bp.delete("/<int:emp_id>")
-@roles_required(HR_OPERATIONS, MANAGER)
+@roles_required(HR_OPERATIONS, MANAGER, SUPER_ADMIN)
 def remove_employee(emp_id):
     """Remove a person. HR Operations can remove anyone; a Manager only their own direct
     reports. Requires a reason, which is recorded with who/when. Reversible via /restore."""
@@ -199,7 +209,7 @@ def remove_employee(emp_id):
 
 
 @bp.post("/<int:emp_id>/restore")
-@roles_required(HR_OPERATIONS, MANAGER)
+@roles_required(HR_OPERATIONS, MANAGER, SUPER_ADMIN)
 def restore_employee(emp_id):
     """Undo a removal. HR Operations can restore anyone; a Manager only someone THEY removed
     (so a manager can't overturn an HR Operations decision)."""
@@ -223,7 +233,7 @@ def list_departments():
 
 
 @bp.post("/departments")
-@roles_required(HR_OPERATIONS)
+@roles_required(HR_OPERATIONS, SUPER_ADMIN)
 def create_department():
     payload = request.get_json(silent=True) or {}
     name = (payload.get("name") or "").strip()

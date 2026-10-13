@@ -65,7 +65,7 @@ export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0 }) {
                   const place = loc ? placeLabel(loc.within_geofence) : null;
                   return (
                     <tr key={p.user.id} className="att-person-row" onClick={() => onOpenPerson(p.user)}>
-                      <td><strong>{p.user.full_name}</strong><div className="muted" style={{ fontSize: 11.5 }}>{p.user.employee_code}{p.user.designation ? ` · ${p.user.designation}` : ""}</div></td>
+                      <td><strong>{p.user.full_name}</strong><div className="muted" style={{ fontSize: 11.5 }}>{p.user.employee_code}{p.user.designation ? ` · ${p.user.designation}` : ""}</div>{p.user.restrict_to_office && <span className="att-chip amber" style={{ marginTop: 4, display: "inline-block" }} title="Clock in/out is only allowed from the office">Office only</span>}</td>
                       <td><Badge status={p.status} />{p.clocked_in_now && <div className="att-chip green" style={{ marginTop: 4 }}>In now</div>}</td>
                       <td>{rec?.clock_in ? fmtTime(rec.clock_in) : "—"}</td>
                       <td>{rec?.clock_in ? (rec.clock_out ? fmtTime(rec.clock_out) : "—") : "—"}</td>

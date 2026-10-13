@@ -7,7 +7,8 @@ import { ROLES, ROLE_LABELS } from "../config/roles";
 
 export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) {
   const { user } = useAuth();
-  const isAdmin = user.role === ROLES.HR_OPERATIONS;
+  const isSuperAdmin = user.role === ROLES.SUPER_ADMIN;
+  const isAdmin = user.role === ROLES.HR_OPERATIONS || isSuperAdmin;
 
   const [snapshot, setSnapshot] = useState(null);
   const [recruiterPerf, setRecruiterPerf] = useState(null);
@@ -53,7 +54,8 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   // the backend enforces this too — this just avoids showing controls that
   // would 403 anyway.
   const isOwnReport = snapshot?.employee.manager_id === user.id;
-  const canManage = isAdmin || isOwnReport;
+  const targetIsSuper = snapshot?.employee.role === ROLES.SUPER_ADMIN;
+  const canManage = (isAdmin || isOwnReport) && (!targetIsSuper || isSuperAdmin); // only a Super Admin may touch a Super Admin
 
   const saveInfo = async () => {
     setError("");
@@ -91,7 +93,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
 
   const emp = snapshot.employee;
   // Admin can remove anyone; a Manager only their own direct reports; nobody removes themselves.
-  const canRemove = (isAdmin || isOwnReport) && emp.id !== user.id && emp.is_active;
+  const canRemove = (isAdmin || isOwnReport) && emp.id !== user.id && emp.is_active && (emp.role !== ROLES.SUPER_ADMIN || isSuperAdmin);
   // A Manager can only undo a removal they made themselves.
   const canRestore = !emp.is_active && (isAdmin || (isOwnReport && emp.removed_by === user.id));
 
@@ -166,7 +168,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
                 <div className="form-field">
                   <label>Role</label>
                   <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                    {Object.entries(ROLE_LABELS).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
+                    {Object.entries(ROLE_LABELS).filter(([val]) => val !== ROLES.SUPER_ADMIN || isSuperAdmin).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
                   </select>
                 </div>
               </div>

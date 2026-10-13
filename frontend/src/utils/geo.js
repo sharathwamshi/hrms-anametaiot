@@ -16,7 +16,7 @@ export function getBrowserLocation(timeoutMs = 9000) {
           ? "Location is blocked for this site — allow it in your browser to record where you punched."
           : "Couldn't get your location this time.",
       }),
-      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 30000 },
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 5000 },
     );
   });
 }

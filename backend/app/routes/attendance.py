@@ -11,10 +11,13 @@ from flask import current_app, send_from_directory
 import os
 import uuid
 from datetime import timedelta
-from app.roles import ROLES_WITH_CLOCK_IN_OUT, MANAGER, HR_OPERATIONS, OPERATIONS
+from app.roles import ROLES_WITH_CLOCK_IN_OUT, MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN
 
-APPROVER_ROLES = (MANAGER, HR_OPERATIONS)
-CALENDAR_MANAGER_ROLES = (MANAGER, HR_OPERATIONS)
+FULL_ACCESS = (HR_OPERATIONS, SUPER_ADMIN)          # every active person, incl. locations + selfies
+APPROVER_ROLES = (MANAGER, HR_OPERATIONS, SUPER_ADMIN)
+CALENDAR_MANAGER_ROLES = (MANAGER, HR_OPERATIONS, SUPER_ADMIN)
+OFFICE_ADMIN_ROLES = (SUPER_ADMIN,)
+VIEWER_ROLES = (MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN)
 
 bp = Blueprint("attendance", __name__, url_prefix="/api/attendance")
 
@@ -47,8 +50,26 @@ def _check_geofence(lat, lng):
     return any(_haversine_meters(lat, lng, o.latitude, o.longitude) <= o.radius_meters for o in offices)
 
 
+def _office_restriction_block(user_id, lat, lng, kind_label):
+    """If this person is restricted to punching from the office, returns a 403 response unless
+    the position sent is inside an active office. Unrestricted people (the default) and the
+    case where no office has been configured yet are never blocked."""
+    user = db.session.get(User, user_id)
+    if not user or not user.restrict_to_office:
+        return None
+    if not OfficeLocation.query.filter_by(is_active=True).first():
+        return None  # nothing to compare against — don't lock people out over a missing setup
+    if lat is None or lng is None:
+        return jsonify({"message": f"Your manager requires you to {kind_label} from the office. Turn on location (use the mobile app) and try again.",
+                        "office_restricted": True, "reason": "no_location"}), 403
+    if _check_geofence(lat, lng) is not True:
+        return jsonify({"message": f"You are not at the office. Your manager requires you to {kind_label} from an office location.",
+                        "office_restricted": True, "reason": "outside_office"}), 403
+    return None
+
+
 # ============================================================================
-# Office locations — the geofence centers Manager/HR Ops define
+# Office locations — the geofence centers the Super Admin defines
 # ============================================================================
 
 @bp.get("/office-locations")
@@ -65,8 +86,8 @@ def list_office_locations():
 @jwt_required()
 def create_office_location():
     claims = get_jwt()
-    if claims.get("role") not in CALENDAR_MANAGER_ROLES:
-        return jsonify({"message": "Only a manager or HR Operations can add an office location."}), 403
+    if claims.get("role") not in OFFICE_ADMIN_ROLES:
+        return jsonify({"message": "Only a Super Admin can add an office location."}), 403
     payload = request.get_json(silent=True) or {}
     try:
         lat, lng = float(payload["latitude"]), float(payload["longitude"])
@@ -87,8 +108,8 @@ def create_office_location():
 @jwt_required()
 def update_office_location(location_id):
     claims = get_jwt()
-    if claims.get("role") not in CALENDAR_MANAGER_ROLES:
-        return jsonify({"message": "Only a manager or HR Operations can edit an office location."}), 403
+    if claims.get("role") not in OFFICE_ADMIN_ROLES:
+        return jsonify({"message": "Only a Super Admin can edit an office location."}), 403
     loc = OfficeLocation.query.get_or_404(location_id)
     payload = request.get_json(silent=True) or {}
     if payload.get("name", "").strip():
@@ -111,8 +132,8 @@ def update_office_location(location_id):
 @jwt_required()
 def delete_office_location(location_id):
     claims = get_jwt()
-    if claims.get("role") not in CALENDAR_MANAGER_ROLES:
-        return jsonify({"message": "Only a manager or HR Operations can remove an office location."}), 403
+    if claims.get("role") not in OFFICE_ADMIN_ROLES:
+        return jsonify({"message": "Only a Super Admin can remove an office location."}), 403
     loc = OfficeLocation.query.get_or_404(location_id)
     db.session.delete(loc)
     db.session.commit()
@@ -257,6 +278,9 @@ def clock_in():
 
     is_reentry = bool(record and record.sessions)
     note, lat, lng, selfie_file, reason = _read_punch()
+    blocked = _office_restriction_block(user_id, lat, lng, "clock in")
+    if blocked:
+        return blocked
     if is_reentry:
         if len(record.sessions) >= MAX_SESSIONS_PER_DAY:
             return jsonify({"message": f"You can have at most {MAX_SESSIONS_PER_DAY} check-ins in a day. Please contact your manager."}), 400
@@ -311,6 +335,9 @@ def clock_out():
         return jsonify({"message": "You are not clocked in right now. If you clocked out by mistake, check in again."}), 400
 
     note, lat, lng, selfie_file, _reason = _read_punch()
+    blocked = _office_restriction_block(user_id, lat, lng, "clock out")
+    if blocked:
+        return blocked
     selfie_name, err = _selfie_check("clock out", selfie_file, user_id, today, "out")
     if err:
         return err
@@ -338,6 +365,7 @@ def today_status():
         {
             "record": record.to_dict() if record else None,
             "has_clock_in_out": claims.get("role") in ROLES_WITH_CLOCK_IN_OUT,
+            "restrict_to_office": bool((db.session.get(User, user_id) or User()).restrict_to_office),
         }
     )
 
@@ -370,7 +398,7 @@ def team_attendance():
     user_id = int(get_jwt_identity())
     target_date = request.args.get("date", date.today().isoformat())
 
-    if role in (HR_OPERATIONS, OPERATIONS):
+    if role in (HR_OPERATIONS, OPERATIONS, SUPER_ADMIN):
         user_ids = [u.id for u in User.query.filter_by(is_active=True).all()]
     elif role == MANAGER:
         user_ids = [u.id for u in User.query.filter_by(manager_id=user_id).all()]
@@ -392,7 +420,7 @@ def team_attendance():
 def regularize(record_id):
     """Manager / HR Operations approves a missed-punch regularization request."""
     claims = get_jwt()
-    if claims.get("role") not in (MANAGER, HR_OPERATIONS):
+    if claims.get("role") not in APPROVER_ROLES:
         return jsonify({"message": "You do not have permission to regularize attendance."}), 403
 
     record = Attendance.query.get_or_404(record_id)
@@ -502,7 +530,7 @@ def request_regularization():
     db.session.commit()
 
     requester = User.query.get(user_id)
-    notify_ids = [requester.manager_id] if requester.manager_id else [u.id for u in User.query.filter_by(role=HR_OPERATIONS, is_active=True).all()]
+    notify_ids = [requester.manager_id] if requester.manager_id else [u.id for u in User.query.filter(User.role.in_(FULL_ACCESS), User.is_active.is_(True)).all()]
     send_push(notify_ids, "New regularization request",
                f"{requester.full_name} requested {work_date.isoformat()} be regularized.",
                data={"type": "regularization_request", "record_id": record.id})
@@ -517,7 +545,7 @@ def _scoped_regularization_query(claims, user_id, status):
     else:
         query = query.filter(Attendance.regularization_status.isnot(None))
     role = claims.get("role")
-    if role == HR_OPERATIONS:
+    if role in FULL_ACCESS:
         return query
     if role == MANAGER:
         return query.filter(User.manager_id == user_id)
@@ -538,7 +566,7 @@ def list_regularization_requests():
 
 def _authorize_reviewer(claims, user_id, record):
     role = claims.get("role")
-    if role == HR_OPERATIONS:
+    if role in FULL_ACCESS:
         return True
     if role == MANAGER and record.user and record.user.manager_id == user_id:
         return True
@@ -722,7 +750,7 @@ def _viewer_scope(claims, viewer_id):
     """Who the viewer may look at: HR Ops / Operations -> everyone active; a Manager
     -> their direct reports; anyone else -> nobody (only themselves, handled separately)."""
     role = claims.get("role")
-    if role in (HR_OPERATIONS, OPERATIONS):
+    if role in (HR_OPERATIONS, OPERATIONS, SUPER_ADMIN):
         return {u.id for u in User.query.filter_by(is_active=True).all()}
     if role == MANAGER:
         return {u.id for u in User.query.filter_by(manager_id=viewer_id).all()}
@@ -735,9 +763,9 @@ def _can_view_user(claims, viewer_id, target_id):
 
 def _can_view_sensitive(claims, viewer_id, target):
     """Selfies and exact coordinates are for the person themselves, their manager and
-    HR Operations — deliberately NOT the wider Operations role."""
+    HR Operations / Super Admin — deliberately NOT the wider Operations role."""
     role = claims.get("role")
-    if target.id == viewer_id or role == HR_OPERATIONS:
+    if target.id == viewer_id or role in FULL_ACCESS:
         return True
     return role == MANAGER and target.manager_id == viewer_id
 
@@ -891,7 +919,8 @@ def _build_overview(claims, viewer_id, target_date):
 
         rec_dict = rec.to_dict() if rec else None
         rows.append({
-            "user": {"id": u.id, "full_name": u.full_name, "employee_code": u.employee_code, "role": u.role, "designation": u.designation},
+            "user": {"id": u.id, "full_name": u.full_name, "employee_code": u.employee_code, "role": u.role, "designation": u.designation,
+                     "restrict_to_office": bool(u.restrict_to_office)},
             "status": status, "record": (rec_dict if sensitive_ok or not rec_dict else _redact(rec_dict)),
             "clocked_in_now": clocked_in_now, "last_known_location": location, "outside_office": outside,
             "session_count": len(sessions), "reentry_count": len(reentries),
@@ -908,7 +937,7 @@ def team_overview():
     punched in — with status, times and last-known location (where they were at their
     most recent punch). The existing /team endpoint only lists people with a record."""
     claims, viewer_id = get_jwt(), int(get_jwt_identity())
-    if claims.get("role") not in (MANAGER, HR_OPERATIONS, OPERATIONS):
+    if claims.get("role") not in VIEWER_ROLES:
         return jsonify({"message": "You do not have permission to view team attendance."}), 403
     try:
         target_date = datetime.strptime(request.args.get("date", date.today().isoformat()), "%Y-%m-%d").date()
@@ -991,7 +1020,7 @@ def team_reentries():
     """Every time someone in the viewer's scope checked in AGAIN after checking out, with
     the reason they gave — the manager's exceptions report. Defaults to the last 7 days."""
     claims, viewer_id = get_jwt(), int(get_jwt_identity())
-    if claims.get("role") not in (MANAGER, HR_OPERATIONS, OPERATIONS):
+    if claims.get("role") not in VIEWER_ROLES:
         return jsonify({"message": "You do not have permission to view this report."}), 403
     rng, err = _parse_range()
     if err:
@@ -1281,3 +1310,30 @@ def manager_regularize_day():
               f"Your attendance for {work_date.isoformat()} was regularized ({reason.label}).",
               data={"type": "regularization_approved", "record_id": record.id})
     return jsonify(record.to_dict()), 201
+
+
+# ============================================================================
+# Office-only punching — a manager can require a person to clock in/out from the office
+# ============================================================================
+
+@bp.put("/team/<int:user_id>/office-restriction")
+@jwt_required()
+def set_office_restriction(user_id):
+    """Body: {restricted: bool}. A manager sets it for their direct reports, HR Operations / Super
+    Admin for anyone active. Nobody can change their own. The person is told by push."""
+    claims, actor_id = get_jwt(), int(get_jwt_identity())
+    target, err = _manager_target(claims, actor_id, user_id)
+    if err:
+        return err
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload.get("restricted"), bool):
+        return jsonify({"message": "restricted (true/false) is required."}), 400
+    target.restrict_to_office = payload["restricted"]
+    target.restrict_set_by, target.restrict_set_at = actor_id, datetime.utcnow()
+    db.session.commit()
+    actor = db.session.get(User, actor_id)
+    send_push(target.id, "Clock-in rule changed",
+              (f"{actor.full_name} now requires you to clock in and out from the office." if target.restrict_to_office
+               else f"{actor.full_name} removed the office-only rule for clock in/out."),
+              data={"type": "office_restriction", "restricted": target.restrict_to_office})
+    return jsonify({"user": target.to_dict(), "no_active_office": not OfficeLocation.query.filter_by(is_active=True).first()})

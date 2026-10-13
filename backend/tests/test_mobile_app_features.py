@@ -11,7 +11,7 @@ class TestConfig(Config):
 from app import create_app
 from app.extensions import db
 from app.models import User, Department, CompanySettings, Attendance, DeviceToken
-from app.roles import HR_OPERATIONS, HR_RECRUITER, MANAGER, EMPLOYEE
+from app.roles import SUPER_ADMIN,  HR_OPERATIONS, HR_RECRUITER, MANAGER, EMPLOYEE
 from datetime import date, timedelta
 
 app = create_app(TestConfig)
@@ -64,11 +64,14 @@ with app.app_context():
 
     # ---- 2. Office locations (geofence centers) --------------------------------------------
     ok("recruiter cannot add an office location", client.post('/api/attendance/office-locations', headers=H['rec1'], json={'name': 'HQ', 'latitude': 12.97, 'longitude': 77.59}).status_code == 403)
-    r = client.post('/api/attendance/office-locations', headers=H['admin'], json={'name': 'Bengaluru HQ', 'latitude': 12.9716, 'longitude': 77.5946, 'radius_meters': 150})
-    ok("HR Operations can add an office location", r.status_code == 201, r.get_json())
+    ok("HR Operations can NOT add an office location (Super Admin only)", client.post('/api/attendance/office-locations', headers=H['admin'], json={'name': 'Bengaluru HQ', 'latitude': 12.9716, 'longitude': 77.5946}).status_code == 403)
+    sadmin = mk("S1", "sa@t.com", "Sia Super", SUPER_ADMIN); db.session.commit()
+    H['sa'] = {'Authorization': 'Bearer ' + client.post('/api/auth/login', json={'email': 'sa@t.com', 'password': 'pw'}).get_json()['access_token']}
+    r = client.post('/api/attendance/office-locations', headers=H['sa'], json={'name': 'Bengaluru HQ', 'latitude': 12.9716, 'longitude': 77.5946, 'radius_meters': 150})
+    ok("Super Admin can add an office location", r.status_code == 201, r.get_json())
     office = r.get_json()
     ok("everyone (a recruiter) can list office locations", client.get('/api/attendance/office-locations', headers=H['rec1']).status_code == 200)
-    r = client.post('/api/attendance/office-locations', headers=H['admin'], json={'name': 'Bad', 'latitude': 'nope', 'longitude': 77.5}) 
+    r = client.post('/api/attendance/office-locations', headers=H['sa'], json={'name': 'Bad', 'latitude': 'nope', 'longitude': 77.5}) 
     ok("a non-numeric latitude is rejected", r.status_code == 400, r.get_json())
 
     # ---- 3. Geofencing is SOFT: clock-in always succeeds, just flagged -----------------------

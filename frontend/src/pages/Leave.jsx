@@ -7,7 +7,7 @@ import Loader from "../components/Loader";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
 
-const APPROVER_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS];
+const APPROVER_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.SUPER_ADMIN];
 
 export default function Leave() {
   const { user } = useAuth();

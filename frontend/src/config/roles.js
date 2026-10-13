@@ -6,6 +6,7 @@ export const ROLES = {
   OPERATIONS: "operations",
   HR_RECRUITER: "hr_recruiter",
   EMPLOYEE: "employee",
+  SUPER_ADMIN: "super_admin",
 };
 
 export const ROLE_LABELS = {
@@ -16,10 +17,12 @@ export const ROLE_LABELS = {
   [ROLES.OPERATIONS]: "Operations",
   [ROLES.HR_RECRUITER]: "HR Recruiter",
   [ROLES.EMPLOYEE]: "Employee",
+  [ROLES.SUPER_ADMIN]: "Super Admin",
 };
 
 // Which nav items each role sees. Every role gets Dashboard + Profile.
 export const NAV_BY_ROLE = {
+  [ROLES.SUPER_ADMIN]: ["dashboard", "employees", "attendance", "leave", "assets", "documents", "profile"],
   [ROLES.HR_OPERATIONS]: ["dashboard", "employees", "attendance", "leave", "payroll", "recruitment", "allCandidates", "recruiters", "vendors", "allPlacements", "announcements", "assets", "documents", "profile"],
   [ROLES.MANAGER]: ["dashboard", "attendance", "leave", "employees", "recruitment", "allCandidates", "recruiters", "vendors", "allPlacements", "documents", "profile"],
   [ROLES.FINANCE_ACCOUNTS]: ["dashboard", "attendance", "leave", "payroll", "allCandidates", "recruiters", "vendors", "allPlacements", "documents", "profile"],

@@ -13,13 +13,13 @@ from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 
 from app.extensions import db
 from app.models import Attendance, AttendanceSession, Holiday, LeaveRequest, User, AttendanceRegularizationReason
-from app.roles import MANAGER, HR_OPERATIONS, OPERATIONS
+from app.roles import MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN
 from app.utils.excel import fmt_time, fmt_datetime, xlsx_response
 from app.routes import attendance as att
 
 bp = Blueprint("exports", __name__, url_prefix="/api")
 
-VIEW_ROLES = (MANAGER, HR_OPERATIONS, OPERATIONS)
+VIEW_ROLES = (MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN)
 MAX_GRID_CELLS = 20000        # people x days in one team export
 MAX_TABLE_ROWS = 50000
 MAX_TABLE_COLS = 60

@@ -24,7 +24,7 @@ def list_documents():
     target_user_id = request.args.get("user_id", type=int) or actor_id
 
     if target_user_id != actor_id:
-        if claims.get("role") == HR_OPERATIONS:
+        if claims.get("role") in (HR_OPERATIONS, "super_admin"):
             pass
         elif claims.get("role") == MANAGER:
             target = User.query.get_or_404(target_user_id)

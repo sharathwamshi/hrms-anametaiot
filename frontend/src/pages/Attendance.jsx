@@ -9,14 +9,17 @@ import RegularizationReviewModal from "../components/RegularizationReviewModal";
 import AttendanceCalendar from "../components/AttendanceCalendar";
 import TeamOverviewPanel from "../components/TeamOverviewPanel";
 import ReentriesPanel from "../components/ReentriesPanel";
+import OfficeLocationsPanel from "../components/OfficeLocationsPanel";
+import OfficeRestrictionToggle from "../components/OfficeRestrictionToggle";
 import ExportButton from "../components/ExportButton";
 import { fmtTime, fmtHours, localDateStr, placeLabel } from "../utils/attendanceTime";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
 
-const TEAM_VIEW_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.OPERATIONS];
-const APPROVER_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS];
-const CALENDAR_MANAGER_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS];
+const TEAM_VIEW_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.OPERATIONS, ROLES.SUPER_ADMIN];
+const APPROVER_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.SUPER_ADMIN];
+const CALENDAR_MANAGER_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.SUPER_ADMIN];
+const OFFICE_ADMIN_ROLES = [ROLES.SUPER_ADMIN]; // only they define geofences
 const inputStyle = { border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" };
 
 function regStatusChip(status) {
@@ -225,6 +228,7 @@ export default function Attendance() {
         {canSeeTeam && tabBtn("reentries", "Re-entries")}
         {tabBtn("holidays", "Holidays")}
         {canManageCalendar && tabBtn("rules", "Regularization Rules")}
+        {tabBtn("offices", "Office Locations")}
       </div>
 
       {tab === "calendar" && (
@@ -299,6 +303,7 @@ export default function Attendance() {
             <button className="btn btn-sm btn-outline" onClick={() => setPerson(null)}>← Back to team</button>
           </div>
           {canApprove && <p className="muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>Click a day to see every check-in and where it happened — you can edit the times or regularize the day directly, no request needed.</p>}
+          {canApprove && person.id !== user.id && <OfficeRestrictionToggle key={person.id} person={person} onChanged={refresh} />}
           <AttendanceCalendar
             endpoint={`/attendance/team/${person.id}/calendar`} manager={canApprove} exportUserId={person.id}
             refreshKey={tick} onChanged={refresh}
@@ -343,6 +348,7 @@ export default function Attendance() {
       {tab === "reentries" && canSeeTeam && <ReentriesPanel />}
       {tab === "holidays" && <HolidaysPanel canManage={canManageCalendar} />}
       {tab === "rules" && canManageCalendar && <RulesPanel />}
+      {tab === "offices" && <OfficeLocationsPanel canManage={OFFICE_ADMIN_ROLES.includes(user.role)} />}
 
       {requestFor && (
         <RegularizeRequestModal

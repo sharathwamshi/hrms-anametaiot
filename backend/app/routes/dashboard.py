@@ -6,7 +6,7 @@ from app.extensions import db
 from app.models import (
     User, Attendance, LeaveRequest, JobPosting, Candidate, Payslip, Announcement,
 )
-from app.roles import MANAGER, HR_OPERATIONS, FINANCE_ACCOUNTS, OPERATIONS, HR_RECRUITER, EMPLOYEE, CONTRACT_EMPLOYEE
+from app.roles import SUPER_ADMIN, MANAGER, HR_OPERATIONS, FINANCE_ACCOUNTS, OPERATIONS, HR_RECRUITER, EMPLOYEE, CONTRACT_EMPLOYEE
 
 bp = Blueprint("dashboard", __name__, url_prefix="/api/dashboard")
 
@@ -21,7 +21,7 @@ def summary():
 
     data = {"role": role, "today": today.isoformat()}
 
-    if role == HR_OPERATIONS:
+    if role in (HR_OPERATIONS, SUPER_ADMIN):
         data["headcount"] = User.query.filter_by(is_active=True).count()
         data["present_today"] = Attendance.query.filter_by(work_date=today, status="present").count()
         data["pending_leave_requests"] = LeaveRequest.query.filter_by(status="pending").count()
@@ -120,7 +120,7 @@ def recruiter_performance(recruiter_id):
     from app.models import CandidateAuditLog, Candidate, User as UserModel
     claims = get_jwt()
     role = claims.get("role")
-    if role not in (MANAGER, HR_OPERATIONS):
+    if role not in (MANAGER, HR_OPERATIONS, SUPER_ADMIN):
         return jsonify({"message": "You do not have permission to view this."}), 403
 
     recruiter = UserModel.query.get_or_404(recruiter_id)

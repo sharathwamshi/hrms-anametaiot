@@ -15,7 +15,8 @@ const emptyForm = {
 
 export default function Employees() {
   const { user } = useAuth();
-  const isHrOps = user.role === ROLES.HR_OPERATIONS;
+  const isSuperAdmin = user.role === ROLES.SUPER_ADMIN;
+  const isHrOps = user.role === ROLES.HR_OPERATIONS || isSuperAdmin; // Super Admin has HR-Operations-level people admin
   const isManager = user.role === ROLES.MANAGER;
   const canOnboard = isHrOps || isManager;
   const [employees, setEmployees] = useState([]);
@@ -194,7 +195,7 @@ export default function Employees() {
                 <div className="form-field">
                   <label>Role</label>
                   <select required value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                    {Object.entries(ROLE_LABELS).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
+                    {Object.entries(ROLE_LABELS).filter(([val]) => val !== ROLES.SUPER_ADMIN || isSuperAdmin).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
                   </select>
                 </div>
                 <div className="form-field">

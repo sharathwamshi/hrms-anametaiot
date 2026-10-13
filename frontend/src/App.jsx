@@ -35,7 +35,7 @@ export default function App() {
       <Route
         path="/attendance"
         element={
-          <ProtectedRoute allow={[ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.FINANCE_ACCOUNTS, ROLES.OPERATIONS, ROLES.HR_RECRUITER, ROLES.EMPLOYEE]}>
+          <ProtectedRoute allow={[ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.FINANCE_ACCOUNTS, ROLES.OPERATIONS, ROLES.HR_RECRUITER, ROLES.EMPLOYEE, ROLES.SUPER_ADMIN]}>
             <Attendance />
           </ProtectedRoute>
         }
@@ -53,7 +53,7 @@ export default function App() {
       <Route
         path="/employees"
         element={
-          <ProtectedRoute allow={[ROLES.HR_OPERATIONS, ROLES.MANAGER, ROLES.OPERATIONS]}>
+          <ProtectedRoute allow={[ROLES.HR_OPERATIONS, ROLES.MANAGER, ROLES.OPERATIONS, ROLES.SUPER_ADMIN]}>
             <Employees />
           </ProtectedRoute>
         }
@@ -127,7 +127,7 @@ export default function App() {
       <Route
         path="/assets"
         element={
-          <ProtectedRoute allow={[ROLES.HR_OPERATIONS, ROLES.OPERATIONS]}>
+          <ProtectedRoute allow={[ROLES.HR_OPERATIONS, ROLES.OPERATIONS, ROLES.SUPER_ADMIN]}>
             <Assets />
           </ProtectedRoute>
         }

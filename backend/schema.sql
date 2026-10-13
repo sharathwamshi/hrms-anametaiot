@@ -44,6 +44,9 @@ CREATE TABLE users (
 	removed_at DATETIME, 
 	removed_by INTEGER, 
 	removal_reason VARCHAR(255), 
+	restrict_to_office BOOL NOT NULL DEFAULT 0, 
+	restrict_set_by INTEGER, 
+	restrict_set_at DATETIME, 
 	self_verify_rights BOOL, 
 	self_verify_granted_by INTEGER, 
 	revalidation_interval_days INTEGER, 
@@ -55,6 +58,7 @@ CREATE TABLE users (
 	FOREIGN KEY(department_id) REFERENCES departments (id), 
 	FOREIGN KEY(manager_id) REFERENCES users (id), 
 	FOREIGN KEY(removed_by) REFERENCES users (id), 
+	FOREIGN KEY(restrict_set_by) REFERENCES users (id), 
 	FOREIGN KEY(self_verify_granted_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 

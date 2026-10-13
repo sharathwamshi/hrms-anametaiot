@@ -5,7 +5,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from app.extensions import db
 from app.models import Announcement, Asset
 from app.utils.security import roles_required
-from app.roles import HR_OPERATIONS, OPERATIONS
+from app.roles import HR_OPERATIONS, OPERATIONS, SUPER_ADMIN
 
 bp = Blueprint("misc", __name__, url_prefix="/api")
 
@@ -40,14 +40,14 @@ def create_announcement():
 
 
 @bp.get("/assets")
-@roles_required(HR_OPERATIONS, OPERATIONS)
+@roles_required(HR_OPERATIONS, OPERATIONS, SUPER_ADMIN)
 def list_assets():
     rows = Asset.query.order_by(Asset.asset_tag).all()
     return jsonify([a.to_dict() for a in rows])
 
 
 @bp.post("/assets")
-@roles_required(HR_OPERATIONS, OPERATIONS)
+@roles_required(HR_OPERATIONS, OPERATIONS, SUPER_ADMIN)
 def create_asset():
     payload = request.get_json(silent=True) or {}
     if not payload.get("asset_tag"):
@@ -67,7 +67,7 @@ def create_asset():
 
 
 @bp.post("/assets/<int:asset_id>/assign")
-@roles_required(HR_OPERATIONS, OPERATIONS)
+@roles_required(HR_OPERATIONS, OPERATIONS, SUPER_ADMIN)
 def assign_asset(asset_id):
     asset = Asset.query.get_or_404(asset_id)
     payload = request.get_json(silent=True) or {}
@@ -80,7 +80,7 @@ def assign_asset(asset_id):
 
 
 @bp.post("/assets/<int:asset_id>/return")
-@roles_required(HR_OPERATIONS, OPERATIONS)
+@roles_required(HR_OPERATIONS, OPERATIONS, SUPER_ADMIN)
 def return_asset(asset_id):
     asset = Asset.query.get_or_404(asset_id)
     asset.returned_on = date.today()

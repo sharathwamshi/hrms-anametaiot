@@ -43,6 +43,11 @@ class User(db.Model):
     removed_at = db.Column(db.DateTime, nullable=True)
     removed_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     removal_reason = db.Column(db.String(255), nullable=True)
+    # When true, this person's clock-in/out is REFUSED unless their phone reports a position inside
+    # an active office geofence. Set by their manager (or HR Operations / Super Admin).
+    restrict_to_office = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text("0"))
+    restrict_set_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    restrict_set_at = db.Column(db.DateTime, nullable=True)
     remover = db.relationship("User", remote_side=[id], foreign_keys=[removed_by])
 
     # --- Recruiter-specific policy fields (meaningful only when role == hr_recruiter) ---
@@ -75,6 +80,7 @@ class User(db.Model):
             "date_of_joining": self.date_of_joining.isoformat() if self.date_of_joining else None,
             "avatar_url": self.avatar_url,
             "is_active": self.is_active,
+            "restrict_to_office": bool(self.restrict_to_office),
             "removed_at": self.removed_at.isoformat() + "Z" if self.removed_at else None,
             "removed_by": self.removed_by,
             "removed_by_name": self.remover.full_name if self.remover else None,
