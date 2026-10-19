@@ -1,5 +1,8 @@
 from app.models.user import User, Department
-from app.models.attendance import Attendance, AttendanceRegularizationReason, Holiday, OfficeLocation, DeviceToken, AttendanceSession
+from app.models.attendance import (
+    Attendance, AttendanceRegularizationReason, AttendanceRegularizationRequest,
+    Holiday, OfficeLocation, DeviceToken, AttendanceSession,
+)
 from app.models.leave import LeaveType, LeaveBalance, LeaveRequest
 from app.models.payroll import SalaryStructure, Payslip
 from app.models.payroll_template import SalaryTemplate
@@ -22,6 +25,7 @@ from app.models.misc import Announcement, Asset
 __all__ = [
     "User", "Department",
     "Attendance",
+    "AttendanceRegularizationRequest",
     "LeaveType", "LeaveBalance", "LeaveRequest",
     "SalaryStructure", "Payslip", "SalaryTemplate",
     "JobPosting", "Candidate", "Interview", "InterviewPanelist",

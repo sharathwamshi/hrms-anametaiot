@@ -28,11 +28,14 @@ Stack: **Flask (REST API) + React (Vite) + MySQL**.
 mysql -u root < backend/schema.sql
 ```
 
-This creates the `anametaiot_hrms` database and every table (24 total, including the
+This creates the `anametaiot_hrms` database and every table (25 total, including the
 recruiter/mock-test/screening tables below). The backend can also auto-create tables via
 `python seed.py` if you'd rather skip this step — `schema.sql` is auto-generated from the
 SQLAlchemy models via `python -c "from sqlalchemy.schema import CreateTable; ..."`, so it
 always matches what `db.create_all()` produces.
+
+For an existing database, run `mysql -u root anametaiot_hrms < backend/migration_attendance_regularization.sql`
+to add the regularization request history table and backfill this month's existing submissions.
 
 ## 2. Backend (Flask API)
 
@@ -124,8 +127,11 @@ right roles get 403'd, not just that the right roles succeed).
 **Backend** (`backend/`)
 - JWT auth with role claims + `roles_required()` RBAC decorator on every sensitive route
 - **Attendance** — clock in/out (blocked server-side for Contract Employee), daily/monthly
-  history, team view for Manager/HR Operations/Operations, regularization approval
-- **Leave** — leave types, balances, apply/approve/reject, auto balance deduction on approval
+  history, team view for Manager/HR Operations/Operations, regularization approval and a
+  maximum of five regularization requests per employee per month
+- **Leave** — apply from today or a future date on the attendance calendar (or Leave page),
+  track pending requests, and let Managers review their direct reports' requests from Profile;
+  approval automatically deducts the balance
 - **Employees** — directory, search; HR Operations can onboard/edit anyone, a **Manager can
   onboard and edit their own direct reports** (their `manager_id` is forced server-side —
   a Manager can never create or edit someone outside their own team)

@@ -2,7 +2,10 @@ import { useState } from "react";
 import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import { useAuth } from "../context/AuthContext";
-import { ROLE_LABELS } from "../config/roles";
+import { ROLE_LABELS, ROLES } from "../config/roles";
+import LeaveApprovalsPanel from "../components/LeaveApprovalsPanel";
+
+const APPROVER_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.SUPER_ADMIN];
 
 export default function Profile() {
   const { user, roleLabel } = useAuth();
@@ -58,6 +61,7 @@ export default function Profile() {
           </form>
         </div>
       </div>
+      {APPROVER_ROLES.includes(user.role) && <LeaveApprovalsPanel />}
     </AppLayout>
   );
 }

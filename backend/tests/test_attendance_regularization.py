@@ -8,9 +8,12 @@ class TestConfig(Config):
 
 from app import create_app
 from app.extensions import db
-from app.models import User, Department, CompanySettings, Attendance, SalaryStructure
+from app.models import (
+    User, Department, CompanySettings, Attendance, AttendanceRegularizationRequest,
+    SalaryStructure,
+)
 from app.roles import HR_OPERATIONS, HR_RECRUITER, MANAGER, EMPLOYEE, CONTRACT_EMPLOYEE
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 app = create_app(TestConfig)
 
@@ -75,6 +78,30 @@ with app.app_context():
     ok("request auto-creates the day's record as pending", req1['regularization_status'] == 'pending' and req1['regularization_reason_label'] == 'Forgot to clock in', req1)
     r = client.post('/api/attendance/regularize-request', headers=H['rec1'], json={'work_date': missed_day, 'reason_id': reason1['id']})
     ok("cannot submit a second request while one is pending", r.status_code == 409, r.get_json())
+    quota = client.get('/api/attendance/regularization-limit', headers=H['rec1']).get_json()
+    ok("first request leaves four of five monthly submissions", quota == {'limit': 5, 'used': 1, 'remaining': 4}, quota)
+
+    current_month_start = datetime(date.today().year, date.today().month, 1)
+    previous_month = current_month_start - timedelta(days=1)
+    db.session.add(AttendanceRegularizationRequest(
+        user_id=rec1.id,
+        attendance_id=req1['id'],
+        submitted_at=datetime(previous_month.year, previous_month.month, previous_month.day, 12),
+    ))
+    for _ in range(4):
+        db.session.add(AttendanceRegularizationRequest(
+            user_id=rec1.id,
+            attendance_id=req1['id'],
+            submitted_at=current_month_start.replace(hour=12),
+        ))
+    db.session.commit()
+    quota = client.get('/api/attendance/regularization-limit', headers=H['rec1']).get_json()
+    ok("monthly quota excludes the previous month and stops at zero", quota == {'limit': 5, 'used': 5, 'remaining': 0}, quota)
+    r = client.post('/api/attendance/regularize-request', headers=H['rec1'], json={
+        'work_date': date.today().isoformat(), 'reason_id': reason1['id'],
+    })
+    ok("a sixth monthly request is rejected with the limit message",
+       r.status_code == 429 and r.get_json()['message'] == "your limit is exceeded please contact your manager", r.get_json())
 
     future = (date.today() + timedelta(days=3)).isoformat()
     r = client.post('/api/attendance/regularize-request', headers=H['rec1'], json={'work_date': future, 'reason_id': reason1['id']})

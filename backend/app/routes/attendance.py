@@ -3,8 +3,9 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 from app.extensions import db
-from app.models import (Attendance, AttendanceSession, User, AttendanceRegularizationReason, Holiday,
-                        OfficeLocation, CompanySettings, LeaveRequest)
+from app.models import (Attendance, AttendanceSession, AttendanceRegularizationReason,
+                        AttendanceRegularizationRequest, User, Holiday, OfficeLocation,
+                        CompanySettings, LeaveRequest)
 from app.utils.push import send_push
 from math import radians, sin, cos, asin, sqrt
 from flask import current_app, send_from_directory
@@ -492,6 +493,38 @@ def update_regularization_reason(reason_id):
 # Self-service regularization: employee requests -> manager/HR Ops reviews
 # ============================================================================
 
+REGULARIZATION_MONTHLY_LIMIT = 5
+
+
+def _regularization_month_bounds(today=None):
+    today = today or datetime.utcnow().date()
+    start = datetime(today.year, today.month, 1)
+    end_year = today.year + 1 if today.month == 12 else today.year
+    end_month = 1 if today.month == 12 else today.month + 1
+    end = datetime(end_year, end_month, 1)
+    return start, end
+
+
+def _regularization_month_usage(user_id, today=None):
+    start, end = _regularization_month_bounds(today)
+    used = AttendanceRegularizationRequest.query.filter(
+        AttendanceRegularizationRequest.user_id == user_id,
+        AttendanceRegularizationRequest.submitted_at >= start,
+        AttendanceRegularizationRequest.submitted_at < end,
+    ).count()
+    return {
+        "limit": REGULARIZATION_MONTHLY_LIMIT,
+        "used": used,
+        "remaining": max(0, REGULARIZATION_MONTHLY_LIMIT - used),
+    }
+
+
+@bp.get("/regularization-limit")
+@jwt_required()
+def regularization_limit():
+    return jsonify(_regularization_month_usage(int(get_jwt_identity())))
+
+
 @bp.post("/regularize-request")
 @jwt_required()
 def request_regularization():
@@ -506,16 +539,26 @@ def request_regularization():
     if work_date > date.today():
         return jsonify({"message": "You cannot request regularization for a future date."}), 400
 
+    User.query.filter_by(id=user_id).with_for_update().first()
+
     reason_id = payload.get("reason_id")
     reason = AttendanceRegularizationReason.query.get(reason_id) if reason_id else None
     if not reason or not reason.is_active:
         return jsonify({"message": "Please pick a valid reason."}), 400
+
+    quota = _regularization_month_usage(user_id)
+    if quota["remaining"] == 0:
+        return jsonify({
+            "message": "your limit is exceeded please contact your manager",
+            **quota,
+        }), 429
 
     record = Attendance.query.filter_by(user_id=user_id, work_date=work_date).first()
     if record and record.regularization_status == "pending":
         return jsonify({"message": "There is already a pending request for this date."}), 409
     if record and record.is_regularized:
         return jsonify({"message": "This date has already been regularized."}), 400
+
     if not record:
         record = Attendance(user_id=user_id, work_date=work_date, status="absent")
         db.session.add(record)
@@ -527,6 +570,11 @@ def request_regularization():
     record.regularization_reviewed_by = None
     record.regularization_reviewed_at = None
     record.regularization_review_comment = None
+    db.session.flush()
+    db.session.add(AttendanceRegularizationRequest(
+        user_id=user_id,
+        attendance_id=record.id,
+    ))
     db.session.commit()
 
     requester = User.query.get(user_id)
@@ -795,12 +843,14 @@ def _calendar_payload(target, month, year, redact=False):
                .order_by(Attendance.work_date.asc()).all())
     holidays = Holiday.query.filter(Holiday.holiday_date >= first, Holiday.holiday_date <= last).order_by(Holiday.holiday_date.asc()).all()
     leaves = LeaveRequest.query.filter(
-        LeaveRequest.user_id == target.id, LeaveRequest.status == "approved",
+        LeaveRequest.user_id == target.id, LeaveRequest.status.in_(("pending", "approved")),
         LeaveRequest.start_date <= last, LeaveRequest.end_date >= first,
     ).all()
 
     leave_days = set()
     for lv in leaves:
+        if lv.status != "approved":
+            continue
         d = max(lv.start_date, first)
         while d <= min(lv.end_date, last):
             leave_days.add(d)
@@ -826,7 +876,8 @@ def _calendar_payload(target, month, year, redact=False):
         "records": rec_dicts,
         "holidays": [h.to_dict() for h in holidays],
         "leaves": [{"start_date": lv.start_date.isoformat(), "end_date": lv.end_date.isoformat(),
-                    "leave_type": lv.leave_type.name if lv.leave_type else None, "days": lv.days} for lv in leaves],
+                    "leave_type": lv.leave_type.name if lv.leave_type else None, "days": lv.days,
+                    "status": lv.status, "reason": lv.reason} for lv in leaves],
         "summary": summary,
     }
 

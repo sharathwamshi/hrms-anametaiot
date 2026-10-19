@@ -43,7 +43,8 @@ export default function AttendanceCalendar({ endpoint, manager = false, exportUs
     if (!data) return [];
     const byDate = Object.fromEntries(data.records.map((r) => [r.work_date, r]));
     const holidays = Object.fromEntries(data.holidays.map((h) => [h.holiday_date, h]));
-    const leaveFor = (ds) => data.leaves.find((l) => l.start_date <= ds && l.end_date >= ds);
+    const leaveFor = (ds) => data.leaves.find((l) => l.status === "approved" && l.start_date <= ds && l.end_date >= ds)
+      || data.leaves.find((l) => l.start_date <= ds && l.end_date >= ds);
     const first = new Date(year, month - 1, 1);
     const lead = (first.getDay() + 6) % 7; // Monday-first
     const days = new Date(year, month, 0).getDate();
@@ -57,7 +58,7 @@ export default function AttendanceCalendar({ endpoint, manager = false, exportUs
       const leave = leaveFor(ds);
       let cls = "";
       if (rec && (rec.clock_in || rec.status === "absent" || rec.status === "regularized")) cls = rec.status === "half_day" ? "half_day" : rec.status;
-      else if (leave) cls = "leave";
+      else if (leave) cls = leave.status === "pending" ? "leave-pending" : "leave";
       else if (holiday) cls = "holiday";
       else if (dow >= 5) cls = "weekend";
       out.push({ d, ds, rec, holiday, leave, cls, isToday: ds === today, future: ds > today });
@@ -115,7 +116,7 @@ export default function AttendanceCalendar({ endpoint, manager = false, exportUs
                 <span className="t">
                   {c.rec?.clock_in ? <>{fmtTime(c.rec.clock_in)}{c.rec.clock_out ? ` – ${fmtTime(c.rec.clock_out)}` : " – now"}<br />{fmtHours(c.rec.total_hours)}{c.rec.session_count > 1 ? ` · ${c.rec.session_count}×` : ""}</>
                     : c.holiday ? c.holiday.name
-                    : c.leave ? (c.leave.leave_type || "Leave")
+                    : c.leave ? `${c.leave.status === "pending" ? "Pending: " : ""}${c.leave.leave_type || "Leave"}`
                     : c.rec?.status === "absent" ? "Absent"
                     : c.rec?.status === "regularized" ? "Regularized" : ""}
                 </span>
@@ -128,12 +129,13 @@ export default function AttendanceCalendar({ endpoint, manager = false, exportUs
             <span><i style={{ background: "var(--color-warning-100)" }} />Half day</span>
             <span><i style={{ background: "var(--color-brand-orange-100)" }} />Regularized</span>
             <span><i style={{ background: "var(--color-brand-blue-50)" }} />Leave</span>
+            <span><i style={{ background: "#f1ecff" }} />Pending leave</span>
             <span><i style={{ background: "#fff7e0" }} />Holiday</span>
             <span><i style={{ background: "var(--color-danger-100)" }} />Absent</span>
             <span><i style={{ background: "var(--color-danger)", borderRadius: "50%" }} />Punched outside the office</span>
             <span><i style={{ background: "var(--color-warning)", borderRadius: "50%" }} />Regularization pending</span>
           </div>
-          <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Click any day for every check-in and check-out, the location of each punch and the reason for each re-entry.</p>
+          <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Click any day to view attendance details. On today or a future date, you can also apply for leave.</p>
         </>
       )}
 

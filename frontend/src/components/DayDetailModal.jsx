@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import client from "../api/client";
 import Badge from "./Badge";
 import RegularizeRequestModal from "./RegularizeRequestModal";
 import ManagerEditDayModal from "./ManagerEditDayModal";
 import ManagerRegularizeModal from "./ManagerRegularizeModal";
+import ApplyLeaveModal from "./ApplyLeaveModal";
 import { fmtTime, fmtHours, placeLabel, localDateStr } from "../utils/attendanceTime";
 import { mapsUrl } from "../utils/geo";
 import { parseUtc } from "../utils/datetime";
@@ -21,12 +23,25 @@ function Place({ within, lat, lng, label }) {
 /** Everything about one day: each check-in/out, where it happened, why, who corrected it — plus the actions. */
 export default function DayDetailModal({ day, person, manager, onClose, onChanged }) {
   const [sub, setSub] = useState(null); // 'request' | 'edit' | 'regularize'
+  const [regularizationQuota, setRegularizationQuota] = useState(null);
+  const [quotaError, setQuotaError] = useState("");
   const rec = day.rec;
   const sessions = rec?.sessions || [];
   const pastOrToday = day.ds <= localDateStr();
   const pretty = new Date(`${day.ds}T00:00:00`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const regularized = rec?.is_regularized || rec?.status === "regularized";
   const pending = rec?.regularization_status === "pending";
+
+  useEffect(() => {
+    if (manager) return undefined;
+    let cancelled = false;
+    client.get("/attendance/regularization-limit")
+      .then(({ data }) => { if (!cancelled) setRegularizationQuota(data); })
+      .catch((err) => {
+        if (!cancelled) setQuotaError(err?.response?.data?.message || "Could not load your regularization limit.");
+      });
+    return () => { cancelled = true; };
+  }, [manager]);
 
   if (sub === "request") {
     return <RegularizeRequestModal record={{ work_date: day.ds }} onClose={() => setSub(null)} onDone={onChanged} />;
@@ -36,6 +51,9 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
   }
   if (sub === "regularize") {
     return <ManagerRegularizeModal person={person} day={day} onClose={() => setSub(null)} onDone={onChanged} />;
+  }
+  if (sub === "leave") {
+    return <ApplyLeaveModal startDate={day.ds} onClose={() => setSub(null)} onDone={onChanged} />;
   }
 
   return (
@@ -50,7 +68,13 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
         </div>
 
         {day.holiday && <div className="att-chip amber" style={{ marginTop: 10 }}>Holiday — {day.holiday.name}</div>}
-        {day.leave && <div className="att-chip" style={{ marginTop: 10 }}>On approved leave{day.leave.leave_type ? ` — ${day.leave.leave_type}` : ""}</div>}
+        {day.leave && (
+          <div className="att-chip" style={{ marginTop: 10 }}>
+            {day.leave.status === "pending" ? "Leave request pending" : "On approved leave"}
+            {day.leave.leave_type ? ` — ${day.leave.leave_type}` : ""}
+            {day.leave.reason ? ` · ${day.leave.reason}` : ""}
+          </div>
+        )}
 
         {sessions.length === 0 ? (
           <p className="muted" style={{ margin: "16px 0", fontSize: 13.5 }}>No check-ins recorded for this day.</p>
@@ -101,7 +125,12 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
         <div className="form-actions" style={{ marginTop: 18, flexWrap: "wrap" }}>
           <button className="btn btn-outline" onClick={onClose}>Close</button>
           {!manager && pastOrToday && !regularized && !pending && !day.holiday && (
-            <button className="btn btn-primary" onClick={() => setSub("request")}>Request regularization</button>
+            <button className="btn btn-primary" onClick={() => setSub("request")}>
+              Request regularization{regularizationQuota ? ` (${regularizationQuota.remaining}/${regularizationQuota.limit} left)` : ""}
+            </button>
+          )}
+          {!manager && day.ds >= localDateStr() && !day.leave && !day.holiday && (
+            <button className="btn btn-primary" onClick={() => setSub("leave")}>Apply for leave</button>
           )}
           {manager && pastOrToday && !regularized && (
             <button className="btn btn-outline" onClick={() => setSub("regularize")}>Regularize…</button>
@@ -110,6 +139,9 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
             <button className="btn btn-primary" onClick={() => setSub("edit")}>Edit times</button>
           )}
         </div>
+        {quotaError && !manager && (
+          <p className="login-error" style={{ marginTop: 8, marginBottom: 0 }}>{quotaError}</p>
+        )}
       </div>
     </div>
   );

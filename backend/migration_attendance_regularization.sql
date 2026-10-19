@@ -45,6 +45,8 @@ SET @sql = (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `attendance` ADD COLUMN `regula
   FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'attendance' AND COLUMN_NAME = 'regularization_note');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+
+
 -- attendance.regularization_requested_at
 SET @sql = (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `attendance` ADD COLUMN `regularization_requested_at` DATETIME NULL', 'SELECT 1')
   FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'attendance' AND COLUMN_NAME = 'regularization_requested_at');
@@ -74,3 +76,26 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `attendance` ADD CONSTRAINT `fk_attendance_reviewed_by` FOREIGN KEY (`regularization_reviewed_by`) REFERENCES `users` (`id`)', 'SELECT 1')
   FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'attendance' AND CONSTRAINT_NAME = 'fk_attendance_reviewed_by');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- Track every submission so rejected requests and re-submissions count toward
+-- the monthly limit. Existing submissions in the current month are backfilled.
+CREATE TABLE IF NOT EXISTS attendance_regularization_requests (
+    id INTEGER NOT NULL AUTO_INCREMENT,
+    user_id INTEGER NOT NULL,
+    attendance_id INTEGER NOT NULL,
+    submitted_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    INDEX ix_regularization_request_user_submitted (user_id, submitted_at),
+    FOREIGN KEY (user_id) REFERENCES users (id),
+    FOREIGN KEY (attendance_id) REFERENCES attendance (id)
+) ENGINE=InnoDB;
+
+INSERT INTO attendance_regularization_requests (user_id, attendance_id, submitted_at)
+SELECT a.user_id, a.id, a.regularization_requested_at
+FROM attendance a
+WHERE a.regularization_requested_at >= DATE_FORMAT(CURRENT_DATE(), '%Y-%m-01')
+  AND a.regularization_requested_at < DATE_ADD(DATE_FORMAT(CURRENT_DATE(), '%Y-%m-01'), INTERVAL 1 MONTH)
+  AND NOT EXISTS (
+      SELECT 1 FROM attendance_regularization_requests r
+      WHERE r.attendance_id = a.id AND r.submitted_at = a.regularization_requested_at
+  );

@@ -209,6 +209,18 @@ class AttendanceRegularizationReason(db.Model):
         }
 
 
+class AttendanceRegularizationRequest(db.Model):
+    __tablename__ = "attendance_regularization_requests"
+    __table_args__ = (
+        db.Index("ix_regularization_request_user_submitted", "user_id", "submitted_at"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    attendance_id = db.Column(db.Integer, db.ForeignKey("attendance.id"), nullable=False)
+    submitted_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
 class Holiday(db.Model):
     """The organization's holiday calendar — set by Manager/HR Ops, visible to everyone."""
     __tablename__ = "holidays"
