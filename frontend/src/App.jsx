@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -24,6 +25,22 @@ import { ROLES } from "./config/roles";
 
 export default function App() {
   const { loading } = useAuth();
+
+  useEffect(() => {
+    const dismissTopmostModal = (event) => {
+      if (event.key !== "Escape") return;
+      const overlays = document.querySelectorAll(".modal-overlay");
+      const topmostOverlay = overlays[overlays.length - 1];
+      if (!topmostOverlay) return;
+      event.preventDefault();
+      event.stopPropagation();
+      topmostOverlay.click();
+    };
+
+    document.addEventListener("keydown", dismissTopmostModal, true);
+    return () => document.removeEventListener("keydown", dismissTopmostModal, true);
+  }, []);
+
   if (loading) return <Loader label="Loading AnametaIOT HRMS..." />;
 
   return (

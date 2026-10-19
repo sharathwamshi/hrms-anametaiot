@@ -46,6 +46,10 @@ export default function Leave() {
   const submitLeave = async (e) => {
     e.preventDefault();
     setError("");
+    if (form.end_date < form.start_date) {
+      setError("End date cannot be before start date.");
+      return;
+    }
     try {
       await client.post("/leave/apply", form);
       setShowForm(false);
@@ -54,6 +58,24 @@ export default function Leave() {
     } catch (err) {
       setError(err?.response?.data?.message || "Could not submit leave request.");
     }
+  };
+
+  const updateStartDate = (startDate) => {
+    setForm((current) => ({
+      ...current,
+      start_date: startDate,
+      end_date: current.end_date && current.end_date < startDate ? "" : current.end_date,
+    }));
+    setError("");
+  };
+
+  const updateEndDate = (endDate) => {
+    if (endDate < form.start_date) {
+      setError("End date cannot be before start date.");
+      return;
+    }
+    setForm((current) => ({ ...current, end_date: endDate }));
+    setError("");
   };
 
   const decide = async (id, decision) => {
@@ -157,11 +179,11 @@ export default function Leave() {
               <div className="form-grid">
                 <div className="form-field">
                   <label>Start Date</label>
-                  <input type="date" required value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
+                  <input type="date" required value={form.start_date} onChange={(e) => updateStartDate(e.target.value)} />
                 </div>
                 <div className="form-field">
                   <label>End Date</label>
-                  <input type="date" required value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
+                  <input type="date" required disabled={!form.start_date} min={form.start_date || undefined} value={form.end_date} onChange={(e) => updateEndDate(e.target.value)} />
                 </div>
               </div>
               <div className="form-field">
