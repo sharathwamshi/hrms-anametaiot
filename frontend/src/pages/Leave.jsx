@@ -6,6 +6,7 @@ import Badge from "../components/Badge";
 import Loader from "../components/Loader";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
+import { localDateStr } from "../utils/attendanceTime";
 
 const APPROVER_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.SUPER_ADMIN];
 
@@ -157,16 +158,16 @@ export default function Leave() {
               <div className="form-grid">
                 <div className="form-field">
                   <label>Start Date</label>
-                  <input type="date" required value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
+                  <input type="date" required min={localDateStr()} value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value, end_date: form.end_date < e.target.value ? e.target.value : form.end_date })} />
                 </div>
                 <div className="form-field">
                   <label>End Date</label>
-                  <input type="date" required value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
+                  <input type="date" required min={form.start_date || localDateStr()} value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
                 </div>
               </div>
               <div className="form-field">
                 <label>Reason</label>
-                <textarea rows={3} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+                <textarea rows={3} maxLength={500} required value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>

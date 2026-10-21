@@ -32,16 +32,39 @@ def apply_leave():
     if claims.get("role") == CONTRACT_EMPLOYEE:
         return jsonify({"message": "Contract Employees manage their documents and payroll only — leave isn't part of this engagement type."}), 403
     payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"message": "A valid leave request is required."}), 400
 
     try:
         start = datetime.strptime(payload["start_date"], "%Y-%m-%d").date()
         end = datetime.strptime(payload["end_date"], "%Y-%m-%d").date()
         leave_type_id = int(payload["leave_type_id"])
-    except (KeyError, ValueError):
+    except (KeyError, TypeError, ValueError):
         return jsonify({"message": "start_date, end_date and leave_type_id are required."}), 400
 
     if end < start:
         return jsonify({"message": "End date cannot be before start date."}), 400
+    if start < date.today():
+        return jsonify({"message": "Leave can only be requested for today or a future date."}), 400
+
+    reason = payload.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        return jsonify({"message": "A reason is required."}), 400
+    if len(reason.strip()) > 500:
+        return jsonify({"message": "Reason cannot exceed 500 characters."}), 400
+
+    leave_type = LeaveType.query.get(leave_type_id)
+    if not leave_type:
+        return jsonify({"message": "The selected leave type is invalid."}), 400
+
+    overlap = LeaveRequest.query.filter(
+        LeaveRequest.user_id == user_id,
+        LeaveRequest.status.in_(("pending", "approved")),
+        LeaveRequest.start_date <= end,
+        LeaveRequest.end_date >= start,
+    ).first()
+    if overlap:
+        return jsonify({"message": "You already have a pending or approved leave request for part of this date range."}), 409
 
     days = (end - start).days + 1
 
@@ -57,7 +80,7 @@ def apply_leave():
         start_date=start,
         end_date=end,
         days=days,
-        reason=payload.get("reason", ""),
+        reason=reason.strip(),
         status="pending",
     )
     db.session.add(leave_request)
@@ -107,11 +130,17 @@ def decide(request_id):
         return jsonify({"message": "You do not have permission to approve or reject leave."}), 403
 
     leave_request = LeaveRequest.query.get_or_404(request_id)
+    if role == MANAGER and leave_request.user.manager_id != reviewer_id:
+        return jsonify({"message": "You can only review leave requests from your direct reports."}), 403
     payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"message": "A valid decision is required."}), 400
     decision = payload.get("decision")  # "approved" | "rejected"
 
     if decision not in ("approved", "rejected"):
         return jsonify({"message": "decision must be 'approved' or 'rejected'."}), 400
+    if leave_request.status != "pending":
+        return jsonify({"message": "This leave request has already been reviewed."}), 409
 
     leave_request.status = decision
     leave_request.reviewed_by = reviewer_id

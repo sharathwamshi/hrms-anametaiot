@@ -323,6 +323,17 @@ CREATE TABLE attendance (
 	FOREIGN KEY(edited_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE attendance_regularization_requests (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	user_id INTEGER NOT NULL,
+	attendance_id INTEGER NOT NULL,
+	submitted_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	INDEX ix_regularization_request_user_submitted (user_id, submitted_at),
+	FOREIGN KEY(user_id) REFERENCES users (id),
+	FOREIGN KEY(attendance_id) REFERENCES attendance (id)
+) ENGINE=InnoDB;
+
 CREATE TABLE job_postings (
 	id INTEGER NOT NULL AUTO_INCREMENT, 
 	title VARCHAR(150) NOT NULL, 

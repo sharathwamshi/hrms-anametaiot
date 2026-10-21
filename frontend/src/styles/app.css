@@ -834,6 +834,7 @@ table.data-table {
 .att-day.absent { background: var(--color-danger-100); border-color: #f6c1bc; }
 .att-day.regularized { background: var(--color-brand-orange-100); border-color: #f7cfae; }
 .att-day.leave { background: var(--color-brand-blue-50); border-color: #cfe0fb; }
+.att-day.leave-pending { background: #f1ecff; border-color: #c9b8f5; }
 .att-day.holiday { background: #fff7e0; border-color: #f1dc9b; }
 .att-day.weekend { background: #f7f7fa; color: #98a2b3; }
 .att-day.future { opacity: .55; }
