@@ -38,10 +38,6 @@ def _place(within, has_coords=True):
     return "Location not captured" if not has_coords else "No office set"
 
 
-def _photo(has):
-    return "Photo sent" if has else "No photo"
-
-
 def _day_name(d):
     return d.strftime("%a")
 
@@ -78,14 +74,12 @@ DAY_HEADERS = ["Date", "Day", "Employee code", "Employee", "Designation", "Statu
                "Regularization", "Regularization reason", "Regularization note", "Reviewed by", "Review comment",
                "Corrected by manager", "Correction note", "Holiday / leave"]
 SESSION_HEADERS_FULL = ["Date", "Employee code", "Employee", "Check-in #", "Check-in time", "Check-in location",
-                        "Check-in latitude", "Check-in longitude", "Check-in photo", "Check-out time", "Check-out location",
-                        "Check-out latitude", "Check-out longitude", "Check-out photo", "Hours", "Gap before (min)",
+                        "Check-out time", "Check-out location", "Hours", "Gap before (min)",
                         "Re-entry reason", "Check-in note", "Check-out note"]
 
 
-def _build_people_sheets(users, first, last, redact_fn, note):
-    """Daily summary + per-check-in detail for `users` over [first, last].
-    redact_fn(user) -> True when the viewer may NOT see coordinates / photo flags."""
+def _build_people_sheets(users, first, last, note):
+    """Daily summary + per-check-in detail for `users` over [first, last]."""
     ids = [u.id for u in users] or [0]
     recs = {}
     for r in Attendance.query.filter(Attendance.user_id.in_(ids), Attendance.work_date >= first, Attendance.work_date <= last).all():
@@ -102,7 +96,6 @@ def _build_people_sheets(users, first, last, redact_fn, note):
     today = date.today()
     day_rows, session_rows = [], []
     for u in users:
-        redact = redact_fn(u)
         for d in _daterange(first, last):
             rec = recs.get((u.id, d))
             leave = leave_by_user.get(u.id, {}).get(d)
@@ -146,19 +139,13 @@ def _build_people_sheets(users, first, last, redact_fn, note):
                 gap = ""
                 if prev is not None and prev.clock_out:
                     gap = max(0, round((s.clock_in - prev.clock_out).total_seconds() / 60))
-                has_in = bool(s.clock_in_lat is not None)
-                has_out = bool(s.clock_out_lat is not None)
+                has_in = s.clock_in_lat is not None
+                has_out = s.clock_out_lat is not None
                 session_rows.append([
                     d, u.employee_code, u.full_name, s.session_no,
                     fmt_time(s.clock_in), _place(s.clock_in_within_geofence, has_in),
-                    "—" if redact else (s.clock_in_lat if s.clock_in_lat is not None else ""),
-                    "—" if redact else (s.clock_in_lng if s.clock_in_lng is not None else ""),
-                    "—" if redact else _photo(bool(s.clock_in_selfie)),
                     fmt_time(s.clock_out) if s.clock_out else "Still clocked in",
                     _place(s.clock_out_within_geofence, has_out) if s.clock_out else "",
-                    "—" if redact else (s.clock_out_lat if s.clock_out_lat is not None else ""),
-                    "—" if redact else (s.clock_out_lng if s.clock_out_lng is not None else ""),
-                    "—" if redact else (_photo(bool(s.clock_out_selfie)) if s.clock_out else ""),
                     s.duration_hours() if s.clock_out else "", gap, s.reentry_reason or "",
                     s.clock_in_note or "", s.clock_out_note or "",
                 ])
@@ -209,7 +196,7 @@ def export_my_attendance():
     first, last = rng
     me = db.session.get(User, int(get_jwt_identity()))
     note = f"Attendance history — {me.full_name} ({me.employee_code}) — {first.strftime('%d-%b-%Y')} to {last.strftime('%d-%b-%Y')}"
-    sheets = _build_people_sheets([me], first, last, lambda u: False, note)
+    sheets = _build_people_sheets([me], first, last, note)
     sheets.insert(0, _summary_sheet([me], first, last, sheets[0]))
     return xlsx_response(sheets, f"My_Attendance_{first.isoformat()}_to_{last.isoformat()}")
 
@@ -252,7 +239,7 @@ def export_team_attendance():
     if len(users) * days > MAX_GRID_CELLS:
         return jsonify({"message": f"That is too much in one file ({len(users)} people x {days} days). Please choose a shorter range."}), 400
     note = f"Team attendance — {first.strftime('%d-%b-%Y')} to {last.strftime('%d-%b-%Y')} — {len(users)} people"
-    sheets = _build_people_sheets(users, first, last, lambda u: not att._can_view_sensitive(claims, viewer_id, u), note)
+    sheets = _build_people_sheets(users, first, last, note)
     sheets.insert(0, _summary_sheet(users, first, last, sheets[0]))
     return xlsx_response(sheets, f"Team_Attendance_{first.isoformat()}_to_{last.isoformat()}")
 

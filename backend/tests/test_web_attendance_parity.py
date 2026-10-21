@@ -1,6 +1,7 @@
 import io
 import sys
 import tempfile
+from calendar import monthrange
 sys.path.insert(0, '.')
 
 from config import Config
@@ -206,13 +207,17 @@ with app.app_context():
     sheets = xl(r)
     ok("the workbook has Summary, Daily summary and Check-in details", list(sheets) == ['Summary', 'Daily summary', 'Check-in details'], list(sheets))
     hdr, rows = table(sheets['Check-in details'])
-    ok("check-in details have in/out-of-office and photo columns", {"Check-in location", "Check-out location", "Check-in photo", "Check-out photo", "Check-in latitude"} <= set(hdr), hdr)
+    removed_headers = {
+        "Check-in latitude", "Check-in longitude", "Check-in photo",
+        "Check-out latitude", "Check-out longitude", "Check-out photo",
+    }
+    ok("check-in details omit latitude, longitude and photo columns", removed_headers.isdisjoint(hdr), hdr)
+    ok("check-in details retain times and office locations", {"Check-in time", "Check-in location", "Check-out time", "Check-out location"} <= set(hdr), hdr)
     ix = {h: i for i, h in enumerate(hdr)}
     todays = [x for x in rows if x[0] is not None and str(x[0])[:10] == TODAY.isoformat()]
     ok("today's two sessions are listed", len(todays) == 2, todays)
     ok("a flagged punch reads 'Out of office'", any(x[ix['Check-out location']] == 'Out of office' for x in todays), todays)
     ok("an in-radius punch reads 'In office'", todays[0][ix['Check-in location']] == 'In office', todays)
-    ok("the photo itself is never included — only whether one was sent", all(x[ix['Check-in photo']] in ('No photo', 'Photo sent') for x in todays))
     ok("re-entry reason is exported", any(x[ix['Re-entry reason']] for x in todays))
     hdr2, rows2 = table(sheets['Daily summary'])
     ix2 = {h: i for i, h in enumerate(hdr2)}
@@ -226,7 +231,21 @@ with app.app_context():
     r = c.get('/api/attendance/export/my?from=2020-01-01&to=2023-01-01', headers=H['r1'])
     ok("a range over a year is refused", r.status_code == 400)
     ok("a reversed range is refused", c.get('/api/attendance/export/my?from=2026-02-02&to=2026-01-01', headers=H['r1']).status_code == 400)
-    ok("month/year form works", c.get(f'/api/attendance/export/my?month={TODAY.month}&year={TODAY.year}', headers=H['r1']).status_code == 200)
+    month_export = c.get(f'/api/attendance/export/my?month={TODAY.month}&year={TODAY.year}', headers=H['r1'])
+    ok("month/year export works", month_export.status_code == 200)
+    month_rows = table(xl(month_export)['Daily summary'])[1]
+    exported_dates = [x[0] for x in month_rows if x[0] is not None]
+    ok("month export includes only dates from the selected month", len(exported_dates) == monthrange(TODAY.year, TODAY.month)[1]
+       and all(str(d)[:7] == TODAY.strftime("%Y-%m") for d in exported_dates), exported_dates[:3])
+    single_day_export = c.get(
+        f'/api/attendance/export/my?from={TODAY.isoformat()}&to={TODAY.isoformat()}',
+        headers=H['r1'],
+    )
+    single_day_rows = table(xl(single_day_export)['Daily summary'])[1]
+    single_day_dates = [x[0] for x in single_day_rows if x[0] is not None]
+    ok("a single selected date exports only that day's details",
+       single_day_export.status_code == 200 and len(single_day_dates) == 1
+       and str(single_day_dates[0])[:10] == TODAY.isoformat(), single_day_dates)
     ok("exports need a login", c.get('/api/attendance/export/my').status_code == 401)
     # formula injection
     c.post('/api/attendance/clock-out', headers=H['r2'], json={})
@@ -244,7 +263,7 @@ with app.app_context():
     names = {x[hdr.index('Employee')] for x in rows if x[0] is not None}
     ok("manager's file has ONLY their own reports (no strangers, no contract staff)", names == {"Sneha Recruiter", "Meera Recruiter"}, names)
     hs, rs = table(sheets['Check-in details'])
-    ok("manager sees coordinates and photo flags", any(x[hs.index('Check-in latitude')] not in ("—", "", None) for x in rs if x[0]))
+    ok("manager export also omits latitude, longitude and photo columns", removed_headers.isdisjoint(hs), hs)
     ok("one person via user_id", c.get(f'/api/attendance/export/team?user_id={ids["r1"]}&from={D3.isoformat()}&to={TODAY.isoformat()}', headers=H['mgr']).status_code == 200)
     ok("a person outside the manager's scope is refused", c.get(f'/api/attendance/export/team?user_id={ids["r4"]}', headers=H['mgr']).status_code == 403)
     ok("an employee cannot export team attendance", c.get('/api/attendance/export/team', headers=H['r1']).status_code == 403)
@@ -255,7 +274,7 @@ with app.app_context():
     r = c.get(f'/api/attendance/export/team?from={D3.isoformat()}&to={TODAY.isoformat()}', headers=H['ops'])
     sh = xl(r); hs, rs = table(sh['Check-in details'])
     real = [x for x in rs if x[0]]
-    ok("Operations' file hides coordinates and photo flags (same as the screens)", real and all(x[hs.index('Check-in latitude')] == "—" and x[hs.index('Check-in photo')] == "—" for x in real), real[:1])
+    ok("Operations export omits latitude, longitude and photo columns", removed_headers.isdisjoint(hs), hs)
     ok("…but still shows times and in/out of office", all(x[hs.index('Check-in time')] for x in real))
     r = c.get(f'/api/attendance/export/team-day?date={TODAY.isoformat()}', headers=H['mgr'])
     hdr, rows = table(xl(r)['Team today'])
