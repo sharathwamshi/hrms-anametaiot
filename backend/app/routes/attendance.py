@@ -846,10 +846,6 @@ def _calendar_payload(target, month, year, redact=False):
         LeaveRequest.user_id == target.id, LeaveRequest.status.in_(("pending", "approved")),
         LeaveRequest.start_date <= last, LeaveRequest.end_date >= first,
     ).all()
-    leave_requests = LeaveRequest.query.filter(
-        LeaveRequest.user_id == target.id,
-        LeaveRequest.start_date <= last, LeaveRequest.end_date >= first,
-    ).order_by(LeaveRequest.created_at.desc()).all()
 
     leave_days = set()
     for lv in leaves:
@@ -879,26 +875,9 @@ def _calendar_payload(target, month, year, redact=False):
         "month": month, "year": year,
         "records": rec_dicts,
         "holidays": [h.to_dict() for h in holidays],
-        "leaves": [
-            {
-                "start_date": lv.start_date.isoformat(),
-                "end_date": lv.end_date.isoformat(),
-                "leave_type": lv.leave_type.name if lv.leave_type else None,
-                "days": lv.days,
-                "status": lv.status,
-                "reason": lv.reason,
-            }
-            for lv in leaves
-        ],
-        "leave_requests": [
-            {
-                "start_date": lv.start_date.isoformat(),
-                "end_date": lv.end_date.isoformat(),
-                "leave_type": lv.leave_type.name if lv.leave_type else None,
-                "status": lv.status,
-            }
-            for lv in leave_requests
-        ],
+        "leaves": [{"start_date": lv.start_date.isoformat(), "end_date": lv.end_date.isoformat(),
+                    "leave_type": lv.leave_type.name if lv.leave_type else None, "days": lv.days,
+                    "status": lv.status, "reason": lv.reason} for lv in leaves],
         "summary": summary,
     }
 

@@ -18,7 +18,6 @@ export default function Leave() {
   const [approvals, setApprovals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [editingRequestId, setEditingRequestId] = useState(null);
   const [form, setForm] = useState({ leave_type_id: "", start_date: "", end_date: "", reason: "" });
   const [error, setError] = useState("");
   const isApprover = APPROVER_ROLES.includes(user.role);
@@ -49,13 +48,8 @@ export default function Leave() {
     e.preventDefault();
     setError("");
     try {
-      if (editingRequestId) {
-        await client.put(`/leave/${editingRequestId}`, form);
-      } else {
-        await client.post("/leave/apply", form);
-      }
+      await client.post("/leave/apply", form);
       setShowForm(false);
-      setEditingRequestId(null);
       setForm({ leave_type_id: "", start_date: "", end_date: "", reason: "" });
       loadAll();
     } catch (err) {
@@ -63,39 +57,10 @@ export default function Leave() {
     }
   };
 
-  const editRequest = (request) => {
-    setEditingRequestId(request.id);
-    setForm({
-      leave_type_id: String(request.leave_type_id),
-      start_date: request.start_date,
-      end_date: request.end_date,
-      reason: request.reason || "",
-    });
-    setError("");
-    setShowForm(true);
-  };
-
-  const closeForm = () => {
-    setShowForm(false);
-    setEditingRequestId(null);
-    setForm({ leave_type_id: "", start_date: "", end_date: "", reason: "" });
-    setError("");
-  };
-
   const decide = async (id, decision) => {
     const comment = window.prompt(`Comment for this ${decision} decision (optional):`) || "";
     await client.post(`/leave/${id}/decision`, { decision, comment });
     loadAll();
-  };
-
-  const cancelRequest = async (request) => {
-    if (!window.confirm("Cancel this leave request?")) return;
-    try {
-      await client.post(`/leave/${request.id}/cancel`);
-      await loadAll();
-    } catch (err) {
-      window.alert(err?.response?.data?.message || "Could not cancel leave request.");
-    }
   };
 
   if (loading) return <AppLayout title="Leave"><Loader /></AppLayout>;
@@ -122,11 +87,11 @@ export default function Leave() {
         <div className="table-wrap">
           <table className="data-table">
             <thead>
-              <tr><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Reviewer</th><th>Action</th></tr>
+              <tr><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Reviewer</th></tr>
             </thead>
             <tbody>
               {myRequests.length === 0 && (
-                <tr className="empty-row"><td colSpan={7}>No leave requests yet.</td></tr>
+                <tr className="empty-row"><td colSpan={6}>No leave requests yet.</td></tr>
               )}
               {myRequests.map((r) => (
                 <tr key={r.id}>
@@ -136,12 +101,6 @@ export default function Leave() {
                   <td>{r.days}</td>
                   <td><Badge status={r.status} /></td>
                   <td>{r.reviewer_name || "—"}</td>
-                  <td>{r.status === "pending" && user.role !== ROLES.CONTRACT_EMPLOYEE && (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn-sm btn-outline" onClick={() => editRequest(r)}>Edit</button>
-                      <button className="btn btn-sm btn-danger" onClick={() => cancelRequest(r)}>Cancel</button>
-                    </div>
-                  )}</td>
                 </tr>
               ))}
             </tbody>
@@ -184,9 +143,9 @@ export default function Leave() {
       )}
 
       {showForm && (
-        <div className="modal-overlay" onClick={closeForm}>
+        <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginBottom: 16 }}>{editingRequestId ? "Edit Leave Request" : "Apply for Leave"}</h3>
+            <h3 style={{ marginBottom: 16 }}>Apply for Leave</h3>
             {error && <div className="login-error">{error}</div>}
             <form onSubmit={submitLeave}>
               <div className="form-field">
@@ -211,8 +170,8 @@ export default function Leave() {
                 <textarea rows={3} maxLength={500} required value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button type="button" className="btn btn-outline" onClick={closeForm}>Cancel</button>
-                <button type="submit" className="btn btn-primary">{editingRequestId ? "Save Changes" : "Submit Request"}</button>
+                <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary">Submit Request</button>
               </div>
             </form>
           </div>
