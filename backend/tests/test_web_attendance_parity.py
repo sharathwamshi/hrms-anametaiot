@@ -207,17 +207,21 @@ with app.app_context():
     sheets = xl(r)
     ok("the workbook has Summary, Daily summary and Check-in details", list(sheets) == ['Summary', 'Daily summary', 'Check-in details'], list(sheets))
     hdr, rows = table(sheets['Check-in details'])
-    removed_headers = {
+    location_photo_headers = {
         "Check-in latitude", "Check-in longitude", "Check-in photo",
         "Check-out latitude", "Check-out longitude", "Check-out photo",
     }
-    ok("check-in details omit latitude, longitude and photo columns", removed_headers.isdisjoint(hdr), hdr)
+    ok("check-in details include latitude, longitude and photo columns", location_photo_headers <= set(hdr), hdr)
     ok("check-in details retain times and office locations", {"Check-in time", "Check-in location", "Check-out time", "Check-out location"} <= set(hdr), hdr)
     ix = {h: i for i, h in enumerate(hdr)}
     todays = [x for x in rows if x[0] is not None and str(x[0])[:10] == TODAY.isoformat()]
     ok("today's two sessions are listed", len(todays) == 2, todays)
     ok("a flagged punch reads 'Out of office'", any(x[ix['Check-out location']] == 'Out of office' for x in todays), todays)
     ok("an in-radius punch reads 'In office'", todays[0][ix['Check-in location']] == 'In office', todays)
+    ok("the employee's own export includes punch coordinates and photo flags",
+       todays[0][ix["Check-in latitude"]] == IN[0]
+       and todays[0][ix["Check-in longitude"]] == IN[1]
+       and todays[0][ix["Check-in photo"]] in ("No photo", "Photo sent"), todays[0])
     ok("re-entry reason is exported", any(x[ix['Re-entry reason']] for x in todays))
     hdr2, rows2 = table(sheets['Daily summary'])
     ix2 = {h: i for i, h in enumerate(hdr2)}
@@ -263,7 +267,14 @@ with app.app_context():
     names = {x[hdr.index('Employee')] for x in rows if x[0] is not None}
     ok("manager's file has ONLY their own reports (no strangers, no contract staff)", names == {"Sneha Recruiter", "Meera Recruiter"}, names)
     hs, rs = table(sheets['Check-in details'])
-    ok("manager export also omits latitude, longitude and photo columns", removed_headers.isdisjoint(hs), hs)
+    ok("manager export includes authorized coordinates and photo columns", location_photo_headers <= set(hs), hs)
+    manager_detail = next(
+        row for row in rs
+        if row[0] and row[1] == "R1" and row[hs.index("Check-in latitude")] is not None
+    )
+    ok("manager can see their report's punch coordinates and photo flags",
+       manager_detail[hs.index("Check-in latitude")] not in ("—", "", None)
+       and manager_detail[hs.index("Check-in photo")] in ("No photo", "Photo sent"), manager_detail)
     ok("one person via user_id", c.get(f'/api/attendance/export/team?user_id={ids["r1"]}&from={D3.isoformat()}&to={TODAY.isoformat()}', headers=H['mgr']).status_code == 200)
     ok("a person outside the manager's scope is refused", c.get(f'/api/attendance/export/team?user_id={ids["r4"]}', headers=H['mgr']).status_code == 403)
     ok("an employee cannot export team attendance", c.get('/api/attendance/export/team', headers=H['r1']).status_code == 403)
@@ -274,7 +285,14 @@ with app.app_context():
     r = c.get(f'/api/attendance/export/team?from={D3.isoformat()}&to={TODAY.isoformat()}', headers=H['ops'])
     sh = xl(r); hs, rs = table(sh['Check-in details'])
     real = [x for x in rs if x[0]]
-    ok("Operations export omits latitude, longitude and photo columns", removed_headers.isdisjoint(hs), hs)
+    ok("Operations export includes the columns but redacts their values",
+       location_photo_headers <= set(hs)
+       and all(x[hs.index("Check-in latitude")] == "—"
+               and x[hs.index("Check-in longitude")] == "—"
+               and x[hs.index("Check-in photo")] == "—"
+               and x[hs.index("Check-out latitude")] == "—"
+               and x[hs.index("Check-out longitude")] == "—"
+               and x[hs.index("Check-out photo")] == "—" for x in real), hs)
     ok("…but still shows times and in/out of office", all(x[hs.index('Check-in time')] for x in real))
     r = c.get(f'/api/attendance/export/team-day?date={TODAY.isoformat()}', headers=H['mgr'])
     hdr, rows = table(xl(r)['Team today'])
