@@ -26,6 +26,14 @@ export default function AttendanceCalendar({
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
+  const [exportFrom, setExportFrom] = useState(
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`
+  );
+  const [exportTo, setExportTo] = useState(
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
+      new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    ).padStart(2, "0")}`
+  );
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [openDay, setOpenDay] = useState(null);
@@ -190,18 +198,41 @@ export default function AttendanceCalendar({
           </button>
         </div>
 
-        <ExportButton
-          url={exportUserId ? "/attendance/export/team" : "/attendance/export/my"}
-          params={{
-            month,
-            year,
-            ...(exportUserId ? { user_id: exportUserId } : {}),
-          }}
-          filename={`Attendance_${
-            data?.user?.employee_code || "me"
-          }_${year}-${String(month).padStart(2, "0")}`}
-          label="Export month to Excel"
-        />
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+            From
+            <input
+              type="date"
+              aria-label="Export from date"
+              value={exportFrom}
+              max={exportTo || undefined}
+              onChange={(event) => setExportFrom(event.target.value)}
+            />
+          </label>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+            To
+            <input
+              type="date"
+              aria-label="Export to date"
+              value={exportTo}
+              min={exportFrom || undefined}
+              onChange={(event) => setExportTo(event.target.value)}
+            />
+          </label>
+          <ExportButton
+            url={exportUserId ? "/attendance/export/team" : "/attendance/export/my"}
+            params={{
+              from: exportFrom,
+              to: exportTo,
+              ...(exportUserId ? { user_id: exportUserId } : {}),
+            }}
+            filename={`Attendance_${
+              data?.user?.employee_code || "me"
+            }_${exportFrom}_to_${exportTo}`}
+            label="Export selected dates"
+            disabled={!exportFrom || !exportTo || exportFrom > exportTo}
+          />
+        </div>
       </div>
 
       {error && (
