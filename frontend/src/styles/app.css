@@ -453,6 +453,42 @@
   border-color: var(--color-primary-500);
 }
 
+.password-input-wrap {
+  position: relative;
+}
+
+.password-input-wrap input {
+  width: 100%;
+  padding-right: 42px;
+}
+
+.password-visibility-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.password-visibility-toggle:hover {
+  color: var(--color-text);
+}
+
+.password-visibility-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
 /* ===== Table ===== */
 .table-wrap {
   overflow-x: auto;
