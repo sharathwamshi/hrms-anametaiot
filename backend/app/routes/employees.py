@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 from app.extensions import db
 from app.models import User, Department, DeviceToken, LeaveRequest
+from app.models.leave import ensure_leave_balances
 from app.utils.security import roles_required
 from app.roles import ALL_ROLES, HR_OPERATIONS, HR_RECRUITER, MANAGER, SUPER_ADMIN
 
@@ -140,6 +141,8 @@ def create_employee():
     )
     user.set_password(payload["password"])
     db.session.add(user)
+    db.session.flush()
+    ensure_leave_balances(user.id, date.today().year)
     db.session.commit()
     return jsonify(user.to_dict()), 201
 
@@ -295,6 +298,7 @@ def convert_candidate_to_employee(candidate_id):
     user.set_password(payload["password"])
     db.session.add(user)
     db.session.flush()
+    ensure_leave_balances(user.id, date.today().year)
 
     candidate.linked_employee_id = user.id
     log_action(candidate.id, "converted_to_employee", actor_id=int(get_jwt_identity()),
@@ -392,7 +396,7 @@ def performance_snapshot(emp_id):
     the existing /api/dashboard/recruiter-performance endpoint — this one
     covers everyone else so a Manager always has something to look at."""
     from datetime import date
-    from app.models import Attendance, LeaveRequest, LeaveBalance
+    from app.models import Attendance, LeaveRequest
 
     target = User.query.get_or_404(emp_id)
     today = date.today()
@@ -404,10 +408,18 @@ def performance_snapshot(emp_id):
         Attendance.status.in_(["present", "half_day", "regularized"]),
     ).count()
 
-    leave_taken_this_year = db.session.query(db.func.coalesce(db.func.sum(LeaveRequest.days), 0)).filter(
-        LeaveRequest.user_id == emp_id, LeaveRequest.status == "approved",
-        db.extract("year", LeaveRequest.start_date) == today.year,
-    ).scalar()
+    year_start = date(today.year, 1, 1)
+    year_end = date(today.year, 12, 31)
+    approved_leave = LeaveRequest.query.filter(
+        LeaveRequest.user_id == emp_id,
+        LeaveRequest.status == "approved",
+        LeaveRequest.start_date <= year_end,
+        LeaveRequest.end_date >= year_start,
+    ).all()
+    leave_taken_this_year = sum(
+        (min(leave.end_date, year_end) - max(leave.start_date, year_start)).days + 1
+        for leave in approved_leave
+    )
 
     pending_leave_requests = LeaveRequest.query.filter_by(user_id=emp_id, status="pending").count()
 

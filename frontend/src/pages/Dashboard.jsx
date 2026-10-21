@@ -8,6 +8,7 @@ import Loader from "../components/Loader";
 import ClockWidget from "../components/ClockWidget";
 import Badge from "../components/Badge";
 import CandidateDetailModal from "../components/CandidateDetailModal";
+import LeaveBalanceSummary from "../components/LeaveBalanceSummary";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
 
@@ -31,20 +32,51 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [summaryError, setSummaryError] = useState("");
+  const [leaveBalances, setLeaveBalances] = useState([]);
+  const [leaveBalancesLoading, setLeaveBalancesLoading] = useState(user.role !== ROLES.CONTRACT_EMPLOYEE);
+  const [leaveBalancesError, setLeaveBalancesError] = useState("");
 
   useEffect(() => {
+    let active = true;
     client
       .get("/dashboard/summary")
-      .then(({ data }) => setSummary(data))
-      .finally(() => setLoading(false));
-  }, []);
+      .then(({ data }) => {
+        if (active) setSummary(data);
+      })
+      .catch((err) => {
+        if (active) setSummaryError(err?.response?.data?.message || "Could not load the dashboard.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    if (user.role !== ROLES.CONTRACT_EMPLOYEE) {
+      client
+        .get("/leave/balances")
+        .then(({ data }) => {
+          if (active) setLeaveBalances(data);
+        })
+        .catch((err) => {
+          if (active) setLeaveBalancesError(err?.response?.data?.message || "Could not load your leave balance.");
+        })
+        .finally(() => {
+          if (active) setLeaveBalancesLoading(false);
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [user.role]);
 
   const showClock = user.role !== ROLES.HR_OPERATIONS; // HR ops dashboard is admin-focused; still reachable via Attendance page
 
   return (
     <AppLayout title={`Welcome, ${user.full_name.split(" ")[0]}`} subtitle="Here's what's happening today.">
-      {loading || !summary ? (
+      {loading ? (
         <Loader />
+      ) : !summary ? (
+        <div className="login-error" role="alert">{summaryError || "Could not load the dashboard."}</div>
       ) : (
         <>
           <div className="stat-grid">
@@ -60,6 +92,14 @@ export default function Dashboard() {
                 />
               ))}
           </div>
+
+          {user.role !== ROLES.CONTRACT_EMPLOYEE && (
+            <LeaveBalanceSummary
+              balances={leaveBalances}
+              loading={leaveBalancesLoading}
+              error={leaveBalancesError}
+            />
+          )}
 
           <div className="two-col">
             {showClock ? <ClockWidget /> : <div />}

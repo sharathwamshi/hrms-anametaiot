@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from app.extensions import db
 
 
@@ -34,11 +34,48 @@ class LeaveBalance(db.Model):
 
     def to_dict(self):
         return {
+            "leave_type_id": self.leave_type_id,
             "leave_type": self.leave_type.name,
             "allocated": self.allocated,
             "used": self.used,
             "balance": self.balance,
+            "annual_entitlement": self.allocated,
+            "approved_leave_taken": self.used,
+            "remaining_leave": self.balance,
         }
+
+
+def ensure_leave_balances(user_id, year):
+    existing_type_ids = {
+        row[0]
+        for row in db.session.query(LeaveBalance.leave_type_id)
+        .filter_by(user_id=user_id, year=year)
+        .all()
+    }
+    for leave_type in LeaveType.query.all():
+        if leave_type.id not in existing_type_ids:
+            year_start = date(year, 1, 1)
+            year_end = date(year, 12, 31)
+            approved_requests = LeaveRequest.query.filter(
+                LeaveRequest.user_id == user_id,
+                LeaveRequest.leave_type_id == leave_type.id,
+                LeaveRequest.status == "approved",
+                LeaveRequest.start_date <= year_end,
+                LeaveRequest.end_date >= year_start,
+            ).all()
+            used = sum(
+                (min(row.end_date, year_end) - max(row.start_date, year_start)).days + 1
+                for row in approved_requests
+            )
+            db.session.add(
+                LeaveBalance(
+                    user_id=user_id,
+                    leave_type_id=leave_type.id,
+                    year=year,
+                    allocated=leave_type.annual_quota or 0,
+                    used=used,
+                )
+            )
 
 
 class LeaveRequest(db.Model):
@@ -68,7 +105,10 @@ class LeaveRequest(db.Model):
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "employee_id": self.user_id,
+            "employee_code": self.user.employee_code if self.user else None,
             "employee_name": self.user.full_name if self.user else None,
+            "leave_type_id": self.leave_type_id,
             "leave_type": self.leave_type.name if self.leave_type else None,
             "start_date": self.start_date.isoformat(),
             "end_date": self.end_date.isoformat(),
@@ -79,3 +119,21 @@ class LeaveRequest(db.Model):
             "review_comment": self.review_comment,
             "created_at": self.created_at.isoformat(),
         }
+
+
+class LeaveEntitlementAudit(db.Model):
+    __tablename__ = "leave_entitlement_audit"
+
+    id = db.Column(db.Integer, primary_key=True)
+    leave_type_id = db.Column(db.Integer, db.ForeignKey("leave_types.id"), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    actor_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    scope = db.Column(db.String(30), nullable=False)
+    year = db.Column(db.Integer, nullable=True)
+    old_entitlement = db.Column(db.Float, nullable=False)
+    new_entitlement = db.Column(db.Float, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    leave_type = db.relationship("LeaveType")
+    employee = db.relationship("User", foreign_keys=[employee_id])
+    actor = db.relationship("User", foreign_keys=[actor_id])

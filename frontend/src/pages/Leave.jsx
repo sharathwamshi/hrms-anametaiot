@@ -4,6 +4,8 @@ import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
 import Loader from "../components/Loader";
+import LeaveBalanceSummary from "../components/LeaveBalanceSummary";
+import ManagerLeaveDashboard from "../components/ManagerLeaveDashboard";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
 import { localDateStr } from "../utils/attendanceTime";
@@ -20,10 +22,16 @@ export default function Leave() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ leave_type_id: "", start_date: "", end_date: "", reason: "" });
   const [error, setError] = useState("");
-  const isApprover = APPROVER_ROLES.includes(user.role);
+  const [formError, setFormError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [busyRequestId, setBusyRequestId] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const isManager = user.role === ROLES.MANAGER;
+  const isApprover = APPROVER_ROLES.includes(user.role) && !isManager;
 
   const loadAll = async () => {
     setLoading(true);
+    setError("");
     const calls = [
       client.get("/leave/types"),
       client.get("/leave/balances"),
@@ -31,12 +39,19 @@ export default function Leave() {
     ];
     if (isApprover) calls.push(client.get("/leave/pending-approvals"));
 
-    const results = await Promise.all(calls);
-    setTypes(results[0].data);
-    setBalances(results[1].data);
-    setMyRequests(results[2].data);
-    if (isApprover) setApprovals(results[3].data);
-    setLoading(false);
+    try {
+      const results = await Promise.all(calls);
+      setTypes(results[0].data);
+      setBalances(results[1].data);
+      setMyRequests(results[2].data);
+      if (isApprover) setApprovals(results[3].data);
+      return true;
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not load leave information.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -46,38 +61,59 @@ export default function Leave() {
 
   const submitLeave = async (e) => {
     e.preventDefault();
-    setError("");
+    setFormError("");
+    setSuccess("");
+    setSubmitting(true);
     try {
       await client.post("/leave/apply", form);
       setShowForm(false);
       setForm({ leave_type_id: "", start_date: "", end_date: "", reason: "" });
-      loadAll();
+      if (await loadAll()) setSuccess("Your leave request was submitted.");
     } catch (err) {
-      setError(err?.response?.data?.message || "Could not submit leave request.");
+      setFormError(err?.response?.data?.message || "Could not submit leave request.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const decide = async (id, decision) => {
     const comment = window.prompt(`Comment for this ${decision} decision (optional):`) || "";
-    await client.post(`/leave/${id}/decision`, { decision, comment });
-    loadAll();
+    setError("");
+    setSuccess("");
+    setBusyRequestId(id);
+    try {
+      await client.post(`/leave/${id}/decision`, { decision, comment });
+      if (await loadAll()) setSuccess(`Leave request ${decision}.`);
+    } catch (err) {
+      setError(err?.response?.data?.message || `Could not ${decision} this leave request.`);
+    } finally {
+      setBusyRequestId(null);
+    }
+  };
+
+  const cancelRequest = async (request) => {
+    if (!window.confirm("Cancel this leave request?")) return;
+    setError("");
+    setSuccess("");
+    setBusyRequestId(request.id);
+    try {
+      await client.post(`/leave/${request.id}/cancel`);
+      if (await loadAll()) setSuccess("Leave request cancelled and the balance updated.");
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not cancel this leave request.");
+    } finally {
+      setBusyRequestId(null);
+    }
   };
 
   if (loading) return <AppLayout title="Leave"><Loader /></AppLayout>;
 
   return (
     <AppLayout title="Leave" subtitle="Apply for leave and track approvals.">
-      <div className="stat-grid">
-        {balances.map((b) => (
-          <div className="stat-card" key={b.leave_type}>
-            <div>
-              <div className="label">{b.leave_type}</div>
-              <div className="value">{b.balance}</div>
-              <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>of {b.allocated} days allocated</div>
-            </div>
-          </div>
-        ))}
-      </div>
+      {error && <div className="login-error" role="alert">{error}</div>}
+      {success && <div className="notice-success" role="status">{success}</div>}
+      <LeaveBalanceSummary balances={balances} />
+      {isManager && <ManagerLeaveDashboard />}
 
       <div className="card section-gap">
         <div className="card-title-row">
@@ -87,11 +123,11 @@ export default function Leave() {
         <div className="table-wrap">
           <table className="data-table">
             <thead>
-              <tr><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Reviewer</th></tr>
+              <tr><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Reviewer</th><th>Action</th></tr>
             </thead>
             <tbody>
               {myRequests.length === 0 && (
-                <tr className="empty-row"><td colSpan={6}>No leave requests yet.</td></tr>
+                <tr className="empty-row"><td colSpan={7}>No leave requests yet.</td></tr>
               )}
               {myRequests.map((r) => (
                 <tr key={r.id}>
@@ -101,6 +137,17 @@ export default function Leave() {
                   <td>{r.days}</td>
                   <td><Badge status={r.status} /></td>
                   <td>{r.reviewer_name || "—"}</td>
+                  <td>
+                    {(r.status === "pending" || (r.status === "approved" && r.start_date >= localDateStr())) && (
+                      <button
+                        className="btn btn-sm btn-outline"
+                        disabled={busyRequestId === r.id}
+                        onClick={() => cancelRequest(r)}
+                      >
+                        {busyRequestId === r.id ? "Cancelling..." : "Cancel"}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -130,8 +177,8 @@ export default function Leave() {
                     <td>{r.reason}</td>
                     <td>
                       <div style={{ display: "flex", gap: 6 }}>
-                        <button className="btn btn-sm btn-success" onClick={() => decide(r.id, "approved")}>Approve</button>
-                        <button className="btn btn-sm btn-danger" onClick={() => decide(r.id, "rejected")}>Reject</button>
+                        <button className="btn btn-sm btn-success" disabled={busyRequestId === r.id} onClick={() => decide(r.id, "approved")}>Approve</button>
+                        <button className="btn btn-sm btn-danger" disabled={busyRequestId === r.id} onClick={() => decide(r.id, "rejected")}>Reject</button>
                       </div>
                     </td>
                   </tr>
@@ -146,7 +193,7 @@ export default function Leave() {
         <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginBottom: 16 }}>Apply for Leave</h3>
-            {error && <div className="login-error">{error}</div>}
+            {formError && <div className="login-error" role="alert">{formError}</div>}
             <form onSubmit={submitLeave}>
               <div className="form-field">
                 <label>Leave Type</label>
@@ -171,7 +218,9 @@ export default function Leave() {
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Submit Request</button>
+                <button type="submit" className="btn btn-primary" disabled={submitting}>
+                  {submitting ? "Submitting..." : "Submit Request"}
+                </button>
               </div>
             </form>
           </div>
