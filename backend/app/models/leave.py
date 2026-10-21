@@ -68,6 +68,7 @@ class LeaveRequest(db.Model):
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "leave_type_id": self.leave_type_id,
             "employee_name": self.user.full_name if self.user else None,
             "leave_type": self.leave_type.name if self.leave_type else None,
             "start_date": self.start_date.isoformat(),
