@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import VersionLabel from "../components/VersionLabel";
 
 export default function Login() {
   const { login, user } = useAuth();
@@ -96,6 +97,7 @@ export default function Login() {
             </button>
           </form>
         </div>
+        <VersionLabel className="login-version" />
       </div>
     </div>
   );
