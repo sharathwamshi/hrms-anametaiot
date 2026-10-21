@@ -828,6 +828,7 @@ table.data-table {
 .att-day.blank { border: 0; background: transparent; cursor: default; min-height: 0; }
 .att-day .n { font-weight: 700; font-size: 13px; }
 .att-day .t { display: block; font-size: 10.5px; margin-top: 4px; line-height: 1.35; }
+.att-day .leave-status { display: block; font-size: 9px; margin-top: 2px; font-weight: 700; text-transform: capitalize; }
 .att-day.today { outline: 2px solid var(--color-primary-500); }
 .att-day.present { background: var(--color-success-100); border-color: #b7e4cc; }
 .att-day.half_day { background: var(--color-warning-100); border-color: #f5d79a; }
@@ -856,4 +857,4 @@ table.data-table {
 .att-modal-wide { width: 640px; }
 .att-person-row { cursor: pointer; }
 .att-person-row:hover td { background: var(--color-primary-50); }
-@media (max-width: 720px) { .att-day { min-height: 56px; padding: 4px; } .att-day .t { display: none; } }
+@media (max-width: 720px) { .att-day { min-height: 56px; padding: 4px; } .att-day .t { display: none; } .att-day .leave-status { font-size: 8px; } }
