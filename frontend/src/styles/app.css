@@ -613,10 +613,29 @@ table.data-table {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40px;
+  padding: 40px 40px 64px;
+  position: relative;
 }
 
 .login-card { width: 100%; max-width: 340px; }
+
+.version-label {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.login-version {
+  position: absolute;
+  right: 24px;
+  bottom: 18px;
+}
+
+.main-content-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 28px 16px;
+}
 
 .login-card h2 { font-size: 22px; margin-bottom: 4px; }
 .login-card .sub { color: var(--color-text-muted); font-size: 13.5px; margin-bottom: 28px; }
@@ -642,6 +661,21 @@ table.data-table {
 }
 
 .full-width-btn { width: 100%; justify-content: center; padding: 11px; }
+
+@media (max-width: 720px) {
+  .login-form-side {
+    padding: 40px 24px 64px;
+  }
+
+  .login-version {
+    right: 20px;
+    bottom: 16px;
+  }
+
+  .main-content-footer {
+    padding: 0 18px 14px;
+  }
+}
 
 /* ===== Misc ===== */
 .muted { color: var(--color-text-muted); }
