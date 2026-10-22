@@ -28,8 +28,8 @@ Stack: **Flask (REST API) + React (Vite) + MySQL**.
 mysql -u root < backend/schema.sql
 ```
 
-This creates the `anametaiot_hrms` database and every table (25 total, including the
-recruiter/mock-test/screening tables below). The backend can also auto-create tables via
+This creates the `anametaiot_hrms` database and every table (including the
+recruiter/mock-test/screening and leave-entitlement audit tables below). The backend can also auto-create tables via
 `python seed.py` if you'd rather skip this step — `schema.sql` is auto-generated from the
 SQLAlchemy models via `python -c "from sqlalchemy.schema import CreateTable; ..."`, so it
 always matches what `db.create_all()` produces.
@@ -43,6 +43,16 @@ Attendance uses the company timezone configured by `COMPANY_TIMEZONE` (default `
 Existing attendance `DATETIME` values are stored as naive UTC; the application converts them
 for company-local attendance dates, arrival rules, screens, and exports. No data migration is
 needed for timezone support.
+
+For an existing database, also run
+`mysql -u root anametaiot_hrms < backend/migration_leave_balance_backfill.sql`
+to create this year's missing per-employee leave balances and include approved leave already
+recorded in request history, and reconcile current-year usage with approved requests. The
+existing leave schema already stores annual allocations and usage; no table alteration is needed.
+
+For an existing database, run
+`mysql -u root anametaiot_hrms < backend/migration_leave_entitlement_audit.sql`
+to create the audit table used by manager leave-entitlement changes.
 
 ## 2. Backend (Flask API)
 
@@ -119,6 +129,7 @@ those links will 404 against the frontend host instead of reaching Flask.
 ```bash
 cd backend
 python tests/test_recruiter_features.py
+python tests/test_leave_requests.py
 ```
 
 An end-to-end smoke test (in-memory SQLite) covering job approval, candidate sourcing,
@@ -137,8 +148,13 @@ right roles get 403'd, not just that the right roles succeed).
   history, team view for Manager/HR Operations/Operations, regularization approval and a
   maximum of five regularization requests per employee per month
 - **Leave** — apply from today or a future date on the attendance calendar (or Leave page),
-  track pending requests, and let Managers review their direct reports' requests from Profile;
-  approval automatically deducts the balance
+  track pending requests, and let Managers review their direct reports' requests from the Leave
+  page with team request totals, balance summaries, history filters, approval comments, and
+  team-scoped annual entitlement editing; default-only policy changes affect future allocations,
+  while team and individual edits apply to current-year balances and are audit logged;
+  approved requests automatically deduct annual leave, cancellation restores it, and employees
+  can see entitlement, approved leave taken, and remaining balances on their dashboard. Managers
+  can view direct reports' balances; HR Operations and Super Admin can view any employee's.
 - **Employees** — directory, search; HR Operations can onboard/edit anyone, a **Manager can
   onboard and edit their own direct reports** (their `manager_id` is forced server-side —
   a Manager can never create or edit someone outside their own team)

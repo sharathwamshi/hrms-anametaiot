@@ -193,6 +193,22 @@ CREATE TABLE leave_requests (
 	FOREIGN KEY(reviewed_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE leave_entitlement_audit (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	leave_type_id INTEGER NOT NULL,
+	employee_id INTEGER,
+	actor_id INTEGER NOT NULL,
+	scope VARCHAR(30) NOT NULL,
+	year INTEGER,
+	old_entitlement FLOAT NOT NULL,
+	new_entitlement FLOAT NOT NULL,
+	created_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(leave_type_id) REFERENCES leave_types (id),
+	FOREIGN KEY(employee_id) REFERENCES users (id),
+	FOREIGN KEY(actor_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
 CREATE TABLE office_locations (
 	id INTEGER NOT NULL AUTO_INCREMENT, 
 	name VARCHAR(150) NOT NULL, 

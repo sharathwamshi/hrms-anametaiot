@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import client from "../api/client";
 import Badge from "./Badge";
 import RemoveEmployeeModal from "./RemoveEmployeeModal";
+import LeaveBalanceSummary from "./LeaveBalanceSummary";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, ROLE_LABELS } from "../config/roles";
 
@@ -14,6 +15,9 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   const [recruiterPerf, setRecruiterPerf] = useState(null);
   const [permissions, setPermissions] = useState([]);
   const [catalogue, setCatalogue] = useState([]);
+  const [leaveBalances, setLeaveBalances] = useState([]);
+  const [leaveBalanceLoading, setLeaveBalanceLoading] = useState(true);
+  const [leaveBalanceError, setLeaveBalanceError] = useState("");
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
@@ -37,6 +41,20 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
       role: snapRes.data.employee.role,
     });
 
+    const targetEmployee = snapRes.data.employee;
+    const canViewLeaveBalance = isAdmin || targetEmployee.id === user.id || targetEmployee.manager_id === user.id;
+    setLeaveBalances([]);
+    setLeaveBalanceError("");
+    setLeaveBalanceLoading(canViewLeaveBalance);
+    if (canViewLeaveBalance) {
+      client.get(`/leave/balances/${employeeId}`)
+        .then(({ data }) => setLeaveBalances(data))
+        .catch((err) => {
+          setLeaveBalanceError(err?.response?.data?.message || "Could not load this employee's leave balance.");
+        })
+        .finally(() => setLeaveBalanceLoading(false));
+    }
+
     if (snapRes.data.is_recruiter) {
       try {
         const { data } = await client.get(`/dashboard/recruiter-performance/${employeeId}`);
@@ -46,7 +64,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
       }
     }
     setLoading(false);
-  }, [employeeId]);
+  }, [employeeId, isAdmin, user.id]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -207,6 +225,15 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
             </div>
           )}
         </div>
+
+        {(isAdmin || isOwnReport || emp.id === user.id) && (
+          <LeaveBalanceSummary
+            balances={leaveBalances}
+            loading={leaveBalanceLoading}
+            error={leaveBalanceError}
+            showLink={false}
+          />
+        )}
 
         {/* Roles & Permissions */}
         {canManage && (

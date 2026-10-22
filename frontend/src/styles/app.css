@@ -362,6 +362,43 @@
 .stat-card .icon-wrap.chip-orange { background: var(--chip-orange-bg); color: var(--chip-orange-fg); }
 .stat-card .icon-wrap.chip-indigo { background: var(--chip-indigo-bg); color: var(--chip-indigo-fg); }
 
+.leave-balance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+}
+
+.leave-balance-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+
+.leave-balance-card h4 {
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.leave-balance-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.leave-balance-metrics span {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.leave-balance-metrics strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-navy-900);
+  font-size: 14px;
+}
+
 .two-col {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
@@ -643,6 +680,15 @@ table.data-table {
 .login-error {
   background: var(--color-danger-100);
   color: #b42318;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.notice-success {
+  background: var(--chip-green-bg);
+  color: var(--chip-green-fg);
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   font-size: 13px;

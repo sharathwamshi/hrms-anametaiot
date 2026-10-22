@@ -4,6 +4,8 @@ import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
 import Loader from "../components/Loader";
+import LeaveBalanceSummary from "../components/LeaveBalanceSummary";
+import ManagerLeaveDashboard from "../components/ManagerLeaveDashboard";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
 import { localDateStr } from "../utils/attendanceTime";
@@ -21,10 +23,16 @@ export default function Leave() {
   const [editingRequestId, setEditingRequestId] = useState(null);
   const [form, setForm] = useState({ leave_type_id: "", start_date: "", end_date: "", reason: "" });
   const [error, setError] = useState("");
-  const isApprover = APPROVER_ROLES.includes(user.role);
+  const [formError, setFormError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [busyRequestId, setBusyRequestId] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const isManager = user.role === ROLES.MANAGER;
+  const isApprover = APPROVER_ROLES.includes(user.role) && !isManager;
 
   const loadAll = async () => {
     setLoading(true);
+    setError("");
     const calls = [
       client.get("/leave/types"),
       client.get("/leave/balances"),
@@ -32,12 +40,19 @@ export default function Leave() {
     ];
     if (isApprover) calls.push(client.get("/leave/pending-approvals"));
 
-    const results = await Promise.all(calls);
-    setTypes(results[0].data);
-    setBalances(results[1].data);
-    setMyRequests(results[2].data);
-    if (isApprover) setApprovals(results[3].data);
-    setLoading(false);
+    try {
+      const results = await Promise.all(calls);
+      setTypes(results[0].data);
+      setBalances(results[1].data);
+      setMyRequests(results[2].data);
+      if (isApprover) setApprovals(results[3].data);
+      return true;
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not load leave information.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -47,7 +62,9 @@ export default function Leave() {
 
   const submitLeave = async (e) => {
     e.preventDefault();
-    setError("");
+    setFormError("");
+    setSuccess("");
+    setSubmitting(true);
     try {
       if (editingRequestId) {
         await client.put(`/leave/${editingRequestId}`, form);
@@ -57,44 +74,41 @@ export default function Leave() {
       setShowForm(false);
       setEditingRequestId(null);
       setForm({ leave_type_id: "", start_date: "", end_date: "", reason: "" });
-      loadAll();
+      if (await loadAll()) setSuccess("Your leave request was submitted.");
     } catch (err) {
-      setError(err?.response?.data?.message || "Could not submit leave request.");
+      setFormError(err?.response?.data?.message || "Could not submit leave request.");
+    } finally {
+      setSubmitting(false);
     }
-  };
-
-  const editRequest = (request) => {
-    setEditingRequestId(request.id);
-    setForm({
-      leave_type_id: String(request.leave_type_id),
-      start_date: request.start_date,
-      end_date: request.end_date,
-      reason: request.reason || "",
-    });
-    setError("");
-    setShowForm(true);
-  };
-
-  const closeForm = () => {
-    setShowForm(false);
-    setEditingRequestId(null);
-    setForm({ leave_type_id: "", start_date: "", end_date: "", reason: "" });
-    setError("");
   };
 
   const decide = async (id, decision) => {
     const comment = window.prompt(`Comment for this ${decision} decision (optional):`) || "";
-    await client.post(`/leave/${id}/decision`, { decision, comment });
-    loadAll();
+    setError("");
+    setSuccess("");
+    setBusyRequestId(id);
+    try {
+      await client.post(`/leave/${id}/decision`, { decision, comment });
+      if (await loadAll()) setSuccess(`Leave request ${decision}.`);
+    } catch (err) {
+      setError(err?.response?.data?.message || `Could not ${decision} this leave request.`);
+    } finally {
+      setBusyRequestId(null);
+    }
   };
 
   const cancelRequest = async (request) => {
     if (!window.confirm("Cancel this leave request?")) return;
+    setError("");
+    setSuccess("");
+    setBusyRequestId(request.id);
     try {
       await client.post(`/leave/${request.id}/cancel`);
-      await loadAll();
+      if (await loadAll()) setSuccess("Leave request cancelled and the balance updated.");
     } catch (err) {
-      window.alert(err?.response?.data?.message || "Could not cancel leave request.");
+      setError(err?.response?.data?.message || "Could not cancel this leave request.");
+    } finally {
+      setBusyRequestId(null);
     }
   };
 
@@ -102,17 +116,10 @@ export default function Leave() {
 
   return (
     <AppLayout title="Leave" subtitle="Apply for leave and track approvals.">
-      <div className="stat-grid">
-        {balances.map((b) => (
-          <div className="stat-card" key={b.leave_type}>
-            <div>
-              <div className="label">{b.leave_type}</div>
-              <div className="value">{b.balance}</div>
-              <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>of {b.allocated} days allocated</div>
-            </div>
-          </div>
-        ))}
-      </div>
+      {error && <div className="login-error" role="alert">{error}</div>}
+      {success && <div className="notice-success" role="status">{success}</div>}
+      <LeaveBalanceSummary balances={balances} />
+      {isManager && <ManagerLeaveDashboard />}
 
       <div className="card section-gap">
         <div className="card-title-row">
@@ -136,12 +143,17 @@ export default function Leave() {
                   <td>{r.days}</td>
                   <td><Badge status={r.status} /></td>
                   <td>{r.reviewer_name || "—"}</td>
-                  <td>{r.status === "pending" && user.role !== ROLES.CONTRACT_EMPLOYEE && (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn-sm btn-outline" onClick={() => editRequest(r)}>Edit</button>
-                      <button className="btn btn-sm btn-danger" onClick={() => cancelRequest(r)}>Cancel</button>
-                    </div>
-                  )}</td>
+                  <td>
+                    {(r.status === "pending" || (r.status === "approved" && r.start_date >= localDateStr())) && (
+                      <button
+                        className="btn btn-sm btn-outline"
+                        disabled={busyRequestId === r.id}
+                        onClick={() => cancelRequest(r)}
+                      >
+                        {busyRequestId === r.id ? "Cancelling..." : "Cancel"}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -171,8 +183,8 @@ export default function Leave() {
                     <td>{r.reason}</td>
                     <td>
                       <div style={{ display: "flex", gap: 6 }}>
-                        <button className="btn btn-sm btn-success" onClick={() => decide(r.id, "approved")}>Approve</button>
-                        <button className="btn btn-sm btn-danger" onClick={() => decide(r.id, "rejected")}>Reject</button>
+                        <button className="btn btn-sm btn-success" disabled={busyRequestId === r.id} onClick={() => decide(r.id, "approved")}>Approve</button>
+                        <button className="btn btn-sm btn-danger" disabled={busyRequestId === r.id} onClick={() => decide(r.id, "rejected")}>Reject</button>
                       </div>
                     </td>
                   </tr>
@@ -186,8 +198,8 @@ export default function Leave() {
       {showForm && (
         <div className="modal-overlay" onClick={closeForm}>
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginBottom: 16 }}>{editingRequestId ? "Edit Leave Request" : "Apply for Leave"}</h3>
-            {error && <div className="login-error">{error}</div>}
+            <h3 style={{ marginBottom: 16 }}>Apply for Leave</h3>
+            {formError && <div className="login-error" role="alert">{formError}</div>}
             <form onSubmit={submitLeave}>
               <div className="form-field">
                 <label>Leave Type</label>
@@ -211,8 +223,10 @@ export default function Leave() {
                 <textarea rows={3} maxLength={500} required value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button type="button" className="btn btn-outline" onClick={closeForm}>Cancel</button>
-                <button type="submit" className="btn btn-primary">{editingRequestId ? "Save Changes" : "Submit Request"}</button>
+                <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={submitting}>
+                  {submitting ? "Submitting..." : "Submit Request"}
+                </button>
               </div>
             </form>
           </div>
