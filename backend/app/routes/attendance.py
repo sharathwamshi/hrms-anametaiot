@@ -12,6 +12,7 @@ from flask import current_app, send_from_directory
 import os
 import uuid
 from datetime import timedelta
+import json
 from app.roles import ROLES_WITH_CLOCK_IN_OUT, MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN
 
 FULL_ACCESS = (HR_OPERATIONS, SUPER_ADMIN)          # every active person, incl. locations + selfies
@@ -220,7 +221,13 @@ def _selfie_check(kind_label, selfie_file, user_id, work_date, kind):
 @bp.get("/policy")
 @jwt_required()
 def get_policy():
-    return jsonify({"selfie_required": bool(_get_settings().selfie_required)})
+    settings = _get_settings()
+    return jsonify({
+        "selfie_required": bool(settings.selfie_required),
+        "attendance_buffer_minutes": settings.attendance_buffer_minutes,
+        "official_check_in": "09:30",
+        "official_check_out": "18:30",
+    })
 
 
 @bp.put("/policy")
@@ -230,13 +237,29 @@ def update_policy():
     if claims.get("role") not in APPROVER_ROLES:
         return jsonify({"message": "Only a manager or HR Operations can change the attendance policy."}), 403
     payload = request.get_json(silent=True) or {}
-    if "selfie_required" not in payload or not isinstance(payload["selfie_required"], bool):
-        return jsonify({"message": "selfie_required (true/false) is required."}), 400
+    if not isinstance(payload, dict):
+        return jsonify({"message": "Attendance policy settings must be provided as an object."}), 400
+    if not payload:
+        return jsonify({"message": "At least one attendance policy setting is required."}), 400
+    if "selfie_required" in payload and not isinstance(payload["selfie_required"], bool):
+        return jsonify({"message": "selfie_required must be true or false."}), 400
+    if "attendance_buffer_minutes" in payload:
+        buffer_minutes = payload["attendance_buffer_minutes"]
+        if isinstance(buffer_minutes, bool) or not isinstance(buffer_minutes, int) or buffer_minutes not in (5, 10, 15):
+            return jsonify({"message": "attendance_buffer_minutes must be 5, 10, or 15."}), 400
     settings = _get_settings()
-    settings.selfie_required = payload["selfie_required"]
+    if "selfie_required" in payload:
+        settings.selfie_required = payload["selfie_required"]
+    if "attendance_buffer_minutes" in payload:
+        settings.attendance_buffer_minutes = buffer_minutes
     settings.updated_by = int(get_jwt_identity())
     db.session.commit()
-    return jsonify({"selfie_required": settings.selfie_required})
+    return jsonify({
+        "selfie_required": bool(settings.selfie_required),
+        "attendance_buffer_minutes": settings.attendance_buffer_minutes,
+        "official_check_in": "09:30",
+        "official_check_out": "18:30",
+    })
 
 
 MAX_SESSIONS_PER_DAY = 10
@@ -1140,6 +1163,17 @@ def _parse_when(value):
     return dt
 
 
+def _audit_session_times(sessions):
+    return [
+        {
+            "session_no": session.session_no,
+            "clock_in": session.clock_in.isoformat() if session.clock_in else None,
+            "clock_out": session.clock_out.isoformat() if session.clock_out else None,
+        }
+        for session in sessions
+    ]
+
+
 def _local_date(dt):
     from app.utils.excel import to_local
     return to_local(dt).date()
@@ -1151,7 +1185,7 @@ def _manager_target(claims, actor_id, user_id):
     own attendance (that would defeat the audit trail)."""
     if claims.get("role") not in APPROVER_ROLES:
         return None, (jsonify({"message": "Only a manager or HR Operations can correct attendance."}), 403)
-    target = db.session.get(User, user_id) if isinstance(user_id, int) else None
+    target = db.session.get(User, user_id) if isinstance(user_id, int) and not isinstance(user_id, bool) else None
     if not target or not target.is_active:
         return None, (jsonify({"message": "That person was not found."}), 404)
     if target.id == actor_id:
@@ -1166,11 +1200,19 @@ def _manager_target(claims, actor_id, user_id):
 def _reason_and_note(payload, require=True):
     """Returns (reason_obj_or_None, note, error_response_or_None)."""
     reason = None
-    if payload.get("reason_id"):
-        reason = db.session.get(AttendanceRegularizationReason, payload.get("reason_id"))
+    reason_id = payload.get("reason_id")
+    if reason_id not in (None, ""):
+        if isinstance(reason_id, bool) or not isinstance(reason_id, int):
+            return None, "", (jsonify({"message": "reason_id must identify an active reason."}), 400)
+        reason = db.session.get(AttendanceRegularizationReason, reason_id)
         if not reason or not reason.is_active:
             return None, "", (jsonify({"message": "Please pick a valid reason."}), 400)
-    note = (payload.get("note") or "").strip()[:255]
+    note_value = payload.get("note")
+    if note_value is None:
+        note_value = ""
+    if not isinstance(note_value, str):
+        return None, "", (jsonify({"message": "note must be text."}), 400)
+    note = note_value.strip()[:255]
     if require and not reason and len(note) < 3:
         return None, "", (jsonify({"message": "Please choose a reason (or write one) — it is kept on the audit trail."}), 400)
     return reason, note, None
@@ -1206,6 +1248,8 @@ def manager_edit_day():
     evidence; times are what change. Every edit is stamped with who/when/why."""
     claims, actor_id = get_jwt(), int(get_jwt_identity())
     payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"message": "Attendance correction must be provided as an object."}), 400
     target, err = _manager_target(claims, actor_id, payload.get("user_id"))
     if err:
         return err
@@ -1227,18 +1271,35 @@ def manager_edit_day():
 
     parsed = []
     for i, item in enumerate(raw, 1):
+        if not isinstance(item, dict):
+            return jsonify({"message": f"Check-in {i} must be an object."}), 400
+        session_id = item.get("id")
+        if session_id is not None and (
+            isinstance(session_id, bool) or not isinstance(session_id, int) or session_id < 1
+        ):
+            return jsonify({"message": f"Check-in {i}: session id must be a positive integer."}), 400
+        checkout_value = item.get("clock_out")
+        if checkout_value is not None and (
+            not isinstance(checkout_value, str) or not checkout_value.strip()
+        ):
+            return jsonify({"message": f"Check-in {i}: check-out must be a valid date-time or null."}), 400
         try:
             cin = _parse_when(item.get("clock_in"))
-            cout = _parse_when(item.get("clock_out")) if item.get("clock_out") else None
+            cout = _parse_when(checkout_value) if checkout_value is not None else None
         except (ValueError, AttributeError):
             return jsonify({"message": f"Check-in {i}: please give valid date-times."}), 400
+        reason_value = item.get("reentry_reason")
+        if reason_value is None:
+            reason_value = ""
+        if not isinstance(reason_value, str):
+            return jsonify({"message": f"Check-in {i}: re-entry reason must be text."}), 400
         if _local_date(cin) != work_date:
             return jsonify({"message": f"Check-in {i} must fall on {work_date.isoformat()}."}), 400
         if cout and cout <= cin:
             return jsonify({"message": f"Check-in {i}: the check-out must be after the check-in."}), 400
         if cout and cout - cin > timedelta(hours=24):
             return jsonify({"message": f"Check-in {i}: a session cannot be longer than 24 hours."}), 400
-        parsed.append({"id": item.get("id"), "in": cin, "out": cout, "reason": (item.get("reentry_reason") or "").strip()[:MAX_REASON_LENGTH]})
+        parsed.append({"id": session_id, "in": cin, "out": cout, "reason": reason_value.strip()[:MAX_REASON_LENGTH]})
     parsed.sort(key=lambda x: x["in"])
     for i, item in enumerate(parsed):
         if item["out"] is None:
@@ -1261,6 +1322,7 @@ def manager_edit_day():
     _ensure_sessions(record)
 
     existing = {s.id: s for s in record.sessions}
+    before_times = _audit_session_times(record.sessions)
     keep_ids = {item["id"] for item in parsed if item["id"] in existing}
     if any(item["id"] is not None and item["id"] not in existing for item in parsed):
         return jsonify({"message": "One of the sessions does not belong to this day."}), 400
@@ -1298,6 +1360,11 @@ def manager_edit_day():
         record.clock_out_lat = record.clock_out_lng = record.clock_out_within_geofence = None
         record.clock_in_selfie = record.clock_out_selfie = None
         record.total_hours = 0
+
+    record.edit_details = json.dumps(
+        {"before": before_times, "after": _audit_session_times(record.sessions)},
+        separators=(",", ":"),
+    )
 
     # Status: the manager's explicit choice wins; otherwise keep a regularization, else judge by hours.
     if status:

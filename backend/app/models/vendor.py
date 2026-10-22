@@ -16,6 +16,7 @@ class CompanySettings(db.Model):
     # Attendance policy: when on, every clock-in/out must include a selfie.
     # Off by default.
     selfie_required = db.Column(db.Boolean, default=False, nullable=False, server_default="0")
+    attendance_buffer_minutes = db.Column(db.Integer, default=10, nullable=False, server_default="10")
     updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

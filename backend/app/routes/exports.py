@@ -12,7 +12,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 
 from app.extensions import db
-from app.models import Attendance, AttendanceSession, Holiday, LeaveRequest, User, AttendanceRegularizationReason
+from app.models import Attendance, AttendanceSession, Holiday, LeaveRequest, User, AttendanceRegularizationReason, CompanySettings
 from app.roles import MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN
 from app.utils.excel import fmt_time, fmt_datetime, xlsx_response
 from app.routes import attendance as att
@@ -74,7 +74,7 @@ def _range_args(default_first=None):
 
 
 DAY_HEADERS = ["Date", "Day", "Employee code", "Employee", "Designation", "Status", "First check-in", "Last check-out",
-               "Hours worked", "Check-ins", "Re-entries", "Time away (min)", "Any punch out of office",
+               "Arrival status", "Hours worked", "Check-ins", "Re-entries", "Time away (min)", "Any punch out of office",
                "Regularization", "Regularization reason", "Regularization note", "Reviewed by", "Review comment",
                "Corrected by manager", "Correction note", "Holiday / leave"]
 SESSION_HEADERS_FULL = ["Date", "Employee code", "Employee", "Check-in #", "Check-in time", "Check-in location",
@@ -100,6 +100,8 @@ def _build_people_sheets(users, first, last, redact_fn, note):
             d += timedelta(days=1)
 
     today = date.today()
+    settings = CompanySettings.query.order_by(CompanySettings.id.asc()).first()
+    buffer_minutes = settings.attendance_buffer_minutes if settings else 10
     day_rows, session_rows = [], []
     for u in users:
         redact = redact_fn(u)
@@ -120,6 +122,7 @@ def _build_people_sheets(users, first, last, redact_fn, note):
             else:
                 status = "No record"
             sessions = rec.effective_sessions() if rec else []
+            arrival_status = rec._check_in_status(buffer_minutes) if rec else None
             reentries = max(0, len(sessions) - 1)
             away = 0
             prev = None
@@ -133,7 +136,9 @@ def _build_people_sheets(users, first, last, redact_fn, note):
             day_rows.append([
                 d, _day_name(d), u.employee_code, u.full_name, u.designation or "", status,
                 fmt_time(rec.clock_in) if rec else "", fmt_time(rec.clock_out) if rec and rec.clock_out else ("Still clocked in" if rec and rec.clock_in else ""),
-                round(rec.total_hours or 0, 2) if rec and rec.clock_in else "", len(sessions) or "", reentries or "", away or "",
+                {"in_time": "In Time", "late": "Late"}.get(arrival_status, ""),
+                round(rec.total_hours or 0, 2) if rec and rec.clock_in else "",
+                len(sessions) or "", reentries or "", away or "",
                 ("Yes" if outside else "No") if any_loc else ("" if not sessions else "Location not captured"),
                 (reg or ("Regularized" if rec and rec.is_regularized else "")).title() if (reg or (rec and rec.is_regularized)) else "",
                 rec.reason.label if rec and rec.reason else "", rec.regularization_note or "" if rec else "",
@@ -280,13 +285,15 @@ def export_team_day():
         rows.append([
             u["employee_code"], u["full_name"], u["designation"] or "", STATUS_LABELS.get(p["status"], p["status"]),
             _fmt_iso_time(rec.get("clock_in")), _fmt_iso_time(rec.get("clock_out")) if rec.get("clock_out") else ("Still clocked in" if rec.get("clock_in") else ""),
-            rec.get("total_hours") or "", p["session_count"] or "", p["reentry_count"] or "",
+            {"in_time": "In Time", "late": "Late"}.get(rec.get("check_in_status"), ""),
+            rec.get("total_hours") or "",
+            p["session_count"] or "", p["reentry_count"] or "",
             (p["latest_reentry"] or {}).get("reason", ""), "Yes" if p["outside_office"] else "No",
             ("" if not loc else loc["latitude"]), ("" if not loc else loc["longitude"]),
             ("" if not loc else _place(loc["within_geofence"])), ("" if not loc else _fmt_iso_dt(loc["as_of"])),
         ])
     sheet = {"name": "Team today", "note": f"Team attendance on {target.strftime('%d-%b-%Y')}" + (f" — {data['holiday_name']}" if data["holiday_name"] else ""),
-             "headers": ["Employee code", "Employee", "Designation", "Status", "First check-in", "Last check-out", "Hours worked",
+             "headers": ["Employee code", "Employee", "Designation", "Status", "First check-in", "Last check-out", "Arrival status", "Hours worked",
                          "Check-ins", "Re-entries", "Latest re-entry reason", "Any punch out of office",
                          "Last known latitude", "Last known longitude", "Last known place", "Last known at"],
              "rows": rows}

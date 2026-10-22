@@ -1,5 +1,8 @@
 from datetime import datetime
+import json
 from app.extensions import db
+from app.models.vendor import CompanySettings
+from app.utils.excel import to_local
 
 
 class Attendance(db.Model):
@@ -55,6 +58,7 @@ class Attendance(db.Model):
     edited_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     edited_at = db.Column(db.DateTime, nullable=True)
     edit_note = db.Column(db.String(255), nullable=True)
+    edit_details = db.Column(db.Text, nullable=True)
 
     user = db.relationship("User", backref="attendance_records", foreign_keys=[user_id])
     reason = db.relationship("AttendanceRegularizationReason")
@@ -77,6 +81,25 @@ class Attendance(db.Model):
             delta = self.clock_out - self.clock_in
             self.total_hours = round(delta.total_seconds() / 3600, 2)
             self.status = "present" if self.total_hours >= 4 else "half_day"
+
+    def _check_in_status(self, buffer_minutes=None):
+        sessions = self.effective_sessions()
+        if not sessions:
+            return None
+        first_check_in = min(sessions, key=lambda session: session.clock_in).clock_in
+        local_check_in = to_local(first_check_in)
+        check_in_seconds = (
+            local_check_in.hour * 3600 + local_check_in.minute * 60
+            + local_check_in.second + local_check_in.microsecond / 1_000_000
+        )
+        official_check_in_seconds = (9 * 60 + 30) * 60
+        if check_in_seconds <= official_check_in_seconds:
+            return "in_time"
+        if buffer_minutes is None:
+            settings = CompanySettings.query.order_by(CompanySettings.id.asc()).first()
+            buffer_minutes = settings.attendance_buffer_minutes if settings else 10
+        buffer_boundary_seconds = (9 * 60 + 30 + buffer_minutes) * 60
+        return "in_time" if check_in_seconds <= buffer_boundary_seconds else "late"
 
     def effective_sessions(self):
         """The sessions to show. A day that predates multi-session support (and hasn't
@@ -130,6 +153,8 @@ class Attendance(db.Model):
             self.status = "present" if self.total_hours >= 4 else "half_day"
 
     def to_dict(self):
+        sessions = self.effective_sessions()
+        edit_details = json.loads(self.edit_details) if self.edit_details else None
         return {
             "id": self.id,
             "user_id": self.user_id,
@@ -139,6 +164,7 @@ class Attendance(db.Model):
             "clock_out": self.clock_out.isoformat() if self.clock_out else None,
             "status": self.status,
             "total_hours": self.total_hours,
+            "check_in_status": self._check_in_status(),
             "is_regularized": self.is_regularized,
             "regularization_status": self.regularization_status,
             "regularization_reason_id": self.regularization_reason_id,
@@ -151,6 +177,7 @@ class Attendance(db.Model):
             "edited_by_name": self.edited_by_user.full_name if self.edited_by_user else None,
             "edited_at": self.edited_at.isoformat() if self.edited_at else None,
             "edit_note": self.edit_note,
+            "edit_details": edit_details,
             "clock_in_within_geofence": self.clock_in_within_geofence,
             "clock_out_within_geofence": self.clock_out_within_geofence,
             "clock_in_note": self.clock_in_note,
