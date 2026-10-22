@@ -164,6 +164,31 @@ class AttendanceWorkRuleTests(unittest.TestCase):
             result["edit_details"]["after"][0]["clock_in"],
         )
         self.assertEqual(result["edited_by_name"], "Manager")
+        response = self.client.put(
+            "/api/attendance/manager/day",
+            headers=self.headers["manager"],
+            json={
+                "user_id": self.employee_id, "work_date": day.isoformat(),
+                "sessions": [{"clock_in": ist_iso(day, 9, 32), "clock_out": check_out}],
+                "reason": "Client site confirmation",
+                "note": "Verified with the site lead",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(
+            response.get_json()["edit_note"],
+            "Client site confirmation: Verified with the site lead",
+        )
+        invalid_reason = self.client.put(
+            "/api/attendance/manager/day",
+            headers=self.headers["manager"],
+            json={
+                "user_id": self.employee_id, "work_date": day.isoformat(),
+                "sessions": [{"clock_in": check_in, "clock_out": check_out}],
+                "reason": "  ",
+            },
+        )
+        self.assertEqual(invalid_reason.status_code, 400)
         bad_checkout = self.client.put(
             "/api/attendance/manager/day",
             headers=self.headers["manager"],
