@@ -39,6 +39,11 @@ to add the regularization request history table and backfill this month's existi
 Also run `mysql -u root anametaiot_hrms < backend/migration_attendance_work_rules.sql` to add the
 configurable check-in buffer (defaults to 10 minutes) and manager edit-time audit details.
 
+Attendance uses the company timezone configured by `COMPANY_TIMEZONE` (default `Asia/Kolkata`).
+Existing attendance `DATETIME` values are stored as naive UTC; the application converts them
+for company-local attendance dates, arrival rules, screens, and exports. No data migration is
+needed for timezone support.
+
 ## 2. Backend (Flask API)
 
 ```bash

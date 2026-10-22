@@ -6,9 +6,8 @@ import RegularizeRequestModal from "./RegularizeRequestModal";
 import ManagerEditDayModal from "./ManagerEditDayModal";
 import ManagerRegularizeModal from "./ManagerRegularizeModal";
 import ApplyLeaveModal from "./ApplyLeaveModal";
-import { fmtTime, fmtHours, arrivalLabel, placeLabel, localDateStr } from "../utils/attendanceTime";
+import { fmtTime, fmtHours, arrivalLabel, placeLabel, localDateStr, formatCompanyDateLabel, formatCompanyDateTime } from "../utils/attendanceTime";
 import { mapsUrl } from "../utils/geo";
-import { parseUtc } from "../utils/datetime";
 
 function Place({ within, lat, lng, label }) {
   const p = placeLabel(within);
@@ -49,7 +48,7 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
   const rec = day.rec;
   const sessions = rec?.sessions || [];
   const pastOrToday = day.ds <= localDateStr();
-  const pretty = new Date(`${day.ds}T00:00:00`).toLocaleDateString("en-IN", {
+  const pretty = formatCompanyDateLabel(day.ds, {
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -285,7 +284,7 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
             ✎ Corrected by {rec.edited_by_name}
             {rec.edited_at
-              ? ` on ${parseUtc(rec.edited_at).toLocaleString("en-IN", {
+              ? ` on ${formatCompanyDateTime(rec.edited_at, {
                   day: "numeric",
                   month: "short",
                   hour: "2-digit",

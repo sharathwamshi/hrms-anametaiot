@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import client from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { getBrowserLocation, mapsUrl } from "../utils/geo";
-import { fmtTime, fmtHours, arrivalLabel, placeLabel } from "../utils/attendanceTime";
+import { fmtTime, fmtHours, arrivalLabel, placeLabel, formatCompanyTime, setCompanyTimezone } from "../utils/attendanceTime";
 
 /**
  * Web clock-in/out — the same flow as the mobile app, minus the camera:
@@ -11,7 +11,7 @@ import { fmtTime, fmtHours, arrivalLabel, placeLabel } from "../utils/attendance
  *   • several check-ins a day: after clocking out you can check in again with a reason;
  *   • if the company has switched the selfie policy on, a photo file can still be attached.
  */
-export default function ClockWidget({ onPunch }) {
+export default function ClockWidget({ onPunch, onTimezoneChange }) {
   const { hasClockInOut } = useAuth();
   const [record, setRecord] = useState(null);
   const [now, setNow] = useState(new Date());
@@ -26,7 +26,10 @@ export default function ClockWidget({ onPunch }) {
   const fileRef = useRef(null);
 
   useEffect(() => {
-    client.get("/attendance/policy").then(({ data }) => setSelfieRequired(!!data.selfie_required)).catch(() => {});
+    client.get("/attendance/policy").then(({ data }) => {
+      if (setCompanyTimezone(data.company_timezone)) onTimezoneChange?.();
+      setSelfieRequired(!!data.selfie_required);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -123,7 +126,7 @@ export default function ClockWidget({ onPunch }) {
       <div style={{ minWidth: 0, flex: 1 }}>
         <div className="label" style={{ marginBottom: 4 }}>Today's Attendance</div>
         <div className="time">
-          {now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          {formatCompanyTime(now, true)}
         </div>
         {error && <div style={{ color: "var(--color-danger)", fontSize: 12.5, marginTop: 6 }}>{error}</div>}
         {locating && <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>📍 Getting your location…</div>}

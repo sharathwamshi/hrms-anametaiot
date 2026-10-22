@@ -5,12 +5,13 @@ formula injection (a value starting with = + - @ would otherwise be executed by 
 """
 import io
 import re
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 
-from flask import current_app, send_file
+from flask import send_file
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
+from app.utils.company_time import to_company_local
 
 ORANGE = "E05E00"
 ORANGE_LIGHT = "FFF3EA"
@@ -19,22 +20,18 @@ _FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 _ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
-def tz_offset():
-    """Exports show local clock times. Timestamps are stored as naive UTC; this is the
-    display offset (default India, UTC+05:30). Override with DISPLAY_TZ_OFFSET_MINUTES."""
-    return timedelta(minutes=int(current_app.config.get("DISPLAY_TZ_OFFSET_MINUTES", 330)))
-
-
 def to_local(dt):
-    return dt + tz_offset() if dt else None
+    return to_company_local(dt)
 
 
 def fmt_time(dt):
-    return to_local(dt).strftime("%I:%M %p").lstrip("0") if dt else ""
+    local = to_local(dt)
+    return f"{local.strftime('%I:%M %p').lstrip('0')} {local.tzname()}" if local else ""
 
 
 def fmt_datetime(dt):
-    return to_local(dt).strftime("%d-%b-%Y %I:%M %p") if dt else ""
+    local = to_local(dt)
+    return f"{local.strftime('%d-%b-%Y %I:%M %p').lstrip('0')} {local.tzname()}" if local else ""
 
 
 def safe_cell(value):

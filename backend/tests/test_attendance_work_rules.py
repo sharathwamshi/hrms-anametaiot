@@ -9,6 +9,7 @@ from app import create_app
 from app.extensions import db
 from app.models import Attendance, CompanySettings, Department, User
 from app.roles import EMPLOYEE, MANAGER
+from app.utils.company_time import company_today, to_company_local
 
 
 class TestConfig(Config):
@@ -86,14 +87,14 @@ class AttendanceWorkRuleTests(unittest.TestCase):
             headers=self.headers["manager"],
             json={
                 "user_id": employee_id,
-                "work_date": date.today().isoformat(),
+                "work_date": company_today().isoformat(),
                 "sessions": [{"clock_in": check_in, "clock_out": check_out}],
                 "note": "Verified correction",
             },
         )
 
     def test_inclusive_arrival_buffer_boundaries(self):
-        day = date.today()
+        day = company_today()
         for buffer_minutes in (5, 10, 15):
             with self.subTest(buffer=buffer_minutes):
                 response = self.client.put(
@@ -122,6 +123,16 @@ class AttendanceWorkRuleTests(unittest.TestCase):
                 )
                 self.assertEqual(response.get_json()["check_in_status"], "late")
 
+    def test_company_timezone_and_utc_timestamp_conventions(self):
+        self.assertEqual(self.app.config["COMPANY_TIMEZONE"], "Asia/Kolkata")
+        self.assertEqual(
+            to_company_local(datetime(2026, 10, 21, 18, 30)).isoformat(),
+            "2026-10-22T00:00:00+05:30",
+        )
+        response = self.client.get("/api/attendance/policy", headers=self.headers["manager"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["company_timezone"], "Asia/Kolkata")
+
     def test_policy_validation_and_manager_edit_permissions(self):
         response = self.client.put(
             "/api/attendance/policy",
@@ -136,7 +147,7 @@ class AttendanceWorkRuleTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
-        day = date.today()
+        day = company_today()
         check_in, check_out = ist_iso(day, 9, 30), ist_iso(day, 18, 30)
         response = self.client.put(
             "/api/attendance/manager/day",
@@ -210,7 +221,7 @@ class AttendanceWorkRuleTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         record = Attendance.query.filter_by(
-            user_id=self.employee_id, work_date=date.today()
+            user_id=self.employee_id, work_date=company_today()
         ).first()
         self.assertIsNotNone(record.clock_out)
         self.assertEqual(record.sessions[0].clock_out, record.clock_out)

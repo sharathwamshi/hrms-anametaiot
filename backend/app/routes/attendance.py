@@ -1,4 +1,4 @@
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
@@ -7,6 +7,7 @@ from app.models import (Attendance, AttendanceSession, AttendanceRegularizationR
                         AttendanceRegularizationRequest, User, Holiday, OfficeLocation,
                         CompanySettings, LeaveRequest)
 from app.utils.push import send_push
+from app.utils.company_time import company_today, utc_now_naive, to_company_local
 from math import radians, sin, cos, asin, sqrt
 from flask import current_app, send_from_directory
 import os
@@ -227,6 +228,7 @@ def get_policy():
         "attendance_buffer_minutes": settings.attendance_buffer_minutes,
         "official_check_in": "09:30",
         "official_check_out": "18:30",
+        "company_timezone": current_app.config.get("COMPANY_TIMEZONE", "Asia/Kolkata"),
     })
 
 
@@ -259,6 +261,7 @@ def update_policy():
         "attendance_buffer_minutes": settings.attendance_buffer_minutes,
         "official_check_in": "09:30",
         "official_check_out": "18:30",
+        "company_timezone": current_app.config.get("COMPANY_TIMEZONE", "Asia/Kolkata"),
     })
 
 
@@ -293,7 +296,7 @@ def clock_in():
         return blocked
 
     user_id = int(get_jwt_identity())
-    today = date.today()
+    today = company_today()
     record = Attendance.query.filter_by(user_id=user_id, work_date=today).first()
     if record:
         _ensure_sessions(record)
@@ -322,7 +325,7 @@ def clock_in():
         db.session.add(record)
         db.session.flush()
     session = AttendanceSession(
-        session_no=len(record.sessions) + 1, clock_in=datetime.utcnow(), clock_in_note=note,
+        session_no=len(record.sessions) + 1, clock_in=utc_now_naive(), clock_in_note=note,
         clock_in_lat=lat, clock_in_lng=lng, clock_in_within_geofence=_check_geofence(lat, lng),
         clock_in_selfie=selfie_name, reentry_reason=reason if is_reentry else None,
     )
@@ -348,7 +351,7 @@ def clock_out():
         return blocked
 
     user_id = int(get_jwt_identity())
-    today = date.today()
+    today = company_today()
     record = Attendance.query.filter_by(user_id=user_id, work_date=today).first()
 
     if not record or not record.clock_in:
@@ -365,7 +368,7 @@ def clock_out():
     selfie_name, err = _selfie_check("clock out", selfie_file, user_id, today, "out")
     if err:
         return err
-    session.clock_out = datetime.utcnow()
+    session.clock_out = utc_now_naive()
     session.clock_out_note = note
     session.clock_out_lat, session.clock_out_lng = lat, lng
     session.clock_out_within_geofence = _check_geofence(lat, lng)
@@ -383,7 +386,7 @@ def clock_out():
 @jwt_required()
 def today_status():
     user_id = int(get_jwt_identity())
-    record = Attendance.query.filter_by(user_id=user_id, work_date=date.today()).first()
+    record = Attendance.query.filter_by(user_id=user_id, work_date=company_today()).first()
     claims = get_jwt()
     return jsonify(
         {
@@ -398,8 +401,8 @@ def today_status():
 @jwt_required()
 def history():
     user_id = int(get_jwt_identity())
-    month = request.args.get("month", type=int) or date.today().month
-    year = request.args.get("year", type=int) or date.today().year
+    month = request.args.get("month", type=int) or company_today().month
+    year = request.args.get("year", type=int) or company_today().year
 
     records = (
         Attendance.query.filter(
@@ -420,7 +423,7 @@ def team_attendance():
     claims = get_jwt()
     role = claims.get("role")
     user_id = int(get_jwt_identity())
-    target_date = request.args.get("date", date.today().isoformat())
+    target_date = request.args.get("date", company_today().isoformat())
 
     if role in (HR_OPERATIONS, OPERATIONS, SUPER_ADMIN):
         user_ids = [u.id for u in User.query.filter_by(is_active=True).all()]
@@ -520,7 +523,7 @@ REGULARIZATION_MONTHLY_LIMIT = 5
 
 
 def _regularization_month_bounds(today=None):
-    today = today or datetime.utcnow().date()
+    today = today or company_today()
     start = datetime(today.year, today.month, 1)
     end_year = today.year + 1 if today.month == 12 else today.year
     end_month = 1 if today.month == 12 else today.month + 1
@@ -559,7 +562,7 @@ def request_regularization():
         work_date = datetime.strptime(payload.get("work_date", ""), "%Y-%m-%d").date()
     except ValueError:
         return jsonify({"message": "A valid work_date (YYYY-MM-DD) is required."}), 400
-    if work_date > date.today():
+    if work_date > company_today():
         return jsonify({"message": "You cannot request regularization for a future date."}), 400
 
     User.query.filter_by(id=user_id).with_for_update().first()
@@ -589,7 +592,7 @@ def request_regularization():
     record.regularization_status = "pending"
     record.regularization_reason_id = reason.id
     record.regularization_note = (payload.get("note") or "").strip()[:255]
-    record.regularization_requested_at = datetime.utcnow()
+    record.regularization_requested_at = utc_now_naive()
     record.regularization_reviewed_by = None
     record.regularization_reviewed_at = None
     record.regularization_review_comment = None
@@ -660,7 +663,7 @@ def approve_regularization_request(record_id):
     record.is_regularized = True
     record.status = "regularized"
     record.regularization_reviewed_by = reviewer_id
-    record.regularization_reviewed_at = datetime.utcnow()
+    record.regularization_reviewed_at = utc_now_naive()
     record.regularization_review_comment = payload.get("comment")
     db.session.commit()
     send_push(record.user_id, "Regularization approved", f"Your request for {record.work_date.isoformat()} was approved.",
@@ -685,7 +688,7 @@ def reject_regularization_request(record_id):
         return jsonify({"message": "A comment explaining the rejection is required."}), 400
     record.regularization_status = "rejected"
     record.regularization_reviewed_by = reviewer_id
-    record.regularization_reviewed_at = datetime.utcnow()
+    record.regularization_reviewed_at = utc_now_naive()
     record.regularization_review_comment = comment
     db.session.commit()
     send_push(record.user_id, "Regularization rejected", f"Your request for {record.work_date.isoformat()} was rejected: {comment}",
@@ -782,7 +785,7 @@ def run_attendance_reminders():
     if kind not in ("clock_in_reminder", "clock_out_reminder", "manager_missing_alert"):
         return jsonify({"message": "kind must be clock_in_reminder, clock_out_reminder, or manager_missing_alert."}), 400
 
-    today = date.today()
+    today = company_today()
     if today.isoformat() in {h.holiday_date.isoformat() for h in Holiday.query.filter_by(holiday_date=today).all()}:
         return jsonify({"sent": 0, "skipped": "today is a holiday"})
 
@@ -927,8 +930,8 @@ def _calendar_payload(target, month, year, redact=False):
 
 
 def _month_year_args():
-    month = request.args.get("month", type=int) or date.today().month
-    year = request.args.get("year", type=int) or date.today().year
+    month = request.args.get("month", type=int) or company_today().month
+    year = request.args.get("year", type=int) or company_today().year
     return (month, year) if 1 <= month <= 12 and 2000 <= year <= 2100 else (None, None)
 
 
@@ -966,7 +969,7 @@ def _build_overview(claims, viewer_id, target_date):
         LeaveRequest.user_id.in_(scope or {0}), LeaveRequest.status == "approved",
         LeaveRequest.start_date <= target_date, LeaveRequest.end_date >= target_date).all()}
     holiday = Holiday.query.filter_by(holiday_date=target_date).first()
-    is_today = target_date == date.today()
+    is_today = target_date == company_today()
 
     rows, counts = [], {"present": 0, "not_clocked_in": 0, "absent": 0, "on_leave": 0, "outside_office": 0,
                         "clocked_in_now": 0, "reentries": 0}
@@ -1035,7 +1038,7 @@ def team_overview():
     if claims.get("role") not in VIEWER_ROLES:
         return jsonify({"message": "You do not have permission to view team attendance."}), 403
     try:
-        target_date = datetime.strptime(request.args.get("date", date.today().isoformat()), "%Y-%m-%d").date()
+        target_date = datetime.strptime(request.args.get("date", company_today().isoformat()), "%Y-%m-%d").date()
     except ValueError:
         return jsonify({"message": "date must be YYYY-MM-DD."}), 400
     return jsonify(_build_overview(claims, viewer_id, target_date))
@@ -1064,7 +1067,7 @@ def get_selfie(record_id, kind):
 def _parse_range(default_days=6, max_days=92):
     """Reads ?from&to. Returns ((start, end), None) or (None, error_response)."""
     try:
-        end = datetime.strptime(request.args["to"], "%Y-%m-%d").date() if request.args.get("to") else date.today()
+        end = datetime.strptime(request.args["to"], "%Y-%m-%d").date() if request.args.get("to") else company_today()
         start = datetime.strptime(request.args["from"], "%Y-%m-%d").date() if request.args.get("from") else end - timedelta(days=default_days)
     except ValueError:
         return None, (jsonify({"message": "from/to must be YYYY-MM-DD."}), 400)
@@ -1158,7 +1161,6 @@ def _parse_when(value):
         raise ValueError("missing time")
     dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
     if dt.tzinfo is not None:
-        from datetime import timezone
         dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt
 
@@ -1175,8 +1177,7 @@ def _audit_session_times(sessions):
 
 
 def _local_date(dt):
-    from app.utils.excel import to_local
-    return to_local(dt).date()
+    return to_company_local(dt).date()
 
 
 def _manager_target(claims, actor_id, user_id):
@@ -1223,7 +1224,7 @@ def _parse_work_date(payload):
         work_date = datetime.strptime(payload.get("work_date", ""), "%Y-%m-%d").date()
     except (ValueError, TypeError):
         return None, (jsonify({"message": "A valid work_date (YYYY-MM-DD) is required."}), 400)
-    if work_date > date.today():
+    if work_date > company_today():
         return None, (jsonify({"message": "You cannot correct a future date."}), 400)
     return work_date, None
 
@@ -1233,7 +1234,7 @@ def _finalize_pending_request(record, actor_id, comment):
     if record.regularization_status == "pending":
         record.regularization_status = "approved"
         record.regularization_reviewed_by = actor_id
-        record.regularization_reviewed_at = datetime.utcnow()
+        record.regularization_reviewed_at = utc_now_naive()
         record.regularization_review_comment = comment[:255]
         return True
     return False
@@ -1318,7 +1319,7 @@ def manager_edit_day():
         if item["out"] is None:
             if i != len(parsed) - 1:
                 return jsonify({"message": "Only the last check-in can be left open (still clocked in)."}), 400
-            if work_date != date.today():
+            if work_date != company_today():
                 return jsonify({"message": "A check-in can only be left open for today."}), 400
         if i and parsed[i - 1]["out"] and item["in"] < parsed[i - 1]["out"]:
             return jsonify({"message": f"Check-in {i + 1} starts before the previous check-out — sessions cannot overlap."}), 400
@@ -1387,7 +1388,7 @@ def manager_edit_day():
         still_open = any(x["out"] is None for x in parsed)
         record.status = "present" if (still_open or (record.total_hours or 0) >= 4) else "half_day"
     audit = f"{custom_reason}: {note}" if (custom_reason and note) else (custom_reason or note)
-    record.edited_by, record.edited_at, record.edit_note = actor_id, datetime.utcnow(), audit[:255]
+    record.edited_by, record.edited_at, record.edit_note = actor_id, utc_now_naive(), audit[:255]
     settled = _finalize_pending_request(record, actor_id, f"Resolved by direct correction — {audit}")
     db.session.commit()
 
@@ -1450,11 +1451,11 @@ def manager_regularize_day():
     record.regularization_status = "approved"
     record.regularization_reason_id = reason.id
     record.regularization_note = note
-    record.regularization_requested_at = record.regularization_requested_at or datetime.utcnow()
+    record.regularization_requested_at = record.regularization_requested_at or utc_now_naive()
     record.regularization_reviewed_by = actor_id
-    record.regularization_reviewed_at = datetime.utcnow()
+    record.regularization_reviewed_at = utc_now_naive()
     record.regularization_review_comment = "Regularized directly by the manager."
-    record.edited_by, record.edited_at, record.edit_note = actor_id, datetime.utcnow(), f"Regularized: {reason.label}"[:255]
+    record.edited_by, record.edited_at, record.edit_note = actor_id, utc_now_naive(), f"Regularized: {reason.label}"[:255]
     db.session.commit()
 
     send_push(target.id, "Attendance regularized",
@@ -1480,7 +1481,7 @@ def set_office_restriction(user_id):
     if not isinstance(payload.get("restricted"), bool):
         return jsonify({"message": "restricted (true/false) is required."}), 400
     target.restrict_to_office = payload["restricted"]
-    target.restrict_set_by, target.restrict_set_at = actor_id, datetime.utcnow()
+    target.restrict_set_by, target.restrict_set_at = actor_id, utc_now_naive()
     db.session.commit()
     actor = db.session.get(User, actor_id)
     send_push(target.id, "Clock-in rule changed",
