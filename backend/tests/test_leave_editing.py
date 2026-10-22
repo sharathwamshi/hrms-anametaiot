@@ -209,7 +209,7 @@ def test_leave_editing_api():
             assert client.post(
                 f"/api/leave/{pending_id}/cancel",
                 headers=employee_headers,
-            ).status_code == 400
+            ).status_code == 409
 
             assert client.put(
                 f"/api/leave/{pending_id}",
@@ -224,10 +224,11 @@ def test_leave_editing_api():
                 json={"decision": "approved"},
             ).status_code == 400
 
-            assert client.post(
+            approved_cancellation = client.post(
                 f"/api/leave/{approved_id}/cancel",
                 headers=employee_headers,
-            ).status_code == 400
+            )
+            assert approved_cancellation.status_code == 200, approved_cancellation.get_json()
 
             calendar_response = client.get(
                 "/api/attendance/my-calendar?month=11&year=2026",
@@ -238,8 +239,8 @@ def test_leave_editing_api():
             calendar_statuses = {
                 item["status"] for item in calendar["leave_requests"]
             }
-            assert calendar_statuses == {"approved", "rejected", "cancelled"}
-            assert len(calendar["leaves"]) == 1
+            assert calendar_statuses == {"rejected", "cancelled"}
+            assert len(calendar["leaves"]) == 0
         finally:
             db.session.remove()
             db.drop_all()

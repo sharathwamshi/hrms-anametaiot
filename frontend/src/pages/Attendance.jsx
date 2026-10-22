@@ -161,7 +161,7 @@ function RulesPanel() {
                   <td><strong>{r.label}</strong></td>
                   <td className="muted">{r.description || "—"}</td>
                   <td><span className={`chip ${r.is_active ? "green" : ""}`}>{r.is_active ? "Active" : "Retired"}</span></td>
-                  <td><button className="btn btn-sm btn-outline" onClick={() => toggle(r)}>{r.is_active ? "Retire" : "Reactivate"}</button></td>
+                  <td><button className={`btn btn-sm ${r.is_active ? "btn-outline" : "btn-success"}`} onClick={() => toggle(r)}>{r.is_active ? "Retire" : "Reactivate"}</button></td>
                 </tr>
               ))}
             </tbody>

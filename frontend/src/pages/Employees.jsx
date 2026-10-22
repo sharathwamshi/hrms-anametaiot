@@ -142,7 +142,7 @@ export default function Employees() {
                         <td>{fmtDate(emp.removed_at)}</td>
                         <td>{emp.removed_by_name || "—"}</td>
                         <td className="muted" style={{ maxWidth: 260 }}>{emp.removal_reason || "—"}</td>
-                        <td>{canRestoreRow(emp) && <button className="btn btn-sm btn-outline" onClick={(e) => restoreRow(e, emp)}>Restore</button>}</td>
+                        <td>{canRestoreRow(emp) && <button className="btn btn-sm btn-success" onClick={(e) => restoreRow(e, emp)}>Restore</button>}</td>
                       </>
                     ) : (
                       <>
@@ -218,7 +218,7 @@ export default function Employees() {
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Create Employee</button>
+                <button type="submit" className="btn btn-success">Create Employee</button>
               </div>
             </form>
           </div>

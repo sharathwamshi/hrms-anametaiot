@@ -2,12 +2,118 @@
 from datetime import date, datetime
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.extensions import db
-from app.models import LeaveRequest, LeaveType, LeaveBalance, User
-from app.roles import MANAGER, HR_OPERATIONS, APPROVER_ROLES, CONTRACT_EMPLOYEE
+from app.models import LeaveRequest, LeaveType, LeaveBalance, LeaveEntitlementAudit, User
+from app.models.leave import ensure_leave_balances
+from app.roles import MANAGER, HR_OPERATIONS, SUPER_ADMIN, APPROVER_ROLES, CONTRACT_EMPLOYEE
 
 bp = Blueprint("leave", __name__, url_prefix="/api/leave")
+
+
+def _manager_report_ids(manager_id):
+    return [user.id for user in User.query.filter_by(manager_id=manager_id).all()]
+
+
+def _validated_leave_fields(payload, user_id):
+    try:
+        start = datetime.strptime(payload.get("start_date"), "%Y-%m-%d").date()
+        end = datetime.strptime(payload.get("end_date"), "%Y-%m-%d").date()
+        leave_type_id = int(payload.get("leave_type_id"))
+    except (TypeError, ValueError):
+        return None, "start_date, end_date and leave_type_id are required."
+
+    if end < start:
+        return None, "End date cannot be before start date."
+    if start < date.today():
+        return None, "Leave can only be requested for today or a future date."
+
+    reason = payload.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        return None, "A reason is required."
+    reason = reason.strip()
+    if len(reason) > 500:
+        return None, "Reason cannot exceed 500 characters."
+
+    leave_type = db.session.get(LeaveType, leave_type_id)
+    if leave_type is None:
+        return None, "The selected leave type is invalid."
+
+    overlap = LeaveRequest.query.filter(
+        LeaveRequest.user_id == user_id,
+        LeaveRequest.status.in_(("pending", "approved")),
+        LeaveRequest.start_date <= end,
+        LeaveRequest.end_date >= start,
+    ).first()
+    if overlap:
+        return None, (
+            "You already have a pending or approved leave request "
+            "for part of this date range."
+        )
+
+    return {
+        "leave_type_id": leave_type.id,
+        "start_date": start,
+        "end_date": end,
+        "days": (end - start).days + 1,
+        "reason": reason,
+    }, None
+
+
+def _validated_entitlements(payload, field_name="annual_quota"):
+    if not isinstance(payload, dict) or not isinstance(payload.get("entitlements"), list):
+        return None, "A list of leave entitlements is required."
+    if not payload["entitlements"]:
+        return None, "At least one leave entitlement is required."
+
+    updates = {}
+    for item in payload["entitlements"]:
+        if not isinstance(item, dict):
+            return None, "Each leave entitlement must be an object."
+        try:
+            leave_type_id = int(item.get("leave_type_id"))
+            entitlement = float(item.get(field_name))
+        except (TypeError, ValueError):
+            return None, "Each entitlement requires a valid leave type and quota."
+        if entitlement < 0 or entitlement != entitlement or entitlement in (float("inf"), float("-inf")):
+            return None, "Leave entitlement must be a non-negative number."
+        if leave_type_id in updates:
+            return None, "A leave type can only be updated once per request."
+        leave_type = db.session.get(LeaveType, leave_type_id)
+        if leave_type is None:
+            return None, "The selected leave type is invalid."
+        updates[leave_type_id] = (leave_type, entitlement)
+    return updates, None
+
+
+def _eligible_manager_reports(manager_id):
+    return User.query.filter(
+        User.manager_id == manager_id,
+        User.is_active.is_(True),
+        User.role != CONTRACT_EMPLOYEE,
+    ).all()
+
+
+def _entitlement_conflict(balance, entitlement, employee):
+    if balance.used <= entitlement:
+        return None
+    return {
+        "employee_id": employee.id,
+        "employee_name": employee.full_name,
+        "leave_type_id": balance.leave_type_id,
+        "approved_leave_taken": balance.used,
+        "requested_entitlement": entitlement,
+    }
+
+
+def _parse_filter_date(value, field_name):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        raise ValueError(f"{field_name} must use YYYY-MM-DD format.")
 
 
 @bp.get("/types")
@@ -220,10 +326,31 @@ def cancel_leave(request_id):
             "message": "You can only cancel your own leave requests."
         }), 403
 
-    if leave_request.status != "pending":
-        return jsonify({
-            "message": "Only pending leave requests can be cancelled."
-        }), 400
+    if leave_request.status == "cancelled":
+        return jsonify({"message": "This leave request has already been cancelled."}), 409
+    if leave_request.status not in ("pending", "approved"):
+        return jsonify({"message": "Only pending or approved leave requests can be cancelled."}), 400
+    if leave_request.status == "approved" and leave_request.start_date < date.today():
+        return jsonify({"message": "Approved leave can only be cancelled before it starts."}), 400
+
+    if leave_request.status == "approved":
+        for year in range(leave_request.start_date.year, leave_request.end_date.year + 1):
+            ensure_leave_balances(user_id, year)
+        db.session.flush()
+        for year in range(leave_request.start_date.year, leave_request.end_date.year + 1):
+            year_start = date(year, 1, 1)
+            year_end = date(year, 12, 31)
+            days_in_year = (
+                min(leave_request.end_date, year_end)
+                - max(leave_request.start_date, year_start)
+            ).days + 1
+            balance = LeaveBalance.query.filter_by(
+                user_id=user_id,
+                leave_type_id=leave_request.leave_type_id,
+                year=year,
+            ).first()
+            if balance:
+                balance.used = max(0, balance.used - days_in_year)
 
     leave_request.status = "cancelled"
     db.session.commit()
@@ -605,18 +732,36 @@ def decide(request_id):
     if leave_request.status != "pending":
         return jsonify({"message": "This leave request has already been reviewed."}), 409
 
+    if decision == "approved":
+        for year in range(leave_request.start_date.year, leave_request.end_date.year + 1):
+            ensure_leave_balances(leave_request.user_id, year)
+        db.session.flush()
+        yearly_balances = []
+        for year in range(leave_request.start_date.year, leave_request.end_date.year + 1):
+            year_start = date(year, 1, 1)
+            year_end = date(year, 12, 31)
+            days_in_year = (
+                min(leave_request.end_date, year_end)
+                - max(leave_request.start_date, year_start)
+            ).days + 1
+            balance = LeaveBalance.query.filter_by(
+                user_id=leave_request.user_id,
+                leave_type_id=leave_request.leave_type_id,
+                year=year,
+            ).first()
+            if balance is None or balance.balance < days_in_year:
+                db.session.rollback()
+                available = balance.balance if balance else 0
+                return jsonify({
+                    "message": f"Insufficient balance for {year}. Available: {available} day(s)."
+                }), 409
+            yearly_balances.append((balance, days_in_year))
+        for balance, days_in_year in yearly_balances:
+            balance.used += days_in_year
+
     leave_request.status = decision
     leave_request.reviewed_by = reviewer_id
     leave_request.review_comment = payload.get("comment", "")
-
-    if decision == "approved":
-        balance = LeaveBalance.query.filter_by(
-            user_id=leave_request.user_id,
-            leave_type_id=leave_request.leave_type_id,
-            year=leave_request.start_date.year,
-        ).first()
-        if balance:
-            balance.used += leave_request.days
 
     db.session.commit()
 

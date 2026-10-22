@@ -80,7 +80,7 @@ export default function ApplyLeaveModal({ startDate, onClose, onDone }) {
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-              <button type="submit" className="btn btn-primary" disabled={submitting || types.length === 0}>
+              <button type="submit" className="btn btn-success" disabled={submitting || types.length === 0}>
                 {submitting ? "Submitting…" : "Submit Request"}
               </button>
             </div>
