@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import client from "../api/client";
-import { fromLocalInput, toLocalInput } from "../utils/attendanceTime";
+import { fromLocalInput, localDateStr, toLocalInput } from "../utils/attendanceTime";
 
 const STATUS_OPTIONS = [
   { value: "", label: "Automatic (Present if ≥ 4 hours, else Half day)" },
@@ -19,7 +19,7 @@ export default function ManagerEditDayModal({ person, day, onClose, onDone }) {
   const [reasons, setReasons] = useState([]);
   const [rows, setRows] = useState(() => (rec?.sessions?.length
     ? rec.sessions.map((s) => ({ id: s.id, in: toLocalInput(s.clock_in), out: toLocalInput(s.clock_out), why: s.reentry_reason || "" }))
-    : [{ id: null, in: `${day.ds}T09:30`, out: `${day.ds}T18:30`, why: "" }]));
+    : [{ id: null, in: "", out: "", why: "" }]));
   const [status, setStatus] = useState("");
   const [reasonId, setReasonId] = useState("");
   const [note, setNote] = useState("");
@@ -40,8 +40,27 @@ export default function ManagerEditDayModal({ person, day, onClose, onDone }) {
     setError("");
     const clearing = status === "absent";
     if (!clearing) {
+      if (rows.length === 0) { setError("Add a check-in or mark the day as absent."); return; }
+      const parsed = [];
       for (let i = 0; i < rows.length; i++) {
         if (!rows[i].in) { setError(`Check-in ${i + 1}: please pick a check-in time.`); return; }
+        const checkIn = fromLocalInput(rows[i].in);
+        const checkOut = rows[i].out ? fromLocalInput(rows[i].out) : null;
+        if (!checkIn || rows[i].in.slice(0, 10) !== day.ds) { setError(`Check-in ${i + 1} must be a valid time on ${day.ds}.`); return; }
+        if (rows[i].out && (!checkOut || rows[i].out.slice(0, 10) < day.ds)) { setError(`Check-out ${i + 1} must be a valid time after the check-in date.`); return; }
+        const inDate = new Date(checkIn);
+        const outDate = checkOut ? new Date(checkOut) : null;
+        if (outDate && outDate <= inDate) { setError(`Check-out ${i + 1} must be after its check-in.`); return; }
+        if (outDate && outDate - inDate > 24 * 60 * 60 * 1000) { setError(`Session ${i + 1} cannot be longer than 24 hours.`); return; }
+        if (!outDate && (i !== rows.length - 1 || day.ds !== localDateStr())) { setError("Only the final session for today can be left without a check-out."); return; }
+        parsed.push({ start: inDate, end: outDate, index: i });
+      }
+      parsed.sort((a, b) => a.start - b.start);
+      for (let i = 1; i < parsed.length; i++) {
+        if (!parsed[i - 1].end || parsed[i].start < parsed[i - 1].end) {
+          setError(`Check-in ${parsed[i].index + 1} overlaps the previous session.`);
+          return;
+        }
       }
     }
     if (!reasonId && note.trim().length < 3) { setError("Please pick a reason (or write one) — it is kept on the audit trail."); return; }
@@ -67,6 +86,7 @@ export default function ManagerEditDayModal({ person, day, onClose, onDone }) {
         <p className="muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
           {new Date(`${day.ds}T00:00:00`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}. No request is needed — your correction is recorded with your name, the time and your reason.
           {rec?.regularization_status === "pending" && " This also settles their pending regularization request."}
+          {" "}Standard checkout is 6:30 PM; enter the actual check-out time.
         </p>
         <form onSubmit={submit}>
           {status !== "absent" && (

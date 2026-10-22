@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import client from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { getBrowserLocation, mapsUrl } from "../utils/geo";
-import { fmtTime, fmtHours, placeLabel } from "../utils/attendanceTime";
+import { fmtTime, fmtHours, arrivalLabel, placeLabel } from "../utils/attendanceTime";
 
 /**
  * Web clock-in/out — the same flow as the mobile app, minus the camera:
@@ -153,6 +153,7 @@ export default function ClockWidget({ onPunch }) {
                 </div>
               );
             })}
+            {record.check_in_status && <div className={`att-chip ${record.check_in_status === "late" ? "red" : "green"}`} style={{ marginTop: 5 }}>{arrivalLabel(record.check_in_status)}</div>}
             {record.total_hours > 0 && <div className="muted">Worked so far: <strong>{fmtHours(record.total_hours)}</strong>{record.away_minutes > 0 ? ` · away ${record.away_minutes} min` : ""}</div>}
           </div>
         )}

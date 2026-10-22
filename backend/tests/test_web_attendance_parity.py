@@ -299,8 +299,8 @@ with app.app_context():
     who = {x[hdr.index('Employee')]: x for x in rows if x[0]}
     ok("team-day export lists everyone incl. people who haven't clocked in", set(who) == {"Sneha Recruiter", "Meera Recruiter"} and who["Sneha Recruiter"][hdr.index('Check-ins')] == 2, who)
     ok("team-day export has last-known location for a manager", who["Sneha Recruiter"][hdr.index('Last known latitude')] not in ("", None))
-    rows_ops = table(xl(c.get(f'/api/attendance/export/team-day?date={TODAY.isoformat()}', headers=H['ops']))['Team today'])[1]
-    ok("team-day export hides last-known location from Operations", all(x[11] in ("", None) for x in rows_ops if x[0]))
+    hdr_ops, rows_ops = table(xl(c.get(f'/api/attendance/export/team-day?date={TODAY.isoformat()}', headers=H['ops']))['Team today'])
+    ok("team-day export hides last-known location from Operations", all(x[hdr_ops.index('Last known latitude')] in ("", None) for x in rows_ops if x[0]))
     ok("team-day bad date is a 400", c.get('/api/attendance/export/team-day?date=nope', headers=H['mgr']).status_code == 400)
     r = c.get(f'/api/attendance/export/reentries?from={D3.isoformat()}&to={TODAY.isoformat()}', headers=H['mgr'])
     hdr, rows = table(xl(r)['Re-entries'])

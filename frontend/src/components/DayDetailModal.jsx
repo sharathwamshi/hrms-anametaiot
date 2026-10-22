@@ -6,7 +6,7 @@ import RegularizeRequestModal from "./RegularizeRequestModal";
 import ManagerEditDayModal from "./ManagerEditDayModal";
 import ManagerRegularizeModal from "./ManagerRegularizeModal";
 import ApplyLeaveModal from "./ApplyLeaveModal";
-import { fmtTime, fmtHours, placeLabel, localDateStr } from "../utils/attendanceTime";
+import { fmtTime, fmtHours, arrivalLabel, placeLabel, localDateStr } from "../utils/attendanceTime";
 import { mapsUrl } from "../utils/geo";
 import { parseUtc } from "../utils/datetime";
 
@@ -21,6 +21,24 @@ function Place({ within, lat, lng, label }) {
       )}
     </span>
   );
+}
+
+function changedTimes(details) {
+  const before = details?.before || [];
+  const after = details?.after || [];
+  const count = Math.max(before.length, after.length);
+  if (!count) return "No session times recorded.";
+  return Array.from({ length: count }, (_, i) => {
+    const oldSession = before[i];
+    const newSession = after[i];
+    if (!oldSession) {
+      return `Session ${newSession.session_no} added: ${fmtTime(newSession.clock_in)} → ${fmtTime(newSession.clock_out)}`;
+    }
+    if (!newSession) {
+      return `Session ${oldSession.session_no} removed: ${fmtTime(oldSession.clock_in)} → ${fmtTime(oldSession.clock_out)}`;
+    }
+    return `Session ${newSession.session_no}: ${fmtTime(oldSession.clock_in)} → ${fmtTime(oldSession.clock_out)} changed to ${fmtTime(newSession.clock_in)} → ${fmtTime(newSession.clock_out)}`;
+  }).join("; ");
 }
 
 /** Everything about one day: each check-in/out, where it happened, why, who corrected it — plus the actions. */
@@ -166,6 +184,11 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
                 <strong>{fmtHours(rec.total_hours)}</strong>{" "}
                 <span className="muted">worked</span>
               </span>
+              {rec.check_in_status && (
+                <span className={`att-chip ${rec.check_in_status === "late" ? "red" : "green"}`}>
+                  {arrivalLabel(rec.check_in_status)}
+                </span>
+              )}
               <span>
                 <strong>{sessions.length}</strong>{" "}
                 <span className="muted">
@@ -179,7 +202,6 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
                 </span>
               )}
             </div>
-
             {sessions.map((x) => (
               <div className="att-session" key={x.session_no}>
                 <div className="when">
@@ -271,6 +293,7 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
                 })}`
               : ""}
             {rec.edit_note ? ` — ${rec.edit_note}` : ""}
+            {rec.edit_details && <div style={{ marginTop: 4 }}>Changed times: {changedTimes(rec.edit_details)}</div>}
           </div>
         )}
 
@@ -314,7 +337,7 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
               className="btn btn-primary"
               onClick={() => setSub("edit")}
             >
-              Edit times
+              Edit Attendance
             </button>
           )}
         </div>

@@ -9,6 +9,10 @@ export const fmtHours = (h) => {
   return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
 };
 
+export const arrivalLabel = (status) => (
+  status === "late" ? "Late" : status === "in_time" ? "In Time" : "—"
+);
+
 export const pad = (n) => String(n).padStart(2, "0");
 
 /** YYYY-MM-DD for a local Date. */

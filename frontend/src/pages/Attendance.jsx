@@ -12,7 +12,7 @@ import ReentriesPanel from "../components/ReentriesPanel";
 import OfficeLocationsPanel from "../components/OfficeLocationsPanel";
 import OfficeRestrictionToggle from "../components/OfficeRestrictionToggle";
 import ExportButton from "../components/ExportButton";
-import { fmtTime, fmtHours, localDateStr, placeLabel } from "../utils/attendanceTime";
+import { fmtTime, fmtHours, arrivalLabel, localDateStr, placeLabel } from "../utils/attendanceTime";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
 
@@ -172,6 +172,65 @@ function RulesPanel() {
   );
 }
 
+function AttendancePolicyPanel() {
+  const [policy, setPolicy] = useState(null);
+  const [bufferMinutes, setBufferMinutes] = useState("10");
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    client.get("/attendance/policy")
+      .then(({ data }) => {
+        setPolicy(data);
+        setBufferMinutes(String(data.attendance_buffer_minutes));
+      })
+      .catch((err) => setError(err?.response?.data?.message || "Could not load attendance policy."));
+  }, []);
+
+  const save = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSaved(false);
+    setSaving(true);
+    try {
+      const { data } = await client.put("/attendance/policy", {
+        attendance_buffer_minutes: Number(bufferMinutes),
+      });
+      setPolicy(data);
+      setSaved(true);
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not save attendance policy.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h3>Attendance Policy</h3>
+      <p className="muted" style={{ fontSize: 12.5 }}>
+        Official check-in is 9:30 AM. A check-in at the selected buffer boundary is In Time; later check-ins are Late.
+        Standard checkout is 6:30 PM; the actual checkout punch is recorded.
+      </p>
+      {!policy && !error && <Loader />}
+      {error && <div className="login-error" style={{ marginBottom: 10 }}>{error}</div>}
+      {policy && (
+        <form onSubmit={save} style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div className="form-field" style={{ marginBottom: 0 }}>
+            <label htmlFor="attendance-buffer">Check-in buffer</label>
+            <select id="attendance-buffer" value={bufferMinutes} onChange={(e) => { setBufferMinutes(e.target.value); setSaved(false); }}>
+              {[5, 10, 15].map((minutes) => <option key={minutes} value={minutes}>{minutes} minutes</option>)}
+            </select>
+          </div>
+          <button className="btn btn-primary btn-sm" disabled={saving}>{saving ? "Saving…" : "Save policy"}</button>
+          {saved && <span className="att-chip green">Saved</span>}
+        </form>
+      )}
+    </div>
+  );
+}
+
 export default function Attendance() {
   const { user } = useAuth();
   const [tab, setTab] = useState("calendar");
@@ -228,6 +287,7 @@ export default function Attendance() {
         {canSeeTeam && tabBtn("reentries", "Re-entries")}
         {tabBtn("holidays", "Holidays")}
         {canManageCalendar && tabBtn("rules", "Regularization Rules")}
+        {canApprove && tabBtn("policy", "Attendance Policy")}
         {tabBtn("offices", "Office Locations")}
       </div>
 
@@ -255,15 +315,16 @@ export default function Attendance() {
           {loading ? <Loader /> : (
             <div className="table-wrap">
               <table className="data-table">
-                <thead><tr><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Check-ins</th><th>Where</th><th>Status</th><th>Regularization</th><th></th></tr></thead>
+                <thead><tr><th>Date</th><th>Clock In</th><th>Arrival</th><th>Clock Out</th><th>Hours</th><th>Check-ins</th><th>Where</th><th>Status</th><th>Regularization</th><th></th></tr></thead>
                 <tbody>
-                  {history.length === 0 && <tr className="empty-row"><td colSpan={9}>No attendance records for this month.</td></tr>}
+                  {history.length === 0 && <tr className="empty-row"><td colSpan={10}>No attendance records for this month.</td></tr>}
                   {history.map((r) => {
                     const places = [...new Set((r.sessions || []).flatMap((x) => [x.clock_in_within_geofence, x.clock_out && x.clock_out_within_geofence]).filter((v) => v !== null && v !== undefined && v !== ""))];
                     return (
                       <tr key={r.id}>
                         <td>{r.work_date}</td>
                         <td>{fmtTime(r.clock_in)}</td>
+                        <td><span className={`att-chip ${r.check_in_status === "late" ? "red" : r.check_in_status === "in_time" ? "green" : ""}`}>{arrivalLabel(r.check_in_status)}</span></td>
                         <td>{r.clock_out ? fmtTime(r.clock_out) : "—"}</td>
                         <td>{fmtHours(r.total_hours)}</td>
                         <td>{r.session_count || "—"}{r.reentry_count > 0 && <span className="att-chip amber" style={{ marginLeft: 6 }}>↻ {r.reentry_count}</span>}</td>
@@ -348,6 +409,7 @@ export default function Attendance() {
       {tab === "reentries" && canSeeTeam && <ReentriesPanel />}
       {tab === "holidays" && <HolidaysPanel canManage={canManageCalendar} />}
       {tab === "rules" && canManageCalendar && <RulesPanel />}
+      {tab === "policy" && canApprove && <AttendancePolicyPanel />}
       {tab === "offices" && <OfficeLocationsPanel canManage={OFFICE_ADMIN_ROLES.includes(user.role)} />}
 
       {requestFor && (

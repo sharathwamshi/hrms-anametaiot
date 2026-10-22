@@ -197,7 +197,6 @@ export default function AttendanceCalendar({
             Today
           </button>
         </div>
-
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
             From
@@ -304,6 +303,7 @@ export default function AttendanceCalendar({
                           : " – now"}
                         <br />
                         {fmtHours(c.rec.total_hours)}
+                        {c.rec.check_in_status === "late" ? " · Late" : c.rec.check_in_status === "in_time" ? " · In Time" : ""}
                         {c.rec.session_count > 1
                           ? ` · ${c.rec.session_count}×`
                           : ""}

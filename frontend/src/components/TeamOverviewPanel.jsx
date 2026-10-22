@@ -3,7 +3,7 @@ import client from "../api/client";
 import Badge from "./Badge";
 import Loader from "./Loader";
 import ExportButton from "./ExportButton";
-import { fmtTime, fmtHours, localDateStr, placeLabel } from "../utils/attendanceTime";
+import { fmtTime, fmtHours, arrivalLabel, localDateStr, placeLabel } from "../utils/attendanceTime";
 import { mapsUrl } from "../utils/geo";
 
 const inputStyle = { border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" };
@@ -66,7 +66,7 @@ export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0 }) {
                   return (
                     <tr key={p.user.id} className="att-person-row" onClick={() => onOpenPerson(p.user)}>
                       <td><strong>{p.user.full_name}</strong><div className="muted" style={{ fontSize: 11.5 }}>{p.user.employee_code}{p.user.designation ? ` · ${p.user.designation}` : ""}</div>{p.user.restrict_to_office && <span className="att-chip amber" style={{ marginTop: 4, display: "inline-block" }} title="Clock in/out is only allowed from the office">Office only</span>}</td>
-                      <td><Badge status={p.status} />{p.clocked_in_now && <div className="att-chip green" style={{ marginTop: 4 }}>In now</div>}</td>
+                      <td><Badge status={p.status} />{p.clocked_in_now && <div className="att-chip green" style={{ marginTop: 4 }}>In now</div>}{rec?.check_in_status && <div className={`att-chip ${rec.check_in_status === "late" ? "red" : "green"}`} style={{ marginTop: 4 }}>{arrivalLabel(rec.check_in_status)}</div>}</td>
                       <td>{rec?.clock_in ? fmtTime(rec.clock_in) : "—"}</td>
                       <td>{rec?.clock_in ? (rec.clock_out ? fmtTime(rec.clock_out) : "—") : "—"}</td>
                       <td>{fmtHours(rec?.total_hours)}</td>

@@ -36,6 +36,8 @@ always matches what `db.create_all()` produces.
 
 For an existing database, run `mysql -u root anametaiot_hrms < backend/migration_attendance_regularization.sql`
 to add the regularization request history table and backfill this month's existing submissions.
+Also run `mysql -u root anametaiot_hrms < backend/migration_attendance_work_rules.sql` to add the
+configurable check-in buffer (defaults to 10 minutes) and manager edit-time audit details.
 
 ## 2. Backend (Flask API)
 
