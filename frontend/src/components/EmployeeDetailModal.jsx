@@ -148,7 +148,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
                 {emp.removed_by_name ? ` by ${emp.removed_by_name}` : ""}
                 {emp.removal_reason ? <div style={{ marginTop: 4 }}>Reason: “{emp.removal_reason}”</div> : null}
               </div>
-              {canRestore && <button className="btn btn-sm btn-outline" onClick={restore}>Restore</button>}
+              {canRestore && <button className="btn btn-sm btn-success" onClick={restore}>Restore</button>}
             </div>
           </div>
         )}

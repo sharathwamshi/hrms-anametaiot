@@ -90,7 +90,7 @@ export default function RegularizeRequestModal({ record, onClose, onDone }) {
             )}
             <div className="form-actions">
               <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-              <button type="submit" className="btn btn-primary" disabled={saving || reasons.length === 0}>
+              <button type="submit" className="btn btn-success" disabled={saving || reasons.length === 0}>
                 {saving ? "Submitting..." : "Submit Request"}
               </button>
             </div>

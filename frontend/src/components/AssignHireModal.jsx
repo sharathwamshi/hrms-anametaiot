@@ -259,7 +259,7 @@ export default function AssignHireModal({ vendor, onClose, onAssigned }) {
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
               <button className="btn btn-outline" onClick={onClose}>Cancel</button>
-              <button className="btn btn-primary" disabled={saving} onClick={assign}>
+              <button className="btn btn-success" disabled={saving} onClick={assign}>
                 {saving ? "Assigning..." : "Assign"}
               </button>
             </div>

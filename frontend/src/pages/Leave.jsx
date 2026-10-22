@@ -60,6 +60,11 @@ export default function Leave() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const closeForm = () => {
+    setShowForm(false);
+    setFormError("");
+  };
+
   const submitLeave = async (e) => {
     e.preventDefault();
     setFormError("");
@@ -224,7 +229,7 @@ export default function Leave() {
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={submitting}>
+                <button type="submit" className="btn btn-success" disabled={submitting}>
                   {submitting ? "Submitting..." : "Submit Request"}
                 </button>
               </div>

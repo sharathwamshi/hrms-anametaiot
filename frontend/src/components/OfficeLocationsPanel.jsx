@@ -92,7 +92,7 @@ export default function OfficeLocationsPanel({ canManage }) {
                   {canManage && (
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button className="btn btn-sm btn-outline" onClick={() => editRadius(o)}>Radius</button>{" "}
-                      <button className="btn btn-sm btn-outline" onClick={() => patch(o, { is_active: !o.is_active })}>{o.is_active ? "Retire" : "Reactivate"}</button>{" "}
+                      <button className={`btn btn-sm ${o.is_active ? "btn-outline" : "btn-success"}`} onClick={() => patch(o, { is_active: !o.is_active })}>{o.is_active ? "Retire" : "Reactivate"}</button>{" "}
                       <button className="btn btn-sm btn-outline" onClick={() => remove(o)}>Remove</button>
                     </td>
                   )}

@@ -111,7 +111,7 @@ export default function BulkImportModal({ onClose, onImported }) {
 
             <div style={{ marginTop: 16, textAlign: "right" }}>
               <button className="btn btn-outline" onClick={onClose} style={{ marginRight: 8 }}>Cancel</button>
-              <button className="btn btn-primary" disabled={busy} onClick={confirm}>
+              <button className="btn btn-success" disabled={busy} onClick={confirm}>
                 {busy ? "Importing..." : `Confirm Import (${preview.valid_rows.length + Object.values(linkDuplicates).filter(Boolean).length})`}
               </button>
             </div>

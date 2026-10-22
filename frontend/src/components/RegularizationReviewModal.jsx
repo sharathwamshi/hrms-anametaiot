@@ -42,7 +42,7 @@ export default function RegularizationReviewModal({ record, onClose, onDone }) {
         <div className="form-actions">
           <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
           <button type="button" className="btn btn-danger" disabled={saving} onClick={() => act("reject")}>Reject</button>
-          <button type="button" className="btn btn-primary" disabled={saving} onClick={() => act("approve")}>Approve</button>
+          <button type="button" className="btn btn-success" disabled={saving} onClick={() => act("approve")}>Approve</button>
         </div>
       </div>
     </div>
