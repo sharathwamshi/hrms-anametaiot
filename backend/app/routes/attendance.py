@@ -1244,7 +1244,7 @@ def _finalize_pending_request(record, actor_id, comment):
 def manager_edit_day():
     """Replace a person's check-in/check-out times for one day. Body:
     {user_id, work_date, sessions: [{id?, clock_in, clock_out|null, reentry_reason?}],
-     status?, reason_id?, note?}. Existing sessions (matched by id) keep their GPS/photo
+     status?, reason?, note?}. Existing sessions (matched by id) keep their GPS/photo
     evidence; times are what change. Every edit is stamped with who/when/why."""
     claims, actor_id = get_jwt(), int(get_jwt_identity())
     payload = request.get_json(silent=True) or {}
@@ -1256,9 +1256,22 @@ def manager_edit_day():
     work_date, err = _parse_work_date(payload)
     if err:
         return err
-    reason, note, err = _reason_and_note(payload)
-    if err:
-        return err
+    custom_reason = payload.get("reason")
+    if custom_reason is not None:
+        if not isinstance(custom_reason, str):
+            return jsonify({"message": "reason must be text."}), 400
+        custom_reason = custom_reason.strip()[:255]
+        if len(custom_reason) < 3:
+            return jsonify({"message": "Enter a reason for the correction (at least 3 characters)."}), 400
+        reason, note, err = None, payload.get("note", ""), None
+        if not isinstance(note, str):
+            return jsonify({"message": "note must be text."}), 400
+        note = note.strip()[:255]
+    else:
+        reason, note, err = _reason_and_note(payload)
+        if err:
+            return err
+        custom_reason = reason.label if reason else ""
 
     raw = payload.get("sessions")
     if not isinstance(raw, list):
@@ -1373,8 +1386,7 @@ def manager_edit_day():
     elif not record.is_regularized and parsed:
         still_open = any(x["out"] is None for x in parsed)
         record.status = "present" if (still_open or (record.total_hours or 0) >= 4) else "half_day"
-    label = reason.label if reason else ""
-    audit = f"{label}: {note}" if (label and note) else (label or note)
+    audit = f"{custom_reason}: {note}" if (custom_reason and note) else (custom_reason or note)
     record.edited_by, record.edited_at, record.edit_note = actor_id, datetime.utcnow(), audit[:255]
     settled = _finalize_pending_request(record, actor_id, f"Resolved by direct correction — {audit}")
     db.session.commit()

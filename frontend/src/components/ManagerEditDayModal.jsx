@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import client from "../api/client";
 import { fromLocalInput, localDateStr, toLocalInput } from "../utils/attendanceTime";
 
@@ -16,17 +16,14 @@ const STATUS_OPTIONS = [
  */
 export default function ManagerEditDayModal({ person, day, onClose, onDone }) {
   const rec = day.rec;
-  const [reasons, setReasons] = useState([]);
   const [rows, setRows] = useState(() => (rec?.sessions?.length
     ? rec.sessions.map((s) => ({ id: s.id, in: toLocalInput(s.clock_in), out: toLocalInput(s.clock_out), why: s.reentry_reason || "" }))
     : [{ id: null, in: "", out: "", why: "" }]));
   const [status, setStatus] = useState("");
-  const [reasonId, setReasonId] = useState("");
+  const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => { client.get("/attendance/regularization-reasons").then(({ data }) => setReasons(data)); }, []);
 
   const setRow = (i, patch) => setRows((rs) => rs.map((r, k) => (k === i ? { ...r, ...patch } : r)));
   const addRow = () => setRows((rs) => {
@@ -63,13 +60,13 @@ export default function ManagerEditDayModal({ person, day, onClose, onDone }) {
         }
       }
     }
-    if (!reasonId && note.trim().length < 3) { setError("Please pick a reason (or write one) — it is kept on the audit trail."); return; }
+    if (reason.trim().length < 3) { setError("Enter a reason for the correction (at least 3 characters)."); return; }
     setSaving(true);
     try {
       await client.put("/attendance/manager/day", {
         user_id: person.id, work_date: day.ds,
         sessions: clearing ? [] : rows.map((r) => ({ id: r.id, clock_in: fromLocalInput(r.in), clock_out: fromLocalInput(r.out), reentry_reason: r.why })),
-        status: status || undefined, reason_id: reasonId ? Number(reasonId) : undefined, note,
+        status: status || undefined, reason, note,
       });
       onDone();
     } catch (err) {
@@ -118,13 +115,16 @@ export default function ManagerEditDayModal({ person, day, onClose, onDone }) {
           </div>
           <div className="form-field">
             <label>Reason for the correction</label>
-            <select value={reasonId} onChange={(e) => setReasonId(e.target.value)}>
-              <option value="">Select a reason…</option>
-              {reasons.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-            </select>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Enter reason for correction"
+              maxLength={255}
+              required
+            />
           </div>
           <div className="form-field">
-            <label>Note {reasonId ? "(optional)" : ""}</label>
+            <label>Note (optional)</label>
             <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Confirmed with the client site lead" maxLength={255} />
           </div>
           {error && <div className="login-error" style={{ marginBottom: 10 }}>{error}</div>}
