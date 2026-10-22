@@ -212,10 +212,11 @@ with app.app_context():
         "Check-out latitude", "Check-out longitude", "Check-out photo",
     }
     ok("check-in details include latitude, longitude and photo columns", location_photo_headers <= set(hdr), hdr)
-    ok("check-in details retain times and office locations", {"Check-in time", "Check-in location", "Check-out time", "Check-out location"} <= set(hdr), hdr)
+    ok("check-in details retain IST times and office locations", {"Check-in time (IST)", "Check-in location", "Check-out time (IST)", "Check-out location"} <= set(hdr), hdr)
     ix = {h: i for i, h in enumerate(hdr)}
     todays = [x for x in rows if x[0] is not None and str(x[0])[:10] == TODAY.isoformat()]
     ok("today's two sessions are listed", len(todays) == 2, todays)
+    ok("exported attendance times identify IST", any("IST" in str(x[ix["Check-in time (IST)"]]) for x in todays), todays)
     ok("a flagged punch reads 'Out of office'", any(x[ix['Check-out location']] == 'Out of office' for x in todays), todays)
     ok("an in-radius punch reads 'In office'", todays[0][ix['Check-in location']] == 'In office', todays)
     ok("the employee's own export includes punch coordinates and photo flags",
@@ -293,7 +294,7 @@ with app.app_context():
                and x[hs.index("Check-out latitude")] == "—"
                and x[hs.index("Check-out longitude")] == "—"
                and x[hs.index("Check-out photo")] == "—" for x in real), hs)
-    ok("…but still shows times and in/out of office", all(x[hs.index('Check-in time')] for x in real))
+    ok("…but still shows times and in/out of office", all(x[hs.index('Check-in time (IST)')] for x in real))
     r = c.get(f'/api/attendance/export/team-day?date={TODAY.isoformat()}', headers=H['mgr'])
     hdr, rows = table(xl(r)['Team today'])
     who = {x[hdr.index('Employee')]: x for x in rows if x[0]}

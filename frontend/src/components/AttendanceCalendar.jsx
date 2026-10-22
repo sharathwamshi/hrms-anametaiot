@@ -4,7 +4,7 @@ import client from "../api/client";
 import Loader from "./Loader";
 import ExportButton from "./ExportButton";
 import DayDetailModal from "./DayDetailModal";
-import { fmtTime, fmtHours, localDateStr } from "../utils/attendanceTime";
+import { fmtTime, fmtHours, localDateStr, companyYearMonth } from "../utils/attendanceTime";
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTHS = [
@@ -21,23 +21,33 @@ export default function AttendanceCalendar({
   manager = false,
   exportUserId = null,
   refreshKey = 0,
+  timezoneVersion = 0,
   onChanged,
 }) {
-  const now = new Date();
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [year, setYear] = useState(now.getFullYear());
+  const now = companyYearMonth();
+  const [month, setMonth] = useState(now.month);
+  const [year, setYear] = useState(now.year);
   const [exportFrom, setExportFrom] = useState(
-    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`
+    `${now.year}-${String(now.month).padStart(2, "0")}-01`
   );
   const [exportTo, setExportTo] = useState(
-    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
-      new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    `${now.year}-${String(now.month).padStart(2, "0")}-${String(
+      new Date(now.year, now.month, 0).getDate()
     ).padStart(2, "0")}`
   );
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [openDay, setOpenDay] = useState(null);
   const [version, setVersion] = useState(0);
+
+  useEffect(() => {
+    const current = companyYearMonth();
+    const lastDay = new Date(current.year, current.month, 0).getDate();
+    setMonth(current.month);
+    setYear(current.year);
+    setExportFrom(`${current.year}-${String(current.month).padStart(2, "0")}-01`);
+    setExportTo(`${current.year}-${String(current.month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`);
+  }, [timezoneVersion]);
 
   useEffect(() => {
     let cancelled = false;
@@ -190,8 +200,8 @@ export default function AttendanceCalendar({
           <button
             className="btn btn-sm btn-outline"
             onClick={() => {
-              setMonth(now.getMonth() + 1);
-              setYear(now.getFullYear());
+              setMonth(now.month);
+              setYear(now.year);
             }}
           >
             Today

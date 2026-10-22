@@ -42,5 +42,6 @@ class Config:
 
     COMPANY_NAME = os.environ.get("COMPANY_NAME", "AnametaIOT HRMS")
     POWERED_BY = os.environ.get("POWERED_BY", "+veGroww")
+    COMPANY_TIMEZONE = os.environ.get("COMPANY_TIMEZONE", "Asia/Kolkata")
 
     CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")

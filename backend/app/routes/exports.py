@@ -15,6 +15,7 @@ from app.extensions import db
 from app.models import Attendance, AttendanceSession, Holiday, LeaveRequest, User, AttendanceRegularizationReason, CompanySettings
 from app.roles import MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN
 from app.utils.excel import fmt_time, fmt_datetime, xlsx_response
+from app.utils.company_time import company_today
 from app.routes import attendance as att
 
 bp = Blueprint("exports", __name__, url_prefix="/api")
@@ -61,7 +62,7 @@ def _range_args(default_first=None):
             first = date(y, m, 1)
             last = (date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)) - timedelta(days=1)
         else:
-            today = date.today()
+            today = company_today()
             first = datetime.strptime(request.args["from"], "%Y-%m-%d").date() if request.args.get("from") else (default_first or today.replace(day=1))
             last = datetime.strptime(request.args["to"], "%Y-%m-%d").date() if request.args.get("to") else today
     except (ValueError, KeyError):
@@ -73,12 +74,12 @@ def _range_args(default_first=None):
     return (first, last), None
 
 
-DAY_HEADERS = ["Date", "Day", "Employee code", "Employee", "Designation", "Status", "First check-in", "Last check-out",
+DAY_HEADERS = ["Date", "Day", "Employee code", "Employee", "Designation", "Status", "First check-in (IST)", "Last check-out (IST)",
                "Arrival status", "Hours worked", "Check-ins", "Re-entries", "Time away (min)", "Any punch out of office",
                "Regularization", "Regularization reason", "Regularization note", "Reviewed by", "Review comment",
                "Corrected by manager", "Correction note", "Holiday / leave"]
-SESSION_HEADERS_FULL = ["Date", "Employee code", "Employee", "Check-in #", "Check-in time", "Check-in location",
-                        "Check-in latitude", "Check-in longitude", "Check-in photo", "Check-out time", "Check-out location",
+SESSION_HEADERS_FULL = ["Date", "Employee code", "Employee", "Check-in #", "Check-in time (IST)", "Check-in location",
+                        "Check-in latitude", "Check-in longitude", "Check-in photo", "Check-out time (IST)", "Check-out location",
                         "Check-out latitude", "Check-out longitude", "Check-out photo", "Hours", "Gap before (min)",
                         "Re-entry reason", "Check-in note", "Check-out note"]
 
@@ -99,7 +100,7 @@ def _build_people_sheets(users, first, last, redact_fn, note):
             leave_by_user.setdefault(lv.user_id, {})[d] = lv.leave_type.name if lv.leave_type else "Leave"
             d += timedelta(days=1)
 
-    today = date.today()
+    today = company_today()
     settings = CompanySettings.query.order_by(CompanySettings.id.asc()).first()
     buffer_minutes = settings.attendance_buffer_minutes if settings else 10
     day_rows, session_rows = [], []
@@ -274,7 +275,7 @@ def export_team_day():
     if err:
         return err
     try:
-        target = datetime.strptime(request.args.get("date", date.today().isoformat()), "%Y-%m-%d").date()
+        target = datetime.strptime(request.args.get("date", company_today().isoformat()), "%Y-%m-%d").date()
     except ValueError:
         return jsonify({"message": "date must be YYYY-MM-DD."}), 400
     data = att._build_overview(claims, viewer_id, target)
@@ -293,7 +294,7 @@ def export_team_day():
             ("" if not loc else _place(loc["within_geofence"])), ("" if not loc else _fmt_iso_dt(loc["as_of"])),
         ])
     sheet = {"name": "Team today", "note": f"Team attendance on {target.strftime('%d-%b-%Y')}" + (f" — {data['holiday_name']}" if data["holiday_name"] else ""),
-             "headers": ["Employee code", "Employee", "Designation", "Status", "First check-in", "Last check-out", "Arrival status", "Hours worked",
+             "headers": ["Employee code", "Employee", "Designation", "Status", "First check-in (IST)", "Last check-out (IST)", "Arrival status", "Hours worked",
                          "Check-ins", "Re-entries", "Latest re-entry reason", "Any punch out of office",
                          "Last known latitude", "Last known longitude", "Last known place", "Last known at"],
              "rows": rows}
@@ -328,7 +329,7 @@ def export_reentries():
         i["reason"] or "", "Yes" if i["outside_office"] else "No", "Yes" if i["still_clocked_in"] else "No",
     ] for i in data["reentries"]]
     sheet = {"name": "Re-entries", "note": f"Re-entries (checked in again) — {data['from']} to {data['to']}",
-             "headers": ["Date", "Employee code", "Employee", "Designation", "Check-in #", "Previous check-out", "Checked in again at",
+             "headers": ["Date", "Employee code", "Employee", "Designation", "Check-in #", "Previous check-out (IST)", "Checked in again at (IST)",
                          "Time away (min)", "Reason given", "Out of office", "Still clocked in"], "rows": rows}
     return xlsx_response([sheet], f"Re_entries_{data['from']}_to_{data['to']}")
 
@@ -348,8 +349,8 @@ def export_regularization_requests():
         fmt_datetime(r.regularization_reviewed_at), r.regularization_review_comment or "",
     ] for r in query.order_by(Attendance.regularization_requested_at.desc()).all()]
     sheet = {"name": "Regularization", "note": f"Regularization requests ({status})",
-             "headers": ["Date", "Employee code", "Employee", "Status", "Reason", "Employee note", "Requested at",
-                         "Reviewed by", "Reviewed at", "Review comment"], "rows": rows}
+             "headers": ["Date", "Employee code", "Employee", "Status", "Reason", "Employee note", "Requested at (IST)",
+                         "Reviewed by", "Reviewed at (IST)", "Review comment"], "rows": rows}
     return xlsx_response([sheet], f"Regularization_Requests_{status}")
 
 
@@ -357,7 +358,7 @@ def export_regularization_requests():
 @jwt_required()
 def export_holidays():
     try:
-        year = int(request.args.get("year") or date.today().year)
+        year = int(request.args.get("year") or company_today().year)
     except ValueError:
         return jsonify({"message": "year must be a number."}), 400
     rows = [[h.holiday_date, _day_name(h.holiday_date), h.name, h.description or ""] for h in
@@ -398,5 +399,5 @@ def export_table():
         clean_rows.append((row + [""] * len(headers))[:len(headers)])
     name = str(payload.get("sheet") or payload.get("filename") or "Export")[:31]
     return xlsx_response([{"name": name, "headers": [str(h) for h in headers], "rows": clean_rows,
-                           "note": f"{payload.get('title') or name} — exported {datetime.utcnow().strftime('%d-%b-%Y')}"}],
+                           "note": f"{payload.get('title') or name} — exported {company_today().strftime('%d-%b-%Y')} (IST)"}],
                          str(payload.get("filename") or "Export"))

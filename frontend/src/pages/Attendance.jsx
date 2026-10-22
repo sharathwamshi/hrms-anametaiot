@@ -12,7 +12,7 @@ import ReentriesPanel from "../components/ReentriesPanel";
 import OfficeLocationsPanel from "../components/OfficeLocationsPanel";
 import OfficeRestrictionToggle from "../components/OfficeRestrictionToggle";
 import ExportButton from "../components/ExportButton";
-import { fmtTime, fmtHours, arrivalLabel, localDateStr, placeLabel } from "../utils/attendanceTime";
+import { fmtTime, fmtHours, arrivalLabel, localDateStr, placeLabel, companyYearMonth, setCompanyTimezone } from "../utils/attendanceTime";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
 
@@ -31,7 +31,7 @@ function regStatusChip(status) {
 
 function HolidaysPanel({ canManage }) {
   const [holidays, setHolidays] = useState(null);
-  const [year, setYear] = useState(new Date().getFullYear());
+  const [year, setYear] = useState(companyYearMonth().year);
   const [form, setForm] = useState({ name: "", holiday_date: "", description: "" });
   const [error, setError] = useState("");
 
@@ -182,6 +182,7 @@ function AttendancePolicyPanel() {
   useEffect(() => {
     client.get("/attendance/policy")
       .then(({ data }) => {
+        setCompanyTimezone(data.company_timezone);
         setPolicy(data);
         setBufferMinutes(String(data.attendance_buffer_minutes));
       })
@@ -198,6 +199,7 @@ function AttendancePolicyPanel() {
         attendance_buffer_minutes: Number(bufferMinutes),
       });
       setPolicy(data);
+      setCompanyTimezone(data.company_timezone);
       setSaved(true);
     } catch (err) {
       setError(err?.response?.data?.message || "Could not save attendance policy.");
@@ -235,13 +237,14 @@ export default function Attendance() {
   const { user } = useAuth();
   const [tab, setTab] = useState("calendar");
   const [history, setHistory] = useState([]);
-  const [histMonth, setHistMonth] = useState(localDateStr().slice(0, 7)); // YYYY-MM
+  const [histMonth, setHistMonth] = useState(localDateStr().slice(0, 7));
   const [pending, setPending] = useState([]);
   const [loading, setLoading] = useState(false);
   const [requestFor, setRequestFor] = useState(null);
   const [reviewing, setReviewing] = useState(null);
   const [person, setPerson] = useState(null);       // team member whose calendar is open
   const [tick, setTick] = useState(0);              // bumps after a punch / correction so views refetch
+  const [timezoneVersion, setTimezoneVersion] = useState(0);
 
   const canSeeTeam = TEAM_VIEW_ROLES.includes(user.role);
   const canApprove = APPROVER_ROLES.includes(user.role);
@@ -267,6 +270,9 @@ export default function Attendance() {
     if (tab === "approvals") loadPending();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, tick]);
+  useEffect(() => {
+    setHistMonth(localDateStr().slice(0, 7));
+  }, [timezoneVersion]);
   useEffect(() => { if (canApprove) client.get("/attendance/regularization-requests", { params: { status: "pending" } }).then(({ data }) => setPending(data)).catch(() => {}); /* eslint-disable-next-line */ }, [tick]);
 
   const tabBtn = (key, label) => (
@@ -276,7 +282,7 @@ export default function Attendance() {
   return (
     <AppLayout title="Attendance" subtitle="Clock in/out with your location, see your calendar, request regularization and export your history.">
       <div className="section-gap">
-        <ClockWidget onPunch={refresh} />
+        <ClockWidget onPunch={refresh} onTimezoneChange={() => setTimezoneVersion((v) => v + 1)} />
       </div>
 
       <div className="tag-list section-gap">
@@ -294,7 +300,7 @@ export default function Attendance() {
       {tab === "calendar" && (
         <div className="card">
           <div className="card-title-row"><h3>My Attendance Calendar</h3></div>
-          <AttendanceCalendar endpoint="/attendance/my-calendar" refreshKey={tick} onChanged={refresh} />
+          <AttendanceCalendar endpoint="/attendance/my-calendar" refreshKey={tick} timezoneVersion={timezoneVersion} onChanged={refresh} />
         </div>
       )}
 
@@ -355,7 +361,7 @@ export default function Attendance() {
       )}
 
       {tab === "team" && canSeeTeam && !person && (
-        <TeamOverviewPanel onOpenPerson={setPerson} refreshKey={tick} />
+        <TeamOverviewPanel onOpenPerson={setPerson} refreshKey={tick} timezoneVersion={timezoneVersion} />
       )}
       {tab === "team" && canSeeTeam && person && (
         <div className="card">
@@ -367,7 +373,7 @@ export default function Attendance() {
           {canApprove && person.id !== user.id && <OfficeRestrictionToggle key={person.id} person={person} onChanged={refresh} />}
           <AttendanceCalendar
             endpoint={`/attendance/team/${person.id}/calendar`} manager={canApprove} exportUserId={person.id}
-            refreshKey={tick} onChanged={refresh}
+            refreshKey={tick} timezoneVersion={timezoneVersion} onChanged={refresh}
           />
         </div>
       )}

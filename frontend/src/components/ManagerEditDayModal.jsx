@@ -1,6 +1,6 @@
 import { useState } from "react";
 import client from "../api/client";
-import { fromLocalInput, localDateStr, toLocalInput } from "../utils/attendanceTime";
+import { fromLocalInput, localDateStr, toLocalInput, formatCompanyDateLabel } from "../utils/attendanceTime";
 
 const STATUS_OPTIONS = [
   { value: "", label: "Automatic (Present if ≥ 4 hours, else Half day)" },
@@ -81,7 +81,7 @@ export default function ManagerEditDayModal({ person, day, onClose, onDone }) {
       <div className="modal-box att-modal-wide" onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginBottom: 4 }}>Edit times — {person.full_name}</h3>
         <p className="muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
-          {new Date(`${day.ds}T00:00:00`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}. No request is needed — your correction is recorded with your name, the time and your reason.
+          {formatCompanyDateLabel(day.ds, { weekday: "long", day: "numeric", month: "long" })}. No request is needed — your correction is recorded with your name, the time and your reason.
           {rec?.regularization_status === "pending" && " This also settles their pending regularization request."}
           {" "}Standard checkout is 6:30 PM; enter the actual check-out time.
         </p>

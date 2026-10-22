@@ -2,7 +2,7 @@ from datetime import datetime
 import json
 from app.extensions import db
 from app.models.vendor import CompanySettings
-from app.utils.excel import to_local
+from app.utils.company_time import to_company_local, utc_now_naive
 
 
 class Attendance(db.Model):
@@ -15,6 +15,7 @@ class Attendance(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     work_date = db.Column(db.Date, nullable=False)
 
+    # MySQL DATETIME stores naive UTC; convert only at company-local display/rule boundaries.
     clock_in = db.Column(db.DateTime, nullable=True)
     clock_out = db.Column(db.DateTime, nullable=True)
     clock_in_note = db.Column(db.String(255))
@@ -87,7 +88,7 @@ class Attendance(db.Model):
         if not sessions:
             return None
         first_check_in = min(sessions, key=lambda session: session.clock_in).clock_in
-        local_check_in = to_local(first_check_in)
+        local_check_in = to_company_local(first_check_in)
         check_in_seconds = (
             local_check_in.hour * 3600 + local_check_in.minute * 60
             + local_check_in.second + local_check_in.microsecond / 1_000_000
@@ -227,7 +228,7 @@ class AttendanceRegularizationReason(db.Model):
     description = db.Column(db.String(255))
     is_active = db.Column(db.Boolean, default=True)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now_naive)
 
     def to_dict(self):
         return {
@@ -245,7 +246,7 @@ class AttendanceRegularizationRequest(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     attendance_id = db.Column(db.Integer, db.ForeignKey("attendance.id"), nullable=False)
-    submitted_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    submitted_at = db.Column(db.DateTime, nullable=False, default=utc_now_naive)
 
 
 class Holiday(db.Model):
@@ -257,7 +258,7 @@ class Holiday(db.Model):
     holiday_date = db.Column(db.Date, nullable=False, unique=True)
     description = db.Column(db.String(255))
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now_naive)
 
     def to_dict(self):
         return {
@@ -332,7 +333,7 @@ class AttendanceSession(db.Model):
 
     # Why they checked in AGAIN. NULL for the first session of the day.
     reentry_reason = db.Column(db.String(255), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now_naive)
 
     def duration_hours(self):
         if self.clock_in and self.clock_out:

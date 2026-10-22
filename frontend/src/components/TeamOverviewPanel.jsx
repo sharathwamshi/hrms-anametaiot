@@ -9,12 +9,17 @@ import { mapsUrl } from "../utils/geo";
 const inputStyle = { border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" };
 
 /** Everyone in the viewer's scope for one day (including people who haven't clocked in). */
-export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0 }) {
+export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0, timezoneVersion = 0 }) {
   const [date, setDate] = useState(localDateStr());
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
   const [range, setRange] = useState({ from: localDateStr(new Date(Date.now() - 29 * 864e5)), to: localDateStr() });
+
+  useEffect(() => {
+    setDate(localDateStr());
+    setRange({ from: localDateStr(new Date(Date.now() - 29 * 864e5)), to: localDateStr() });
+  }, [timezoneVersion]);
 
   useEffect(() => {
     let off = false;
