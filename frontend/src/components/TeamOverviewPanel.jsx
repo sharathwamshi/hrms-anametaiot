@@ -60,10 +60,10 @@ export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0, timezo
           <div className="table-wrap">
             <table className="data-table">
               <thead>
-                <tr><th>Employee</th><th>Status</th><th>First In</th><th>Last Out</th><th>Hours</th><th>Check-ins</th><th>Where</th><th>Re-entry reason</th><th></th></tr>
+                <tr><th>Employee</th><th>Status</th><th>First In</th><th>Last Out</th><th>Hours</th><th>Check-ins</th><th>Work location</th><th>Where</th><th>Re-entry reason</th><th></th></tr>
               </thead>
               <tbody>
-                {people.length === 0 && <tr className="empty-row"><td colSpan={9}>No one to show.</td></tr>}
+                {people.length === 0 && <tr className="empty-row"><td colSpan={10}>No one to show.</td></tr>}
                 {people.map((p) => {
                   const rec = p.record;
                   const loc = p.last_known_location;
@@ -76,6 +76,12 @@ export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0, timezo
                       <td>{rec?.clock_in ? (rec.clock_out ? fmtTime(rec.clock_out) : "—") : "—"}</td>
                       <td>{fmtHours(rec?.total_hours)}</td>
                       <td>{p.session_count || "—"}{p.reentry_count > 0 && <span className="att-chip amber" style={{ marginLeft: 6 }}>↻ {p.reentry_count}</span>}</td>
+                      <td>
+                        {(rec?.sessions || []).filter((session) => session.work_location_name).map((session) => (
+                          <div key={session.session_no}><span className="att-chip">{(rec.sessions.length > 1 ? `#${session.session_no} ` : "") + session.work_location_name}</span></div>
+                        ))}
+                        {!(rec?.sessions || []).some((session) => session.work_location_name) && <span className="muted">—</span>}
+                      </td>
                       <td onClick={(e) => e.stopPropagation()}>
                         {place ? <><span className={`att-chip ${place.cls}`}>{place.text}</span> <a href={mapsUrl(loc.latitude, loc.longitude)} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>Maps ›</a></> : <span className="muted">—</span>}
                       </td>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import client from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import Loader from "./Loader";
 import { getBrowserLocation, mapsUrl } from "../utils/geo";
 import { fmtTime, fmtHours, arrivalLabel, placeLabel, formatCompanyTime, setCompanyTimezone } from "../utils/attendanceTime";
 
@@ -23,7 +24,31 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
   const [reentering, setReentering] = useState(false);
   const [reason, setReason] = useState("");
   const [locating, setLocating] = useState(false);
+  const [workLocations, setWorkLocations] = useState([]);
+  const [workLocationsLoading, setWorkLocationsLoading] = useState(false);
+  const [workLocationsError, setWorkLocationsError] = useState("");
+  const [selectedWorkLocationId, setSelectedWorkLocationId] = useState("");
+  const [clockInOpen, setClockInOpen] = useState(false);
   const fileRef = useRef(null);
+  const clockInDialogRef = useRef(null);
+
+  const loadWorkLocations = async () => {
+    setWorkLocationsLoading(true);
+    setWorkLocationsError("");
+    try {
+      const { data } = await client.get("/attendance/work-locations");
+      setWorkLocations(data);
+      setSelectedWorkLocationId((current) => (
+        data.some((location) => String(location.id) === String(current))
+          ? current
+          : String(data.find((location) => location.is_default)?.id || data[0]?.id || "")
+      ));
+    } catch (err) {
+      setWorkLocationsError(err?.response?.data?.message || "Could not load work locations.");
+    } finally {
+      setWorkLocationsLoading(false);
+    }
+  };
 
   useEffect(() => {
     client.get("/attendance/policy").then(({ data }) => {
@@ -31,6 +56,47 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
       setSelfieRequired(!!data.selfie_required);
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (hasClockInOut) loadWorkLocations();
+  }, [hasClockInOut]);
+
+  useEffect(() => {
+    if (!clockInOpen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const previousFocus = document.activeElement;
+    document.body.style.overflow = "hidden";
+    clockInDialogRef.current?.focus();
+    const keepFocusInDialog = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = clockInDialogRef.current?.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])'
+      );
+      if (!focusable?.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", keepFocusInDialog);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", keepFocusInDialog);
+      previousFocus?.focus?.();
+    };
+  }, [clockInOpen]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -65,6 +131,17 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
   const canCheckInAgain = !!record?.clock_in && !clockedIn;
   const lastSession = sessions[sessions.length - 1];
 
+  const openClockIn = () => {
+    setError("");
+    setNotice(null);
+    setClockInOpen(true);
+    setSelectedWorkLocationId((current) => (
+      workLocations.some((location) => String(location.id) === String(current))
+        ? current
+        : String(workLocations.find((location) => location.is_default)?.id || workLocations[0]?.id || "")
+    ));
+  };
+
   const handleClock = async (action) => {
     const isReentry = action === "clock-in" && canCheckInAgain;
     if (isReentry && reason.trim().length < 3) {
@@ -89,16 +166,22 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
         form.append("selfie", selfie);
         Object.entries(coords).forEach(([k, v]) => form.append(k, v));
         if (isReentry) form.append("reason", reason.trim());
+        if (action === "clock-in") form.append("work_location_id", selectedWorkLocationId);
         ({ data } = await client.post(`/attendance/${action}`, form));
       } else {
-        ({ data } = await client.post(`/attendance/${action}`, { ...coords, ...(isReentry ? { reason: reason.trim() } : {}) }));
+        ({ data } = await client.post(`/attendance/${action}`, {
+          ...coords,
+          ...(isReentry ? { reason: reason.trim() } : {}),
+          ...(action === "clock-in" ? { work_location_id: selectedWorkLocationId } : {}),
+        }));
       }
+      if (action === "clock-in") setClockInOpen(false);
       if (data.geofence_warning) {
         setNotice({ kind: "warn", text: "You weren't within the office radius. Your attendance is recorded as usual, and it has been flagged for your manager." });
       } else if (loc.error) {
         setNotice({ kind: "info", text: `${loc.error} Your attendance was still recorded.` });
       } else {
-        setNotice({ kind: "ok", text: "Location captured — you're at the office." });
+        setNotice({ kind: "ok", text: "GPS location captured." });
       }
       setSelfie(null);
       setReason("");
@@ -133,7 +216,7 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
         {notice && (
           <div style={{ ...noticeStyle[notice.kind], fontSize: 12.5, borderRadius: 6, padding: "7px 10px", marginTop: 8, maxWidth: 520 }}>{notice.text}</div>
         )}
-        {selfieRequired && (!record?.clock_in || clockedIn || reentering) && (
+        {selfieRequired && clockedIn && (
           <div style={{ marginTop: 8, fontSize: 12.5 }}>
             <label className="muted">Photo required by your company: </label>
             <input
@@ -150,6 +233,7 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
                 <div key={x.session_no} className="muted" style={{ marginBottom: 2 }}>
                   <strong style={{ color: "var(--color-text)" }}>{sessions.length > 1 ? `Session ${x.session_no}: ` : "In: "}</strong>
                   {fmtTime(x.clock_in)}{x.clock_out ? <> &ndash; {fmtTime(x.clock_out)}</> : " (now)"}
+                  {x.work_location_name && <span className="att-chip" style={{ marginLeft: 8 }}>{x.work_location_name}</span>}
                   {place.cls && <span className={`att-chip ${place.cls}`} style={{ marginLeft: 8 }}>{place.text}</span>}
                   {x.clock_in_lat != null && <a href={mapsUrl(x.clock_in_lat, x.clock_in_lng)} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>map</a>}
                   {x.reentry_reason ? <> &middot; <em>{x.reentry_reason}</em></> : null}
@@ -165,19 +249,10 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
             Clocked out{lastSession?.clock_out ? ` at ${fmtTime(lastSession.clock_out)}` : ""}. Clocked out by mistake, or coming back? You can check in again — with a reason your manager can see.
           </div>
         )}
-        {reentering && canCheckInAgain && (
-          <div style={{ marginTop: 8 }}>
-            <input
-              value={reason} onChange={(e) => setReason(e.target.value)} maxLength={255}
-              placeholder="Reason for checking in again (your manager can see this)"
-              style={{ width: "100%", maxWidth: 520, border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}
-            />
-          </div>
-        )}
       </div>
       <div>
         {!record?.clock_in && (
-          <button className="btn btn-success" disabled={busy} onClick={() => handleClock("clock-in")}>
+          <button className="btn btn-success" disabled={busy} onClick={openClockIn}>
             {busy ? "Please wait…" : "Clock In"}
           </button>
         )}
@@ -191,11 +266,84 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
         )}
         {canCheckInAgain && reentering && (
           <>
-            <button className="btn btn-success" disabled={busy} onClick={() => handleClock("clock-in")}>{busy ? "Please wait…" : "Check In"}</button>
+            <button className="btn btn-success" disabled={busy} onClick={openClockIn}>{busy ? "Please wait…" : "Check In"}</button>
             <button className="btn btn-outline" style={{ marginLeft: 6 }} onClick={() => { setReentering(false); setReason(""); setError(""); }}>Cancel</button>
           </>
         )}
       </div>
+      {clockInOpen && (
+        <div className="modal-overlay clock-in-location-overlay" role="presentation">
+          <div ref={clockInDialogRef} className="modal-box" role="dialog" aria-modal="true" aria-labelledby="clock-in-location-title" tabIndex={-1}>
+            <h3 id="clock-in-location-title" style={{ marginBottom: 6 }}>{canCheckInAgain ? "Check in again" : "Clock in"}</h3>
+            <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
+              Choose where you are working today, then clock in.
+            </p>
+            {error && <div className="login-error" style={{ marginBottom: 10 }}>{error}</div>}
+            {workLocationsError && (
+              <div className="login-error" style={{ marginBottom: 10 }}>
+                {workLocationsError}{" "}
+                <button type="button" className="btn btn-sm btn-outline" onClick={loadWorkLocations}>Retry</button>
+              </div>
+            )}
+            {workLocationsLoading ? <Loader /> : workLocations.length > 0 ? (
+              <div className="form-field">
+                <label>Work location</label>
+                <div className="clock-in-location-options">
+                  {workLocations.map((location) => (
+                    <label key={location.id} className={`clock-in-location-option${String(location.id) === selectedWorkLocationId ? " selected" : ""}`}>
+                      <input
+                        type="radio"
+                        name="work-location"
+                        value={location.id}
+                        checked={String(location.id) === selectedWorkLocationId}
+                        onChange={() => setSelectedWorkLocationId(String(location.id))}
+                      />
+                      <span>{location.name}</span>
+                      {location.is_default && <span className="muted">Default</span>}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : !workLocationsError ? (
+              <p className="login-error">No active work locations are available. Ask your manager to add one.</p>
+            ) : null}
+            {canCheckInAgain && (
+              <div className="form-field">
+                <label htmlFor="reentry-reason">Reason for checking in again</label>
+                <input
+                  id="reentry-reason"
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  maxLength={255}
+                  placeholder="Your manager will see this"
+                />
+              </div>
+            )}
+            {selfieRequired && (
+              <div className="form-field">
+                <label>Photo required by your company</label>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  capture="user"
+                  onChange={(event) => setSelfie(event.target.files?.[0] || null)}
+                />
+              </div>
+            )}
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-success"
+                disabled={busy || workLocationsLoading || !selectedWorkLocationId || workLocations.length === 0 || !!workLocationsError || (selfieRequired && !selfie) || (canCheckInAgain && reason.trim().length < 3)}
+                onClick={() => handleClock("clock-in")}
+              >
+                {locating ? "Getting location…" : busy ? "Clocking in…" : "Choose location and Clock In"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

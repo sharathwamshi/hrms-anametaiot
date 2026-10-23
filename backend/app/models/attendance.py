@@ -300,6 +300,27 @@ class OfficeLocation(db.Model):
         }
 
 
+class WorkLocation(db.Model):
+    """Selectable work-location labels, separate from GPS office geofences."""
+    __tablename__ = "attendance_work_locations"
+    __table_args__ = (db.UniqueConstraint("name", name="uq_attendance_work_location_name"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    is_default = db.Column(db.Boolean, nullable=False, default=False)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime, default=utc_now_naive)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "is_active": self.is_active,
+            "is_default": self.is_default,
+        }
+
+
 class DeviceToken(db.Model):
     """A phone registered for push notifications (Expo push token)."""
     __tablename__ = "device_tokens"
@@ -337,6 +358,8 @@ class AttendanceSession(db.Model):
     clock_in_lat = db.Column(db.Float, nullable=True)
     clock_in_lng = db.Column(db.Float, nullable=True)
     clock_in_within_geofence = db.Column(db.Boolean, nullable=True)
+    work_location_id = db.Column(db.Integer, db.ForeignKey("attendance_work_locations.id"), nullable=True)
+    work_location_name = db.Column(db.String(100), nullable=True)
     clock_out_lat = db.Column(db.Float, nullable=True)
     clock_out_lng = db.Column(db.Float, nullable=True)
     clock_out_within_geofence = db.Column(db.Boolean, nullable=True)
@@ -364,6 +387,8 @@ class AttendanceSession(db.Model):
             "clock_in_note": self.clock_in_note, "clock_out_note": self.clock_out_note,
             "clock_in_lat": self.clock_in_lat, "clock_in_lng": self.clock_in_lng,
             "clock_in_within_geofence": self.clock_in_within_geofence,
+            "work_location_id": self.work_location_id,
+            "work_location_name": self.work_location_name,
             "clock_out_lat": self.clock_out_lat, "clock_out_lng": self.clock_out_lng,
             "clock_out_within_geofence": self.clock_out_within_geofence,
             "has_clock_in_selfie": bool(self.clock_in_selfie),

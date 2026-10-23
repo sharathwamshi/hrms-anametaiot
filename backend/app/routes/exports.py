@@ -78,7 +78,7 @@ DAY_HEADERS = ["Date", "Day", "Employee code", "Employee", "Designation", "Statu
                "Arrival status", "Hours worked", "Check-ins", "Re-entries", "Time away (min)", "Any punch out of office",
                "Regularization", "Regularization reason", "Regularization note", "Reviewed by", "Review comment",
                "Corrected by manager", "Correction note", "Holiday / leave"]
-SESSION_HEADERS_FULL = ["Date", "Employee code", "Employee", "Check-in #", "Check-in time (IST)", "Check-in location",
+SESSION_HEADERS_FULL = ["Date", "Employee code", "Employee", "Check-in #", "Work location", "Check-in time (IST)", "Check-in location",
                         "Check-in latitude", "Check-in longitude", "Check-in photo", "Check-out time (IST)", "Check-out location",
                         "Check-out latitude", "Check-out longitude", "Check-out photo", "Hours", "Gap before (min)",
                         "Re-entry reason", "Check-in note", "Check-out note"]
@@ -155,7 +155,7 @@ def _build_people_sheets(users, first, last, redact_fn, note):
                 has_in = s.clock_in_lat is not None
                 has_out = s.clock_out_lat is not None
                 session_rows.append([
-                    d, u.employee_code, u.full_name, s.session_no,
+                    d, u.employee_code, u.full_name, s.session_no, s.work_location_name or "",
                     fmt_time(s.clock_in), _place(s.clock_in_within_geofence, has_in),
                     "—" if redact else (s.clock_in_lat if s.clock_in_lat is not None else ""),
                     "—" if redact else (s.clock_in_lng if s.clock_in_lng is not None else ""),
@@ -287,14 +287,16 @@ def export_team_day():
             u["employee_code"], u["full_name"], u["designation"] or "", STATUS_LABELS.get(p["status"], p["status"]),
             _fmt_iso_time(rec.get("clock_in")), _fmt_iso_time(rec.get("clock_out")) if rec.get("clock_out") else ("Still clocked in" if rec.get("clock_in") else ""),
             {"in_time": "In Time", "late": "Late"}.get(rec.get("check_in_status"), ""),
-            rec.get("total_hours") or "",
+            rec.get("total_hours") or "", ", ".join(dict.fromkeys(
+                session.get("work_location_name") for session in rec.get("sessions", []) if session.get("work_location_name")
+            )),
             p["session_count"] or "", p["reentry_count"] or "",
             (p["latest_reentry"] or {}).get("reason", ""), "Yes" if p["outside_office"] else "No",
             ("" if not loc else loc["latitude"]), ("" if not loc else loc["longitude"]),
             ("" if not loc else _place(loc["within_geofence"])), ("" if not loc else _fmt_iso_dt(loc["as_of"])),
         ])
     sheet = {"name": "Team today", "note": f"Team attendance on {target.strftime('%d-%b-%Y')}" + (f" — {data['holiday_name']}" if data["holiday_name"] else ""),
-             "headers": ["Employee code", "Employee", "Designation", "Status", "First check-in (IST)", "Last check-out (IST)", "Arrival status", "Hours worked",
+             "headers": ["Employee code", "Employee", "Designation", "Status", "First check-in (IST)", "Last check-out (IST)", "Arrival status", "Hours worked", "Work locations",
                          "Check-ins", "Re-entries", "Latest re-entry reason", "Any punch out of office",
                          "Last known latitude", "Last known longitude", "Last known place", "Last known at"],
              "rows": rows}

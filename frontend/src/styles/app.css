@@ -873,6 +873,40 @@ table.data-table {
   box-shadow: var(--shadow-md);
 }
 
+.clock-in-location-overlay {
+  z-index: 1000;
+  background: rgba(16, 24, 40, 0.72);
+}
+
+.clock-in-location-options {
+  display: grid;
+  gap: 8px;
+}
+
+.clock-in-location-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.clock-in-location-option.selected {
+  border-color: var(--color-primary-500);
+  background: var(--color-primary-50);
+}
+
+.clock-in-location-option input {
+  margin: 0;
+}
+
+.clock-in-location-option span:last-child {
+  margin-left: auto;
+  font-size: 12px;
+}
+
 /* ===== Payslip ===== */
 .payslip-header {
   display: flex;

@@ -214,6 +214,7 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
                 </div>
 
                 <div className="meta">
+                  {x.work_location_name && <span className="att-chip">Work location: {x.work_location_name}</span>}
                   <Place
                     label="Check-in"
                     within={x.clock_in_within_geofence}
