@@ -5,12 +5,14 @@ import Loader from "./Loader";
 import ExportButton from "./ExportButton";
 import DayDetailModal from "./DayDetailModal";
 import { fmtTime, fmtHours, localDateStr, companyYearMonth } from "../utils/attendanceTime";
+import { hasAutomaticClockoutBell } from "../utils/attendanceCalendar";
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+const AUTO_CLOCK_OUT_TOOLTIP = "You forgot clockout yesterday";
 
 /**
  * Month calendar of one person's attendance.
@@ -158,6 +160,7 @@ export default function AttendanceCalendar({
         holiday,
         leave,
         leaveRequest,
+        automaticClockoutBell: hasAutomaticClockoutBell(data, ds),
         cls,
         isToday: ds === today,
         future: ds > today,
@@ -282,12 +285,31 @@ export default function AttendanceCalendar({
                   } ${c.future ? "future" : ""}`}
                   onClick={() => setOpenDay(c)}
                   title={
-                    c.holiday?.name ||
-                    c.leaveRequest?.leave_type ||
-                    ""
+                    c.automaticClockoutBell
+                      ? AUTO_CLOCK_OUT_TOOLTIP
+                      : c.holiday?.name ||
+                        c.leaveRequest?.leave_type ||
+                        ""
                   }
                 >
                   <span className="n">{c.d}</span>
+
+                  {c.automaticClockoutBell && (
+                    <>
+                      <span
+                        className="att-auto-clockout-bell"
+                        aria-label={AUTO_CLOCK_OUT_TOOLTIP}
+                        title={AUTO_CLOCK_OUT_TOOLTIP}
+                      >
+                        <svg viewBox="0 0 16 16" aria-hidden="true">
+                          <path d="M8 15a1.5 1.5 0 0 0 1.45-1.1h-2.9A1.5 1.5 0 0 0 8 15Zm5-3.1-.9-1.05V7a4.1 4.1 0 0 0-3.35-4.03V2.5a.75.75 0 0 0-1.5 0v.47A4.1 4.1 0 0 0 3.9 7v3.85L3 11.9v.8h10v-.8Z" />
+                        </svg>
+                      </span>
+                      <span className="att-auto-clockout-tooltip" aria-hidden="true">
+                        {AUTO_CLOCK_OUT_TOOLTIP}
+                      </span>
+                    </>
+                  )}
 
                   {c.rec?.outside_office_any && (
                     <i

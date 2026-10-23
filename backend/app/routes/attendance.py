@@ -1,4 +1,4 @@
-from datetime import datetime, date, timezone
+from datetime import datetime, date, time, timezone
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
@@ -6,8 +6,9 @@ from app.extensions import db
 from app.models import (Attendance, AttendanceSession, AttendanceRegularizationReason,
                         AttendanceRegularizationRequest, User, Holiday, OfficeLocation,
                         CompanySettings, LeaveRequest)
+from app.models.attendance import AUTO_CLOCK_OUT_NOTE
 from app.utils.push import send_push
-from app.utils.company_time import company_today, utc_now_naive, to_company_local
+from app.utils.company_time import company_today, company_timezone, utc_now_naive, to_company_local
 from math import radians, sin, cos, asin, sqrt
 from flask import current_app, send_from_directory
 import os
@@ -342,6 +343,26 @@ def clock_in():
     return jsonify(out), 201
 
 
+def _claim_session_clock_out(session_id, clock_out_at, note, lat=None, lng=None, within_geofence=None, selfie=None):
+    """Atomically close only an open session, so manual and scheduled punches cannot overwrite each other."""
+    changed = (
+        db.session.query(AttendanceSession)
+        .filter(AttendanceSession.id == session_id, AttendanceSession.clock_out.is_(None))
+        .update(
+            {
+                AttendanceSession.clock_out: clock_out_at,
+                AttendanceSession.clock_out_note: note,
+                AttendanceSession.clock_out_lat: lat,
+                AttendanceSession.clock_out_lng: lng,
+                AttendanceSession.clock_out_within_geofence: within_geofence,
+                AttendanceSession.clock_out_selfie: selfie,
+            },
+            synchronize_session=False,
+        )
+    )
+    return changed == 1
+
+
 @bp.post("/clock-out")
 @jwt_required()
 def clock_out():
@@ -362,18 +383,23 @@ def clock_out():
         return jsonify({"message": "You are not clocked in right now. If you clocked out by mistake, check in again."}), 400
 
     note, lat, lng, selfie_file, _reason = _read_punch()
+    if note is not None and not isinstance(note, str):
+        return jsonify({"message": "note must be text."}), 400
+    if note == AUTO_CLOCK_OUT_NOTE:
+        return jsonify({"message": "This clock-out note is reserved for the attendance system."}), 400
     blocked = _office_restriction_block(user_id, lat, lng, "clock out")
     if blocked:
         return blocked
     selfie_name, err = _selfie_check("clock out", selfie_file, user_id, today, "out")
     if err:
         return err
-    session.clock_out = utc_now_naive()
-    session.clock_out_note = note
-    session.clock_out_lat, session.clock_out_lng = lat, lng
-    session.clock_out_within_geofence = _check_geofence(lat, lng)
-    session.clock_out_selfie = selfie_name
-    db.session.flush()
+    clock_out_at = utc_now_naive()
+    if not _claim_session_clock_out(
+        session.id, clock_out_at, note, lat, lng, _check_geofence(lat, lng), selfie_name
+    ):
+        db.session.rollback()
+        return jsonify({"message": "This session was already clocked out. Refresh and try again."}), 409
+    db.session.refresh(session)
     record.recompute_from_sessions()
     db.session.commit()
 
@@ -823,6 +849,37 @@ def run_attendance_reminders():
     return jsonify({"sent": sent})
 
 
+@bp.post("/internal/auto-midnight-clockout")
+def run_auto_midnight_clockouts():
+    secret = request.headers.get("X-Internal-Secret")
+    if not secret or secret != current_app.config.get("INTERNAL_TASK_SECRET"):
+        return jsonify({"message": "Not authorized."}), 403
+
+    closing_date = company_today() - timedelta(days=1)
+    local_midnight = datetime.combine(
+        closing_date + timedelta(days=1), time.min, tzinfo=company_timezone()
+    )
+    midnight_utc = local_midnight.astimezone(timezone.utc).replace(tzinfo=None)
+    records = Attendance.query.filter_by(work_date=closing_date).all()
+    closed_sessions = 0
+
+    for record in records:
+        _ensure_sessions(record)
+        closed_for_record = 0
+        for session in list(record.sessions):
+            if session.clock_out is not None or session.clock_in >= midnight_utc:
+                continue
+            if _claim_session_clock_out(session.id, midnight_utc, AUTO_CLOCK_OUT_NOTE):
+                db.session.refresh(session)
+                closed_for_record += 1
+        if closed_for_record:
+            record.recompute_from_sessions()
+            closed_sessions += closed_for_record
+
+    db.session.commit()
+    return jsonify({"work_date": closing_date.isoformat(), "closed_sessions": closed_sessions})
+
+
 # ============================================================================
 # Calendar + manager's full view
 # ============================================================================
@@ -874,6 +931,29 @@ def _calendar_payload(target, month, year, redact=False):
     first, last = _month_bounds(month, year)
     records = (Attendance.query.filter(Attendance.user_id == target.id, Attendance.work_date >= first, Attendance.work_date <= last)
                .order_by(Attendance.work_date.asc()).all())
+    automatic_clockout_bell_dates = set()
+
+    def add_automatic_bell_date(record):
+        following_day = record.work_date + timedelta(days=1)
+        for session in record.effective_sessions():
+            if not session.is_automatic_clock_out:
+                continue
+            local_clock_out = to_company_local(session.clock_out)
+            if (
+                local_clock_out.date() == following_day
+                and local_clock_out.time().replace(tzinfo=None) == time.min
+                and first <= following_day <= last
+            ):
+                automatic_clockout_bell_dates.add(following_day.isoformat())
+
+    for record in records:
+        add_automatic_bell_date(record)
+    previous_record = Attendance.query.filter_by(
+        user_id=target.id, work_date=first - timedelta(days=1)
+    ).first()
+    if previous_record:
+        add_automatic_bell_date(previous_record)
+
     holidays = Holiday.query.filter(Holiday.holiday_date >= first, Holiday.holiday_date <= last).order_by(Holiday.holiday_date.asc()).all()
     leaves = LeaveRequest.query.filter(
         LeaveRequest.user_id == target.id, LeaveRequest.status.in_(("pending", "approved")),
@@ -911,6 +991,7 @@ def _calendar_payload(target, month, year, redact=False):
                  "role": target.role, "designation": target.designation},
         "month": month, "year": year,
         "records": rec_dicts,
+        "automatic_clockout_bell_dates": sorted(automatic_clockout_bell_dates),
         "holidays": [h.to_dict() for h in holidays],
         "leaves": [
             {

@@ -5,6 +5,9 @@ from app.models.vendor import CompanySettings
 from app.utils.company_time import to_company_local, utc_now_naive
 
 
+AUTO_CLOCK_OUT_NOTE = "[SYSTEM:AUTO_MIDNIGHT_CLOCK_OUT]"
+
+
 class Attendance(db.Model):
     __tablename__ = "attendance"
     __table_args__ = (
@@ -149,8 +152,12 @@ class Attendance(db.Model):
 
         worked = sum((s.clock_out - s.clock_in).total_seconds() for s in sessions if s.clock_out)
         self.total_hours = round(worked / 3600, 2)
+        # An automatic midnight closure is always a half day, regardless of its duration.
+        if any(session.is_automatic_clock_out for session in sessions):
+            if not self.is_regularized and self.status != "regularized":
+                self.status = "half_day"
         # Only judge the day once nobody is clocked in, and never overwrite a regularization.
-        if last.clock_out is not None and not self.is_regularized and self.status != "regularized":
+        elif last.clock_out is not None and not self.is_regularized and self.status != "regularized":
             self.status = "present" if self.total_hours >= 4 else "half_day"
 
     def to_dict(self):
@@ -345,6 +352,10 @@ class AttendanceSession(db.Model):
             return round((self.clock_out - self.clock_in).total_seconds() / 3600, 2)
         return None
 
+    @property
+    def is_automatic_clock_out(self):
+        return self.clock_out is not None and self.clock_out_note == AUTO_CLOCK_OUT_NOTE
+
     def to_dict(self):
         return {
             "id": self.id, "session_no": self.session_no,
@@ -360,4 +371,5 @@ class AttendanceSession(db.Model):
             "reentry_reason": self.reentry_reason,
             "is_reentry": (self.session_no or 1) > 1,
             "duration_hours": self.duration_hours(),
+            "automatic_clock_out": self.is_automatic_clock_out,
         }

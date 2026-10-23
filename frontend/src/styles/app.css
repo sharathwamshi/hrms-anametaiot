@@ -999,6 +999,10 @@ table.data-table {
 .att-day.future { opacity: .55; }
 .att-dot { position: absolute; top: 7px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--color-danger); }
 .att-dot.pending { background: var(--color-warning); }
+.att-auto-clockout-bell { position: absolute; top: 20px; right: 5px; display: grid; place-items: center; width: 16px; height: 16px; color: var(--color-primary-700); }
+.att-auto-clockout-bell svg { display: block; width: 13px; height: 13px; fill: currentColor; }
+.att-auto-clockout-tooltip { display: none; position: absolute; z-index: 2; top: 4px; right: 4px; padding: 4px 7px; border-radius: 4px; background: var(--color-text); color: #fff; font-size: 10px; white-space: nowrap; box-shadow: var(--shadow-sm); }
+.att-day:hover .att-auto-clockout-tooltip, .att-day:focus .att-auto-clockout-tooltip { display: block; }
 .att-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; font-size: 12px; color: var(--color-text-muted); }
 .att-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; border: 1px solid rgba(0,0,0,.08); }
 .att-session { border-left: 3px solid var(--color-primary-500); padding: 4px 0 4px 12px; margin: 10px 0; }
