@@ -11,7 +11,7 @@ from datetime import date
 import json
 from app import create_app
 from app.extensions import db
-from app.models import User, Department, LeaveType, LeaveBalance, TopicLibrary, MockTestTemplate, MockTestQuestion, CompanySettings, SalaryTemplate, JobPosting, Candidate
+from app.models import User, Department, LeaveType, LeaveBalance, TopicLibrary, MockTestTemplate, MockTestQuestion, CompanySettings, SalaryTemplate, JobPosting, Candidate, OfficeLocation, WorkLocation
 from app.roles import (
     MANAGER, CONTRACT_EMPLOYEE, HR_OPERATIONS, FINANCE_ACCOUNTS,
     OPERATIONS, HR_RECRUITER, EMPLOYEE,
@@ -49,6 +49,21 @@ DEMO_USERS = [
 def run():
     with app.app_context():
         db.create_all()
+
+        default_work_location = WorkLocation.query.filter_by(is_default=True, is_active=True).first()
+        if not default_work_location:
+            office = OfficeLocation.query.filter_by(is_active=True).order_by(OfficeLocation.id.asc()).first()
+            office_name = office.name.strip() if office and office.name.strip() else "Main Office"
+            default_work_location = WorkLocation.query.filter_by(name=office_name).first()
+            if default_work_location:
+                default_work_location.is_active = True
+                default_work_location.is_default = True
+            else:
+                db.session.add(WorkLocation(name=office_name, is_active=True, is_default=True))
+        home_location = WorkLocation.query.filter_by(name="Work From Home").first()
+        if not home_location:
+            db.session.add(WorkLocation(name="Work From Home", is_active=True, is_default=False))
+        db.session.commit()
 
         dept_map = {}
         for name in DEPARTMENTS:

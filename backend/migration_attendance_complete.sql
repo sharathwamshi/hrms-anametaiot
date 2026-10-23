@@ -64,6 +64,32 @@ CREATE TABLE IF NOT EXISTS office_locations (
     FOREIGN KEY(created_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
+-- Work-location choices are labels (for example an office, Work From Home, or a satellite office).
+-- They are intentionally separate from GPS geofences.
+CREATE TABLE IF NOT EXISTS attendance_work_locations (
+    id INTEGER NOT NULL AUTO_INCREMENT,
+    name VARCHAR(100) NOT NULL,
+    is_active BOOL NOT NULL DEFAULT 1,
+    is_default BOOL NOT NULL DEFAULT 0,
+    created_by INTEGER,
+    created_at DATETIME,
+    PRIMARY KEY (id),
+    CONSTRAINT uq_attendance_work_location_name UNIQUE (name),
+    FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+-- Use the first configured active office as the initial default; otherwise use Main Office.
+INSERT INTO attendance_work_locations (name, is_active, is_default, created_at)
+SELECT COALESCE(
+    (SELECT name FROM office_locations WHERE is_active = 1 ORDER BY id LIMIT 1),
+    'Main Office'
+), 1, 1, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM attendance_work_locations WHERE is_default = 1)
+ON DUPLICATE KEY UPDATE is_active = 1, is_default = 1;
+
+INSERT IGNORE INTO attendance_work_locations (name, is_active, is_default, created_at)
+VALUES ('Work From Home', 1, 0, NOW());
+
 -- attendance.regularization_status
 SET @sql = (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `attendance` ADD COLUMN `regularization_status` VARCHAR(20) NULL', 'SELECT 1')
   FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'attendance' AND COLUMN_NAME = 'regularization_status');
@@ -167,6 +193,8 @@ CREATE TABLE IF NOT EXISTS attendance_sessions (
     clock_in_lat FLOAT,
     clock_in_lng FLOAT,
     clock_in_within_geofence BOOL,
+    work_location_id INTEGER,
+    work_location_name VARCHAR(100),
     clock_out_lat FLOAT,
     clock_out_lng FLOAT,
     clock_out_within_geofence BOOL,
@@ -176,8 +204,23 @@ CREATE TABLE IF NOT EXISTS attendance_sessions (
     created_at DATETIME,
     PRIMARY KEY (id),
     CONSTRAINT uq_attendance_session_no UNIQUE (attendance_id, session_no),
-    FOREIGN KEY(attendance_id) REFERENCES attendance (id) ON DELETE CASCADE
+    FOREIGN KEY(attendance_id) REFERENCES attendance (id) ON DELETE CASCADE,
+    CONSTRAINT fk_attendance_session_work_location
+      FOREIGN KEY(work_location_id) REFERENCES attendance_work_locations (id)
 ) ENGINE=InnoDB;
+
+-- Add the selectable work location to an attendance session on existing installations.
+SET @sql = (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `attendance_sessions` ADD COLUMN `work_location_id` INT NULL', 'SELECT 1')
+  FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'attendance_sessions' AND COLUMN_NAME = 'work_location_id');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `attendance_sessions` ADD COLUMN `work_location_name` VARCHAR(100) NULL', 'SELECT 1')
+  FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'attendance_sessions' AND COLUMN_NAME = 'work_location_name');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `attendance_sessions` ADD CONSTRAINT `fk_attendance_session_work_location` FOREIGN KEY (`work_location_id`) REFERENCES `attendance_work_locations` (`id`)', 'SELECT 1')
+  FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'attendance_sessions' AND CONSTRAINT_NAME = 'fk_attendance_session_work_location');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- Backfill: every existing attendance day that has a check-in becomes session #1, so history,
 -- reports and the new manager views include it. Safe to re-run (skips days already migrated).
@@ -191,6 +234,20 @@ SELECT a.id, 1, a.clock_in, a.clock_out, a.clock_in_note, a.clock_out_note,
 FROM attendance a
 WHERE a.clock_in IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM attendance_sessions s WHERE s.attendance_id = a.id);
+
+-- Preserve labels from the earlier attendance_sessions.work_location column, when present.
+-- The conditional statement keeps this migration compatible with installations that never
+-- had that older column.
+SET @sql = (SELECT IF(COUNT(*) > 0,
+  'UPDATE `attendance_sessions` SET `work_location_name` = `work_location` WHERE `work_location_name` IS NULL AND `work_location` IS NOT NULL AND TRIM(`work_location`) <> ''''',
+  'SELECT 1')
+  FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'attendance_sessions' AND COLUMN_NAME = 'work_location');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+UPDATE attendance_sessions s
+JOIN attendance_work_locations w ON LOWER(w.name) = LOWER(s.work_location_name)
+SET s.work_location_id = w.id
+WHERE s.work_location_id IS NULL;
 
 -- Direct manager/HR Ops correction audit (no employee request needed)
 -- attendance.edited_by

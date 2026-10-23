@@ -10,6 +10,7 @@ import AttendanceCalendar from "../components/AttendanceCalendar";
 import TeamOverviewPanel from "../components/TeamOverviewPanel";
 import ReentriesPanel from "../components/ReentriesPanel";
 import OfficeLocationsPanel from "../components/OfficeLocationsPanel";
+import WorkLocationOptionsPanel from "../components/WorkLocationOptionsPanel";
 import OfficeRestrictionToggle from "../components/OfficeRestrictionToggle";
 import ExportButton from "../components/ExportButton";
 import { fmtTime, fmtHours, arrivalLabel, localDateStr, placeLabel, companyYearMonth, setCompanyTimezone } from "../utils/attendanceTime";
@@ -326,6 +327,7 @@ export default function Attendance() {
         {canManageCalendar && tabBtn("rules", "Regularization Rules")}
         {canApprove && tabBtn("policy", "Attendance Policy")}
         {tabBtn("offices", "Office Locations")}
+        {canApprove && tabBtn("work-locations", "Work Location Options")}
       </div>
 
       {tab === "calendar" && (
@@ -501,6 +503,7 @@ export default function Attendance() {
       {tab === "rules" && canManageCalendar && <RulesPanel />}
       {tab === "policy" && canApprove && <AttendancePolicyPanel />}
       {tab === "offices" && <OfficeLocationsPanel canManage={OFFICE_ADMIN_ROLES.includes(user.role)} />}
+      {tab === "work-locations" && canApprove && <WorkLocationOptionsPanel />}
 
       {requestFor && (
         <RegularizeRequestModal

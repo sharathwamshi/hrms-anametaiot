@@ -1,7 +1,7 @@
 from app.models.user import User, Department
 from app.models.attendance import (
     Attendance, AttendanceRegularizationReason, AttendanceRegularizationRequest,
-    Holiday, OfficeLocation, DeviceToken, AttendanceSession,
+    Holiday, OfficeLocation, WorkLocation, DeviceToken, AttendanceSession,
 )
 from app.models.leave import LeaveType, LeaveBalance, LeaveRequest, LeaveEntitlementAudit
 from app.models.payroll import SalaryStructure, Payslip
@@ -26,6 +26,7 @@ __all__ = [
     "User", "Department",
     "Attendance",
     "AttendanceRegularizationRequest",
+    "WorkLocation",
     "LeaveType", "LeaveBalance", "LeaveRequest", "LeaveEntitlementAudit",
     "SalaryStructure", "Payslip", "SalaryTemplate",
     "JobPosting", "Candidate", "Interview", "InterviewPanelist",

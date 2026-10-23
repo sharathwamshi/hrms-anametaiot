@@ -5,7 +5,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from app.extensions import db
 from app.models import (Attendance, AttendanceSession, AttendanceRegularizationReason,
                         AttendanceRegularizationRequest, User, Holiday, OfficeLocation,
-                        CompanySettings, LeaveRequest)
+                        CompanySettings, LeaveRequest, WorkLocation)
 from app.models.attendance import AUTO_CLOCK_OUT_NOTE
 from app.utils.push import send_push
 from app.utils.company_time import company_today, company_timezone, utc_now_naive, to_company_local
@@ -21,6 +21,7 @@ FULL_ACCESS = (HR_OPERATIONS, SUPER_ADMIN)          # every active person, incl.
 APPROVER_ROLES = (MANAGER, HR_OPERATIONS, SUPER_ADMIN)
 CALENDAR_MANAGER_ROLES = (MANAGER, HR_OPERATIONS, SUPER_ADMIN)
 OFFICE_ADMIN_ROLES = (SUPER_ADMIN,)
+WORK_LOCATION_ADMIN_ROLES = (MANAGER, HR_OPERATIONS, SUPER_ADMIN)
 VIEWER_ROLES = (MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN)
 
 bp = Blueprint("attendance", __name__, url_prefix="/api/attendance")
@@ -54,6 +55,30 @@ def _check_geofence(lat, lng):
     return any(_haversine_meters(lat, lng, o.latitude, o.longitude) <= o.radius_meters for o in offices)
 
 
+def _ensure_default_work_locations():
+    locations = WorkLocation.query.order_by(WorkLocation.id.asc()).all()
+    all_names = {location.name.casefold() for location in locations}
+    if not locations:
+        office = OfficeLocation.query.filter_by(is_active=True).order_by(OfficeLocation.id.asc()).first()
+        main_office_name = office.name.strip() if office and office.name.strip() else "Main Office"
+        main_office = WorkLocation(name=main_office_name, is_active=True, is_default=True)
+        db.session.add(main_office)
+        locations.append(main_office)
+    if "work from home" not in all_names:
+        home = WorkLocation(name="Work From Home", is_active=True, is_default=False)
+        db.session.add(home)
+        locations.append(home)
+    active = [location for location in locations if location.is_active]
+    defaults = [location for location in active if location.is_default]
+    if not defaults and active:
+        active[0].is_default = True
+        defaults = [active[0]]
+    for location in defaults[1:]:
+        location.is_default = False
+    db.session.flush()
+    return locations
+
+
 def _office_restriction_block(user_id, lat, lng, kind_label):
     """If this person is restricted to punching from the office, returns a 403 response unless
     the position sent is inside an active office. Unrestricted people (the default) and the
@@ -69,6 +94,12 @@ def _office_restriction_block(user_id, lat, lng, kind_label):
     if _check_geofence(lat, lng) is not True:
         return jsonify({"message": f"You are not at the office. Your manager requires you to {kind_label} from an office location.",
                         "office_restricted": True, "reason": "outside_office"}), 403
+    return None
+
+
+def _work_location_admin_required():
+    if get_jwt().get("role") not in WORK_LOCATION_ADMIN_ROLES:
+        return jsonify({"message": "Only Managers, HR Operations, and Super Admins can manage work locations."}), 403
     return None
 
 
@@ -144,6 +175,99 @@ def delete_office_location(location_id):
     return jsonify({"message": "Office location removed."})
 
 
+# ============================================================================
+# Work location choices — labels saved on each attendance session
+# ============================================================================
+
+@bp.get("/work-locations")
+@jwt_required()
+def list_work_locations():
+    locations = _ensure_default_work_locations()
+    db.session.commit()
+    active_only = request.args.get("active_only", "true").lower() != "false"
+    if active_only or get_jwt().get("role") not in WORK_LOCATION_ADMIN_ROLES:
+        locations = [location for location in locations if location.is_active]
+    return jsonify([location.to_dict() for location in locations])
+
+
+@bp.post("/work-locations")
+@jwt_required()
+def create_work_location():
+    blocked = _work_location_admin_required()
+    if blocked:
+        return blocked
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"message": "Work location details must be provided as an object."}), 400
+    name = payload.get("name")
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
+        return jsonify({"message": "A work location name of 1 to 100 characters is required."}), 400
+    if "is_default" in payload and not isinstance(payload["is_default"], bool):
+        return jsonify({"message": "is_default must be a boolean."}), 400
+    locations = _ensure_default_work_locations()
+    clean_name = name.strip()
+    if WorkLocation.query.filter(db.func.lower(WorkLocation.name) == clean_name.lower()).first():
+        return jsonify({"message": "A work location with that name already exists."}), 409
+    is_default = payload.get("is_default") is True or not any(
+        location.is_default for location in locations if location.is_active
+    )
+    if is_default:
+        WorkLocation.query.update({WorkLocation.is_default: False}, synchronize_session=False)
+    location = WorkLocation(
+        name=clean_name,
+        is_active=True,
+        is_default=is_default,
+        created_by=int(get_jwt_identity()),
+    )
+    db.session.add(location)
+    db.session.commit()
+    return jsonify(location.to_dict()), 201
+
+
+@bp.put("/work-locations/<int:location_id>")
+@jwt_required()
+def update_work_location(location_id):
+    blocked = _work_location_admin_required()
+    if blocked:
+        return blocked
+    location = WorkLocation.query.get_or_404(location_id)
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"message": "Work location updates must be provided as an object."}), 400
+    if "name" in payload:
+        name = payload["name"]
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
+            return jsonify({"message": "A work location name of 1 to 100 characters is required."}), 400
+        clean_name = name.strip()
+        duplicate = WorkLocation.query.filter(
+            db.func.lower(WorkLocation.name) == clean_name.lower(),
+            WorkLocation.id != location.id,
+        ).first()
+        if duplicate:
+            return jsonify({"message": "A work location with that name already exists."}), 409
+        location.name = clean_name
+    if "is_active" in payload:
+        if not isinstance(payload["is_active"], bool):
+            return jsonify({"message": "is_active must be a boolean."}), 400
+        if location.is_default and not payload["is_active"]:
+            return jsonify({"message": "Choose another default location before deactivating this one."}), 400
+        location.is_active = payload["is_active"]
+    if "is_default" in payload:
+        if not isinstance(payload["is_default"], bool):
+            return jsonify({"message": "is_default must be a boolean."}), 400
+        if payload["is_default"]:
+            if not location.is_active:
+                return jsonify({"message": "An inactive location cannot be the default."}), 400
+            WorkLocation.query.filter(WorkLocation.id != location.id).update(
+                {WorkLocation.is_default: False}, synchronize_session=False
+            )
+            location.is_default = True
+        elif location.is_default:
+            return jsonify({"message": "Set another default location before removing the current default."}), 400
+    db.session.commit()
+    return jsonify(location.to_dict())
+
+
 
 # ============================================================================
 # Attendance policy (selfie) + punch helpers
@@ -171,14 +295,17 @@ def _to_coord(value, limit):
 
 def _read_punch():
     """A punch arrives either as JSON (no selfie) or as multipart form data (with a
-    selfie). Returns (note, lat, lng, selfie_file, reason). Coordinates are only kept if
-    both are valid, so a half-sent location can never be stored."""
+    selfie). Returns (note, lat, lng, selfie_file, reason, work_location_id).
+    Coordinates are only kept if both are valid, so a half-sent location can never be stored."""
     data = (request.get_json(silent=True) or {}) if request.is_json else request.form
     lat = _to_coord(data.get("latitude"), 90)
     lng = _to_coord(data.get("longitude"), 180)
     if lat is None or lng is None:
         lat = lng = None
-    return data.get("note"), lat, lng, request.files.get("selfie"), (data.get("reason") or "").strip()
+    return (
+        data.get("note"), lat, lng, request.files.get("selfie"),
+        (data.get("reason") or "").strip(), data.get("work_location_id"),
+    )
 
 
 def _save_selfie(file, user_id, work_date, kind):
@@ -305,7 +432,21 @@ def clock_in():
             return jsonify({"message": "You are already clocked in. Clock out first."}), 400
 
     is_reentry = bool(record and record.sessions)
-    note, lat, lng, selfie_file, reason = _read_punch()
+    note, lat, lng, selfie_file, reason, raw_work_location_id = _read_punch()
+    available_work_locations = _ensure_default_work_locations()
+    if raw_work_location_id in (None, ""):
+        work_location = next(
+            (location for location in available_work_locations if location.is_active and location.is_default),
+            None,
+        )
+    else:
+        try:
+            work_location_id = int(raw_work_location_id)
+        except (TypeError, ValueError):
+            return jsonify({"message": "Choose a valid work location before clocking in."}), 400
+        work_location = WorkLocation.query.filter_by(id=work_location_id, is_active=True).first()
+    if not work_location:
+        return jsonify({"message": "Choose an active work location before clocking in."}), 400
     blocked = _office_restriction_block(user_id, lat, lng, "clock in")
     if blocked:
         return blocked
@@ -328,6 +469,7 @@ def clock_in():
     session = AttendanceSession(
         session_no=len(record.sessions) + 1, clock_in=utc_now_naive(), clock_in_note=note,
         clock_in_lat=lat, clock_in_lng=lng, clock_in_within_geofence=_check_geofence(lat, lng),
+        work_location_id=work_location.id, work_location_name=work_location.name,
         clock_in_selfie=selfie_name, reentry_reason=reason if is_reentry else None,
     )
     record.sessions.append(session)
@@ -382,7 +524,7 @@ def clock_out():
     if not session:
         return jsonify({"message": "You are not clocked in right now. If you clocked out by mistake, check in again."}), 400
 
-    note, lat, lng, selfie_file, _reason = _read_punch()
+    note, lat, lng, selfie_file, _reason, _work_location_id = _read_punch()
     if note is not None and not isinstance(note, str):
         return jsonify({"message": "note must be text."}), 400
     if note == AUTO_CLOCK_OUT_NOTE:

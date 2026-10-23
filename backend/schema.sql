@@ -222,6 +222,18 @@ CREATE TABLE office_locations (
 	FOREIGN KEY(created_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE attendance_work_locations (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	name VARCHAR(100) NOT NULL,
+	is_active BOOL NOT NULL,
+	is_default BOOL NOT NULL,
+	created_by INTEGER,
+	created_at DATETIME,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_attendance_work_location_name UNIQUE (name),
+	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
 CREATE TABLE payslips (
 	id INTEGER NOT NULL AUTO_INCREMENT, 
 	user_id INTEGER NOT NULL, 
@@ -324,6 +336,8 @@ CREATE TABLE attendance (
 	clock_in_lat FLOAT, 
 	clock_in_lng FLOAT, 
 	clock_in_within_geofence BOOL, 
+	work_location_id INTEGER,
+	work_location_name VARCHAR(100),
 	clock_out_lat FLOAT, 
 	clock_out_lng FLOAT, 
 	clock_out_within_geofence BOOL, 
@@ -423,7 +437,8 @@ CREATE TABLE attendance_sessions (
 	created_at DATETIME, 
 	PRIMARY KEY (id), 
 	CONSTRAINT uq_attendance_session_no UNIQUE (attendance_id, session_no), 
-	FOREIGN KEY(attendance_id) REFERENCES attendance (id) ON DELETE CASCADE
+	FOREIGN KEY(attendance_id) REFERENCES attendance (id) ON DELETE CASCADE,
+	FOREIGN KEY(work_location_id) REFERENCES attendance_work_locations (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE candidates (
