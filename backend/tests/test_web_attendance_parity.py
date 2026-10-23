@@ -313,9 +313,17 @@ with app.app_context():
     r = c.get('/api/attendance/export/regularization-requests?status=all', headers=H['mgr'])
     hdr, rows = table(xl(r)['Regularization'])
     ok("regularization export includes pending and decided requests", {x[hdr.index('Status')] for x in rows if x[0]} >= {"Pending", "Approved"}, rows)
+    ok("regularization export includes both dates in DD-MM-YYYY format",
+       {"Request Date", "Attendance Date"} <= set(hdr) and
+       all(len(str(row[hdr.index("Request Date")]).split("-")) == 3 and
+           len(str(row[hdr.index("Attendance Date")]).split("-")) == 3
+           for row in rows if row[hdr.index("Status")] in {"Pending", "Approved"}),
+       hdr)
     ok("regularization export: manager only sees own reports", all(x[hdr.index('Employee')] in ("Sneha Recruiter", "Meera Recruiter") for x in rows if x[0]))
     ok("employees cannot export regularization requests", c.get('/api/attendance/export/regularization-requests', headers=H['r1']).status_code == 403)
-    ok("status filter works", all(x[hdr.index('Status')] == 'Pending' for x in table(xl(c.get('/api/attendance/export/regularization-requests?status=pending', headers=H['mgr']))['Regularization'])[1] if x[0]))
+    pending_hdr, pending_rows = table(xl(c.get('/api/attendance/export/regularization-requests?status=pending', headers=H['mgr']))['Regularization'])
+    ok("pending export includes request and attendance date columns", {"Request Date", "Attendance Date"} <= set(pending_hdr))
+    ok("status filter works", all(x[pending_hdr.index('Status')] == 'Pending' for x in pending_rows if x[0]))
     db.session.add(Holiday(name="Diwali", holiday_date=date(TODAY.year, 11, 1))); db.session.commit()
     r = c.get(f'/api/attendance/export/holidays?year={TODAY.year}', headers=H['r1'])
     ok("holidays export works for everyone", r.status_code == 200 and any(x and x[2] == 'Diwali' for x in table(xl(r)[f'Holidays {TODAY.year}'])[1]))

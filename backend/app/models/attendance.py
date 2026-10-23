@@ -160,6 +160,7 @@ class Attendance(db.Model):
             "id": self.id,
             "user_id": self.user_id,
             "employee_name": self.user.full_name if self.user else None,
+            "employee_code": self.user.employee_code if self.user else None,
             "work_date": self.work_date.isoformat(),
             "clock_in": self.clock_in.isoformat() if self.clock_in else None,
             "clock_out": self.clock_out.isoformat() if self.clock_out else None,
@@ -172,6 +173,10 @@ class Attendance(db.Model):
             "regularization_reason_label": self.reason.label if self.reason else None,
             "regularization_note": self.regularization_note,
             "regularization_requested_at": self.regularization_requested_at.isoformat() if self.regularization_requested_at else None,
+            "regularization_request_date": (
+                to_company_local(self.regularization_requested_at).date().isoformat()
+                if self.regularization_requested_at else None
+            ),
             "regularization_reviewed_by_name": self.reviewed_by_user.full_name if self.reviewed_by_user else None,
             "regularization_reviewed_at": self.regularization_reviewed_at.isoformat() if self.regularization_reviewed_at else None,
             "regularization_review_comment": self.regularization_review_comment,
