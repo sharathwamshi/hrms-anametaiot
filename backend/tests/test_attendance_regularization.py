@@ -76,6 +76,7 @@ with app.app_context():
     ok("recruiter can request regularization with a valid reason", r.status_code == 201, r.get_json())
     req1 = r.get_json()
     ok("request auto-creates the day's record as pending", req1['regularization_status'] == 'pending' and req1['regularization_reason_label'] == 'Forgot to clock in', req1)
+    ok("request date is generated automatically", req1['regularization_request_date'] == date.today().isoformat(), req1.get('regularization_request_date'))
     r = client.post('/api/attendance/regularize-request', headers=H['rec1'], json={'work_date': missed_day, 'reason_id': reason1['id']})
     ok("cannot submit a second request while one is pending", r.status_code == 409, r.get_json())
     quota = client.get('/api/attendance/regularization-limit', headers=H['rec1']).get_json()
@@ -132,6 +133,23 @@ with app.app_context():
     r = client.get('/api/attendance/history', headers=H['rec1'])
     row = next(x for x in r.get_json() if x['work_date'] == missed_day)
     ok("recruiter's own history reflects the approval", row['regularization_status'] == 'approved' and row['regularization_reviewed_by_name'] == 'Ananya Manager', row)
+    approved_history = client.get(
+        '/api/attendance/regularization-requests',
+        headers=H['mgr'],
+        query_string={'status': 'all'},
+    )
+    ok("approved requests remain in the review history",
+       approved_history.status_code == 200 and
+       any(item['id'] == req1['id'] and item['regularization_status'] == 'approved'
+           for item in approved_history.get_json()),
+       approved_history.get_json())
+    ok("status filter returns only approved requests",
+       all(item['regularization_status'] == 'approved' for item in
+           client.get('/api/attendance/regularization-requests', headers=H['mgr'],
+                      query_string={'status': 'approved'}).get_json()))
+    ok("invalid regularization status is rejected",
+       client.get('/api/attendance/regularization-requests', headers=H['mgr'],
+                  query_string={'status': 'unknown'}).status_code == 400)
 
     r = client.get('/api/attendance/regularization-requests', headers=H['mgr2'])
     pending2 = r.get_json()[0]
@@ -140,6 +158,16 @@ with app.app_context():
     r = client.post(f"/api/attendance/regularization-requests/{pending2['id']}/reject", headers=H['mgr2'], json={'comment': 'No record of a system outage that day'})
     ok("rejecting with a comment works", r.status_code == 200 and r.get_json()['regularization_status'] == 'rejected', r.get_json())
     ok("a rejected request is NOT regularized", r.get_json()['is_regularized'] is False, r.get_json())
+    rejected_history = client.get(
+        '/api/attendance/regularization-requests',
+        headers=H['mgr2'],
+        query_string={'status': 'all'},
+    )
+    ok("rejected requests remain in the review history",
+       rejected_history.status_code == 200 and
+       any(item['id'] == pending2['id'] and item['regularization_status'] == 'rejected'
+           for item in rejected_history.get_json()),
+       rejected_history.get_json())
 
     # ---- 6. Holiday calendar ("manager adds holidays ... everyone sees it") ------------------
     ok("recruiter cannot add a holiday", client.post('/api/attendance/holidays', headers=H['rec1'], json={'name': 'x', 'holiday_date': '2026-10-02'}).status_code == 403)

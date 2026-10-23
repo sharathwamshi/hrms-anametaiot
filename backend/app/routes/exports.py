@@ -15,7 +15,7 @@ from app.extensions import db
 from app.models import Attendance, AttendanceSession, Holiday, LeaveRequest, User, AttendanceRegularizationReason, CompanySettings
 from app.roles import MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN
 from app.utils.excel import fmt_time, fmt_datetime, xlsx_response
-from app.utils.company_time import company_today
+from app.utils.company_time import company_today, to_company_local
 from app.routes import attendance as att
 
 bp = Blueprint("exports", __name__, url_prefix="/api")
@@ -339,17 +339,26 @@ def export_reentries():
 def export_regularization_requests():
     claims = get_jwt()
     status = request.args.get("status", "all")
+    if status not in ("pending", "approved", "rejected", "all"):
+        return jsonify({"message": "status must be pending, approved, rejected, or all."}), 400
     query = att._scoped_regularization_query(claims, int(get_jwt_identity()), None if status == "all" else status)
+
+    def regularization_request_date(record):
+        if record.regularization_requested_at is None:
+            return ""
+        return to_company_local(record.regularization_requested_at).strftime("%d-%m-%Y")
+
     if query is None:
         return jsonify({"message": "You do not have permission to export regularization requests."}), 403
     rows = [[
-        r.work_date, r.user.employee_code, r.user.full_name,
+        regularization_request_date(r), r.work_date.strftime("%d-%m-%Y"),
+        r.user.employee_code, r.user.full_name,
         (r.regularization_status or "").title(), r.reason.label if r.reason else "", r.regularization_note or "",
-        fmt_datetime(r.regularization_requested_at), r.reviewed_by_user.full_name if r.reviewed_by_user else "",
+        r.reviewed_by_user.full_name if r.reviewed_by_user else "",
         fmt_datetime(r.regularization_reviewed_at), r.regularization_review_comment or "",
     ] for r in query.order_by(Attendance.regularization_requested_at.desc()).all()]
     sheet = {"name": "Regularization", "note": f"Regularization requests ({status})",
-             "headers": ["Date", "Employee code", "Employee", "Status", "Reason", "Employee note", "Requested at (IST)",
+             "headers": ["Request Date", "Attendance Date", "Employee code", "Employee", "Status", "Reason", "Employee note",
                          "Reviewed by", "Reviewed at (IST)", "Review comment"], "rows": rows}
     return xlsx_response([sheet], f"Regularization_Requests_{status}")
 

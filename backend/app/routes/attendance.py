@@ -631,7 +631,14 @@ def _scoped_regularization_query(claims, user_id, status):
 def list_regularization_requests():
     """A manager sees their own reports' requests; HR Operations sees everyone's."""
     claims = get_jwt()
-    query = _scoped_regularization_query(claims, int(get_jwt_identity()), request.args.get("status", "pending"))
+    status = request.args.get("status", "pending")
+    if status not in ("pending", "approved", "rejected", "all"):
+        return jsonify({"message": "status must be pending, approved, rejected, or all."}), 400
+    query = _scoped_regularization_query(
+        claims,
+        int(get_jwt_identity()),
+        None if status == "all" else status,
+    )
     if query is None:
         return jsonify({"message": "You do not have permission to review regularization requests."}), 403
     rows = query.order_by(Attendance.regularization_requested_at.desc()).all()

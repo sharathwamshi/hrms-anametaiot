@@ -29,6 +29,12 @@ function regStatusChip(status) {
   return null;
 }
 
+function formatDateDDMMYYYY(value) {
+  if (!value) return "—";
+  const [year, month, day] = value.slice(0, 10).split("-");
+  return `${day}-${month}-${year}`;
+}
+
 function HolidaysPanel({ canManage }) {
   const [holidays, setHolidays] = useState(null);
   const [year, setYear] = useState(companyYearMonth().year);
@@ -238,7 +244,13 @@ export default function Attendance() {
   const [tab, setTab] = useState("calendar");
   const [history, setHistory] = useState([]);
   const [histMonth, setHistMonth] = useState(localDateStr().slice(0, 7));
-  const [pending, setPending] = useState([]);
+  const [regularizationRequests, setRegularizationRequests] = useState([]);
+  const [regularizationStatus, setRegularizationStatus] = useState("all");
+  const [regularizationSearch, setRegularizationSearch] = useState("");
+  const [requestDateFrom, setRequestDateFrom] = useState("");
+  const [requestDateTo, setRequestDateTo] = useState("");
+  const [attendanceDateFrom, setAttendanceDateFrom] = useState("");
+  const [attendanceDateTo, setAttendanceDateTo] = useState("");
   const [loading, setLoading] = useState(false);
   const [requestFor, setRequestFor] = useState(null);
   const [reviewing, setReviewing] = useState(null);
@@ -250,6 +262,24 @@ export default function Attendance() {
   const canApprove = APPROVER_ROLES.includes(user.role);
   const canManageCalendar = CALENDAR_MANAGER_ROLES.includes(user.role);
   const refresh = () => setTick((t) => t + 1);
+  const filteredRequests = regularizationRequests.filter((record) => {
+    if (regularizationStatus !== "all" && record.regularization_status !== regularizationStatus) {
+      return false;
+    }
+    const search = regularizationSearch.trim().toLowerCase();
+    const matchesSearch = !search || [
+      record.employee_name,
+      record.employee_code,
+      record.user_id,
+    ].some((value) => String(value || "").toLowerCase().includes(search));
+    const requestDate = record.regularization_request_date || "";
+    const attendanceDate = record.work_date || "";
+    return matchesSearch &&
+      (!requestDateFrom || requestDate >= requestDateFrom) &&
+      (!requestDateTo || requestDate <= requestDateTo) &&
+      (!attendanceDateFrom || attendanceDate >= attendanceDateFrom) &&
+      (!attendanceDateTo || attendanceDate <= attendanceDateTo);
+  });
 
   const loadHistory = async (ym = histMonth) => {
     setLoading(true);
@@ -258,23 +288,24 @@ export default function Attendance() {
     setHistory(data);
     setLoading(false);
   };
-  const loadPending = async () => {
+  const loadRegularizationRequests = async () => {
     setLoading(true);
-    const { data } = await client.get("/attendance/regularization-requests", { params: { status: "pending" } });
-    setPending(data);
-    setLoading(false);
+    try {
+      const { data } = await client.get("/attendance/regularization-requests", { params: { status: "all" } });
+      setRegularizationRequests(data);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     if (tab === "mine") loadHistory();
-    if (tab === "approvals") loadPending();
+    if (tab === "approvals") loadRegularizationRequests();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, tick]);
   useEffect(() => {
     setHistMonth(localDateStr().slice(0, 7));
   }, [timezoneVersion]);
-  useEffect(() => { if (canApprove) client.get("/attendance/regularization-requests", { params: { status: "pending" } }).then(({ data }) => setPending(data)).catch(() => {}); /* eslint-disable-next-line */ }, [tick]);
-
   const tabBtn = (key, label) => (
     <button className={`btn btn-sm ${tab === key ? "btn-primary" : "btn-outline"}`} onClick={() => { setTab(key); if (key !== "team") setPerson(null); }}>{label}</button>
   );
@@ -289,7 +320,7 @@ export default function Attendance() {
         {tabBtn("calendar", "My Calendar")}
         {tabBtn("mine", "My History")}
         {canSeeTeam && tabBtn("team", "Team Attendance")}
-        {canApprove && tabBtn("approvals", `Regularization Requests${pending.length > 0 ? ` (${pending.length})` : ""}`)}
+        {canApprove && tabBtn("approvals", `Regularization Requests${regularizationRequests.filter((record) => record.regularization_status === "pending").length > 0 ? ` (${regularizationRequests.filter((record) => record.regularization_status === "pending").length})` : ""}`)}
         {canSeeTeam && tabBtn("reentries", "Re-entries")}
         {tabBtn("holidays", "Holidays")}
         {canManageCalendar && tabBtn("rules", "Regularization Rules")}
@@ -390,19 +421,72 @@ export default function Attendance() {
           <p className="muted" style={{ fontSize: 12.5, marginTop: -8, marginBottom: 12 }}>
             {user.role === ROLES.MANAGER ? "Requests from your direct reports." : "Requests from everyone."} You can also regularize or correct any day directly from <em>Team Attendance → a person's calendar</em>.
           </p>
+          <div className="regularization-filter-row">
+            <div className="form-field" style={{ margin: 0 }}>
+              <label htmlFor="regularization-status">Status</label>
+              <select id="regularization-status" value={regularizationStatus}
+                onChange={(event) => setRegularizationStatus(event.target.value)}>
+                <option value="all">All</option>
+                <option value="pending">Pending</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
+            <div className="form-field" style={{ margin: 0 }}>
+              <label htmlFor="regularization-search">Search employee name or ID</label>
+              <input id="regularization-search" type="search" value={regularizationSearch}
+                onChange={(event) => setRegularizationSearch(event.target.value)}
+                placeholder="Name, employee code, or ID" />
+            </div>
+            <div className="form-field" style={{ margin: 0 }}>
+              <label htmlFor="request-date-from">Request Date from</label>
+              <input id="request-date-from" type="date" value={requestDateFrom}
+                max={requestDateTo || undefined}
+                onChange={(event) => setRequestDateFrom(event.target.value)} />
+            </div>
+            <div className="form-field" style={{ margin: 0 }}>
+              <label htmlFor="request-date-to">Request Date to</label>
+              <input id="request-date-to" type="date" value={requestDateTo}
+                min={requestDateFrom || undefined}
+                onChange={(event) => setRequestDateTo(event.target.value)} />
+            </div>
+            <div className="form-field" style={{ margin: 0 }}>
+              <label htmlFor="attendance-date-from">Attendance Date from</label>
+              <input id="attendance-date-from" type="date" value={attendanceDateFrom}
+                max={attendanceDateTo || undefined}
+                onChange={(event) => setAttendanceDateFrom(event.target.value)} />
+            </div>
+            <div className="form-field" style={{ margin: 0 }}>
+              <label htmlFor="attendance-date-to">Attendance Date to</label>
+              <input id="attendance-date-to" type="date" value={attendanceDateTo}
+                min={attendanceDateFrom || undefined}
+                onChange={(event) => setAttendanceDateTo(event.target.value)} />
+            </div>
+          </div>
           {loading ? <Loader /> : (
             <div className="table-wrap">
               <table className="data-table">
-                <thead><tr><th>Employee</th><th>Date</th><th>Reason</th><th>Note</th><th></th></tr></thead>
+                <thead><tr><th>Employee</th><th>Employee ID</th><th>Request Date</th><th>Attendance Date</th><th>Reason</th><th>Note</th><th></th></tr></thead>
                 <tbody>
-                  {pending.length === 0 && <tr className="empty-row"><td colSpan={5}>No pending requests.</td></tr>}
-                  {pending.map((r) => (
+                  {filteredRequests.length === 0 && <tr className="empty-row"><td colSpan={8}>{regularizationRequests.length ? "No requests match these filters." : "No regularization requests."}</td></tr>}
+                  {filteredRequests.map((r) => (
                     <tr key={r.id}>
                       <td><strong>{r.employee_name}</strong></td>
-                      <td>{r.work_date}</td>
+                      <td>{r.employee_code || r.user_id}</td>
+                      <td>{formatDateDDMMYYYY(r.regularization_request_date)}</td>
+                      <td>{formatDateDDMMYYYY(r.work_date)}</td>
+                      <td>{regStatusChip(r.regularization_status)}</td>
                       <td>{r.regularization_reason_label}</td>
                       <td className="muted" style={{ maxWidth: 260 }}>{r.regularization_note || "—"}</td>
-                      <td><button className="btn btn-sm btn-primary" onClick={() => setReviewing(r)}>Review</button></td>
+                      <td>
+                        {r.regularization_status === "pending" ? (
+                          <button className="btn btn-sm btn-primary" onClick={() => setReviewing(r)}>Review</button>
+                        ) : (
+                          <span className="muted" title={r.regularization_review_comment || ""}>
+                            {r.regularization_reviewed_by_name ? `Reviewed by ${r.regularization_reviewed_by_name}` : "Reviewed"}
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
