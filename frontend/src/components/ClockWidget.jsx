@@ -29,6 +29,10 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
   const [workLocationsError, setWorkLocationsError] = useState("");
   const [selectedWorkLocationId, setSelectedWorkLocationId] = useState("");
   const [clockInOpen, setClockInOpen] = useState(false);
+  const [clockInLocationStatus, setClockInLocationStatus] = useState("idle");
+  const [clockInLocation, setClockInLocation] = useState(null);
+  const [clockInLocationError, setClockInLocationError] = useState("");
+  const [showLocationInstructions, setShowLocationInstructions] = useState(false);
   const fileRef = useRef(null);
   const clockInDialogRef = useRef(null);
 
@@ -131,15 +135,45 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
   const canCheckInAgain = !!record?.clock_in && !clockedIn;
   const lastSession = sessions[sessions.length - 1];
 
+  const checkClockInLocation = async () => {
+    setClockInLocationStatus("loading");
+    setClockInLocation(null);
+    setClockInLocationError("");
+    setShowLocationInstructions(false);
+    const location = await getBrowserLocation();
+    if (location.error) {
+      setClockInLocationStatus("error");
+      setClockInLocationError(location.error);
+      setShowLocationInstructions(true);
+      return;
+    }
+    try {
+      const { data } = await client.post("/attendance/location-check", {
+        latitude: location.latitude,
+        longitude: location.longitude,
+      });
+      setClockInLocation({ ...location, ...data });
+      setClockInLocationStatus("ready");
+    } catch (err) {
+      setClockInLocationStatus("error");
+      setClockInLocationError(err?.response?.data?.message || "Could not verify your location. Please try again.");
+    }
+  };
+
   const openClockIn = () => {
     setError("");
     setNotice(null);
+    setClockInLocationStatus("loading");
+    setClockInLocation(null);
+    setClockInLocationError("");
+    setShowLocationInstructions(false);
     setClockInOpen(true);
     setSelectedWorkLocationId((current) => (
       workLocations.some((location) => String(location.id) === String(current))
         ? current
         : String(workLocations.find((location) => location.is_default)?.id || workLocations[0]?.id || "")
     ));
+    checkClockInLocation();
   };
 
   const handleClock = async (action) => {
@@ -152,12 +186,18 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
       setError("A photo is required by your company — attach one first.");
       return;
     }
+    if (action === "clock-in" && (clockInLocationStatus !== "ready" || !clockInLocation)) {
+      setError("Fetch and verify your location before clocking in.");
+      return;
+    }
     setBusy(true);
     setError("");
     setNotice(null);
     try {
-      setLocating(true);
-      const loc = await getBrowserLocation();
+      if (action === "clock-out") setLocating(true);
+      const loc = action === "clock-in"
+        ? clockInLocation
+        : await getBrowserLocation();
       setLocating(false);
       const coords = loc.error ? {} : { latitude: loc.latitude, longitude: loc.longitude };
       let data;
@@ -276,16 +316,61 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
           <div ref={clockInDialogRef} className="modal-box" role="dialog" aria-modal="true" aria-labelledby="clock-in-location-title" tabIndex={-1}>
             <h3 id="clock-in-location-title" style={{ marginBottom: 6 }}>{canCheckInAgain ? "Check in again" : "Clock in"}</h3>
             <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
-              Choose where you are working today, then clock in.
+              We’ll check your location before showing the clock-in options.
             </p>
             {error && <div className="login-error" style={{ marginBottom: 10 }}>{error}</div>}
+            {clockInLocationStatus === "loading" && (
+              <div className="muted" role="status" style={{ marginBottom: 14 }}>Getting and verifying your location…</div>
+            )}
+            {clockInLocationStatus === "error" && (
+              <div style={{ marginBottom: 14 }}>
+                <div className="login-error" role="alert" style={{ marginBottom: 8 }}>{clockInLocationError}</div>
+                {showLocationInstructions && (
+                  <p className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
+                    To allow location, click the site controls icon beside the address bar, open site permissions or settings, set Location to Allow, then retry. In other browsers, open this site’s permissions and allow Location.
+                  </p>
+                )}
+                <button type="button" className="btn btn-sm btn-outline" onClick={checkClockInLocation}>Retry location check</button>
+              </div>
+            )}
+            {clockInLocationStatus === "ready" && (
+              <div
+                role="status"
+                style={{
+                  background: clockInLocation.office_configured && clockInLocation.within_office
+                    ? "var(--color-success-100)"
+                    : "var(--color-warning-100)",
+                  color: clockInLocation.office_configured && clockInLocation.within_office
+                    ? "#067647"
+                    : "#b54708",
+                  fontSize: 13,
+                  borderRadius: 6,
+                  padding: "9px 12px",
+                  marginBottom: 14,
+                }}
+              >
+                <div>
+                  {clockInLocation.office_configured
+                    ? clockInLocation.within_office
+                      ? "Your location was fetched. You are in the office."
+                      : "Your location was fetched. You are out of the office."
+                    : "Your location was fetched, but no office geofence is configured, so we could not determine whether you are in or out of the office."}
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  Your location is: {clockInLocation.latitude.toFixed(5)}, {clockInLocation.longitude.toFixed(5)}
+                  {Number.isFinite(clockInLocation.accuracy) && ` (accuracy ±${Math.round(clockInLocation.accuracy)} m)`}
+                  {" · "}
+                  <a href={mapsUrl(clockInLocation.latitude, clockInLocation.longitude)} target="_blank" rel="noreferrer">View on map</a>
+                </div>
+              </div>
+            )}
             {workLocationsError && (
               <div className="login-error" style={{ marginBottom: 10 }}>
                 {workLocationsError}{" "}
                 <button type="button" className="btn btn-sm btn-outline" onClick={loadWorkLocations}>Retry</button>
               </div>
             )}
-            {workLocationsLoading ? <Loader /> : workLocations.length > 0 ? (
+            {clockInLocationStatus === "ready" && (workLocationsLoading ? <Loader /> : workLocations.length > 0 ? (
               <div className="form-field">
                 <label>Work location</label>
                 <div className="clock-in-location-options">
@@ -306,8 +391,8 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
               </div>
             ) : !workLocationsError ? (
               <p className="login-error">No active work locations are available. Ask your manager to add one.</p>
-            ) : null}
-            {canCheckInAgain && (
+            ) : null)}
+            {clockInLocationStatus === "ready" && canCheckInAgain && (
               <div className="form-field">
                 <label htmlFor="reentry-reason">Reason for checking in again</label>
                 <input
@@ -319,7 +404,7 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
                 />
               </div>
             )}
-            {selfieRequired && (
+            {clockInLocationStatus === "ready" && selfieRequired && (
               <div className="form-field">
                 <label>Photo required by your company</label>
                 <input
@@ -332,14 +417,17 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
               </div>
             )}
             <div className="form-actions">
-              <button
-                type="button"
-                className="btn btn-success"
-                disabled={busy || workLocationsLoading || !selectedWorkLocationId || workLocations.length === 0 || !!workLocationsError || (selfieRequired && !selfie) || (canCheckInAgain && reason.trim().length < 3)}
-                onClick={() => handleClock("clock-in")}
-              >
-                {locating ? "Getting location…" : busy ? "Clocking in…" : "Choose location and Clock In"}
-              </button>
+              <button type="button" className="btn btn-outline" disabled={busy} onClick={() => setClockInOpen(false)}>Cancel</button>
+              {clockInLocationStatus === "ready" && (
+                <button
+                  type="button"
+                  className="btn btn-success"
+                  disabled={busy || workLocationsLoading || !selectedWorkLocationId || workLocations.length === 0 || !!workLocationsError || (selfieRequired && !selfie) || (canCheckInAgain && reason.trim().length < 3)}
+                  onClick={() => handleClock("clock-in")}
+                >
+                  {busy ? "Clocking in…" : "Choose location and Clock In"}
+                </button>
+              )}
             </div>
           </div>
         </div>

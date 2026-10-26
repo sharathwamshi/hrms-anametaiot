@@ -9,7 +9,7 @@ from app.models import (Attendance, AttendanceSession, AttendanceRegularizationR
 from app.models.attendance import AUTO_CLOCK_OUT_NOTE
 from app.utils.push import send_push
 from app.utils.company_time import company_today, company_timezone, utc_now_naive, to_company_local
-from math import radians, sin, cos, asin, sqrt
+from math import radians, sin, cos, asin, sqrt, isfinite
 from flask import current_app, send_from_directory
 import os
 import uuid
@@ -53,6 +53,27 @@ def _check_geofence(lat, lng):
     if not offices:
         return None
     return any(_haversine_meters(lat, lng, o.latitude, o.longitude) <= o.radius_meters for o in offices)
+
+
+@bp.post("/location-check")
+@jwt_required()
+def check_location():
+    eligibility_error = _guard_clock_eligibility(get_jwt().get("role"))
+    if eligibility_error:
+        return eligibility_error
+    payload = request.get_json(silent=True) or {}
+    try:
+        lat, lng = float(payload["latitude"]), float(payload["longitude"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"message": "Valid latitude and longitude are required."}), 400
+    if not isfinite(lat) or not isfinite(lng) or not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
+        return jsonify({"message": "Latitude and longitude are out of range."}), 400
+
+    within_office = _check_geofence(lat, lng)
+    return jsonify({
+        "within_office": within_office,
+        "office_configured": within_office is not None,
+    })
 
 
 def _ensure_default_work_locations():

@@ -65,6 +65,11 @@ with app.app_context():
     ok("S5 everyone can still READ office locations (the app needs them)", len(c.get("/api/attendance/office-locations", headers=H["e1"]).get_json()) == 1)
     ok("S6 manager cannot edit or delete one", pj(f"/api/attendance/office-locations/{lid}", "mgr", {"radius_meters": 5000}, "put").status_code == 403 and c.delete(f"/api/attendance/office-locations/{lid}", headers=H["mgr"]).status_code == 403)
     ok("S7 Super Admin edits the radius", pj(f"/api/attendance/office-locations/{lid}", "sa", {"radius_meters": 200}, "put").get_json()["radius_meters"] == 200)
+    inside_check = pj("/api/attendance/location-check", "e1", {"latitude": HQ[0], "longitude": HQ[1]})
+    outside_check = pj("/api/attendance/location-check", "e1", {"latitude": FAR[0], "longitude": FAR[1]})
+    ok("S7a location check identifies someone inside the office", inside_check.status_code == 200 and inside_check.get_json() == {"within_office": True, "office_configured": True})
+    ok("S7b location check identifies someone outside the office", outside_check.status_code == 200 and outside_check.get_json() == {"within_office": False, "office_configured": True})
+    ok("S7c location check rejects invalid coordinates", pj("/api/attendance/location-check", "e1", {"latitude": 91, "longitude": 0}).status_code == 400)
 
     # ---------------- Overall access ----------------
     ok("S8 Super Admin sees everyone in the team overview", len(c.get(f"/api/attendance/team/overview?date={TS}", headers=H["sa"]).get_json()["people"]) >= 6)
