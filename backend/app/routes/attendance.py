@@ -1211,6 +1211,48 @@ def team_member_calendar(user_id):
     return jsonify(_calendar_payload(target, month, year, redact=not _can_view_sensitive(claims, viewer_id, target)))
 
 
+@bp.get("/team/<int:user_id>/records")
+@jwt_required()
+def team_member_attendance_records(user_id):
+    claims, viewer_id = get_jwt(), int(get_jwt_identity())
+    target, err = _manager_target(claims, viewer_id, user_id)
+    if err:
+        return err
+
+    def parse_filter_date(name):
+        value = request.args.get(name)
+        if not value:
+            return None, None
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError:
+            return None, (jsonify({"message": f"{name} must be a valid date (YYYY-MM-DD)."}), 400)
+        if parsed.isoformat() != value:
+            return None, (jsonify({"message": f"{name} must be a valid date (YYYY-MM-DD)."}), 400)
+        return parsed, None
+
+    start_date, err = parse_filter_date("start_date")
+    if err:
+        return err
+    end_date, err = parse_filter_date("end_date")
+    if err:
+        return err
+    if start_date and end_date and start_date > end_date:
+        return jsonify({"message": "start_date cannot be after end_date."}), 400
+
+    query = Attendance.query.filter_by(user_id=user_id)
+    if start_date:
+        query = query.filter(Attendance.work_date >= start_date)
+    if end_date:
+        query = query.filter(Attendance.work_date <= end_date)
+    records = query.order_by(Attendance.work_date.desc()).all()
+    can_view_sensitive = _can_view_sensitive(claims, viewer_id, target)
+    return jsonify([
+        record.to_dict() if can_view_sensitive else _redact(record.to_dict())
+        for record in records
+    ])
+
+
 def _build_overview(claims, viewer_id, target_date):
     scope = _viewer_scope(claims, viewer_id)
     users = (User.query.filter(User.id.in_(scope or {0}), User.is_active.is_(True), User.role != "contract_employee")
@@ -1580,6 +1622,149 @@ def _finalize_pending_request(record, actor_id, comment):
     return False
 
 
+def _company_time_as_utc(work_date, wall_time):
+    local_value = datetime.combine(work_date, wall_time, tzinfo=company_timezone())
+    return local_value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+@bp.put("/manager/records/<int:record_id>/time")
+@jwt_required()
+def manager_edit_record_time(record_id):
+    """Correct one punch time on an existing attendance day using company-local HH:MM."""
+    claims, actor_id = get_jwt(), int(get_jwt_identity())
+    record = db.session.get(Attendance, record_id)
+    if not record:
+        return jsonify({"message": "Attendance record was not found."}), 404
+    target, err = _manager_target(claims, actor_id, record.user_id)
+    if err:
+        return err
+    if record.work_date > company_today():
+        return jsonify({"message": "You cannot correct a future date."}), 400
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"message": "Attendance correction must be provided as an object."}), 400
+    field = payload.get("field")
+    if field not in ("clock_in", "clock_out"):
+        return jsonify({"message": "field must be clock_in or clock_out."}), 400
+    raw_time = payload.get("time")
+    if not isinstance(raw_time, str):
+        return jsonify({"message": "time must be a valid HH:MM value."}), 400
+    try:
+        wall_time = datetime.strptime(raw_time, "%H:%M").time()
+    except ValueError:
+        return jsonify({"message": "time must be a valid HH:MM value."}), 400
+    if wall_time.strftime("%H:%M") != raw_time:
+        return jsonify({"message": "time must be a valid HH:MM value."}), 400
+    reason = payload.get("reason")
+    if not isinstance(reason, str) or len(reason.strip()) < 3:
+        return jsonify({"message": "Enter a correction reason of at least 3 characters."}), 400
+    reason = reason.strip()[:255]
+
+    _ensure_sessions(record)
+    sessions = list(record.sessions)
+    before_times = _audit_session_times(sessions)
+    if not sessions:
+        if field == "clock_out":
+            return jsonify({"message": "Add a check-in before adding a check-out."}), 400
+        new_check_in = _company_time_as_utc(record.work_date, wall_time)
+        if record.clock_out and record.clock_out <= new_check_in:
+            return jsonify({"message": "Check-in must be earlier than the existing check-out."}), 400
+        if not record.clock_out and record.work_date != company_today():
+            return jsonify({"message": "A check-in can only be left open for today."}), 400
+        if record.clock_out and record.clock_out - new_check_in > timedelta(hours=24):
+            return jsonify({"message": "A check-in session cannot be longer than 24 hours."}), 400
+        session = AttendanceSession(
+            session_no=1,
+            clock_in=new_check_in,
+            clock_out=record.clock_out,
+            clock_in_note=record.clock_in_note,
+            clock_in_lat=record.clock_in_lat,
+            clock_in_lng=record.clock_in_lng,
+            clock_in_within_geofence=record.clock_in_within_geofence,
+            clock_in_selfie=record.clock_in_selfie,
+            clock_out_note=record.clock_out_note,
+            clock_out_lat=record.clock_out_lat,
+            clock_out_lng=record.clock_out_lng,
+            clock_out_within_geofence=record.clock_out_within_geofence,
+            clock_out_selfie=record.clock_out_selfie,
+        )
+        record.sessions.append(session)
+        sessions = [session]
+    else:
+        selected_session = sessions[0] if field == "clock_in" else sessions[-1]
+        old_value = selected_session.clock_in if field == "clock_in" else selected_session.clock_out
+        if field == "clock_in":
+            new_value = _company_time_as_utc(record.work_date, wall_time)
+            if old_value == new_value:
+                return jsonify({"message": "The check-in time is unchanged."}), 400
+            selected_session.clock_in = new_value
+        else:
+            check_in_local = to_company_local(selected_session.clock_in)
+            checkout_date = record.work_date + (
+                timedelta(days=1) if wall_time <= check_in_local.timetz().replace(tzinfo=None) else timedelta()
+            )
+            new_value = _company_time_as_utc(checkout_date, wall_time)
+            if old_value == new_value:
+                return jsonify({"message": "The check-out time is unchanged."}), 400
+            if selected_session.is_automatic_clock_out:
+                selected_session.clock_out_note = None
+            selected_session.clock_out = new_value
+
+    for index, session in enumerate(sessions):
+        if _local_date(session.clock_in) != record.work_date:
+            return jsonify({"message": "Check-in must fall on the attendance date."}), 400
+        if session.clock_out and session.clock_out <= session.clock_in:
+            return jsonify({"message": "Check-out must be later than its check-in."}), 400
+        if session.clock_out and session.clock_out - session.clock_in > timedelta(hours=24):
+            return jsonify({"message": "A check-in session cannot be longer than 24 hours."}), 400
+        if session.clock_out is None and (index != len(sessions) - 1 or record.work_date != company_today()):
+            return jsonify({"message": "Only the final session for today can be left without a check-out."}), 400
+        if index and sessions[index - 1].clock_out and session.clock_in < sessions[index - 1].clock_out:
+            return jsonify({"message": "Attendance sessions cannot overlap."}), 400
+
+    record.recompute_from_sessions()
+    if (
+        record.open_session()
+        and not record.is_regularized
+        and record.status != "regularized"
+    ):
+        record.status = "present"
+    previous_details = json.loads(record.edit_details) if record.edit_details else {}
+    audit_history = previous_details.get("history", []) if isinstance(previous_details, dict) else []
+    if not isinstance(audit_history, list):
+        audit_history = []
+    if isinstance(previous_details, dict) and "before" in previous_details and "after" in previous_details:
+        audit_history = [
+            *audit_history,
+            {
+                "edited_by": record.edited_by,
+                "edited_at": record.edited_at.isoformat() if record.edited_at else None,
+                "edit_note": record.edit_note,
+                "before": previous_details["before"],
+                "after": previous_details["after"],
+            },
+        ]
+    record.edit_details = json.dumps({
+        "before": before_times,
+        "after": _audit_session_times(record.sessions),
+        "history": audit_history,
+    }, separators=(",", ":"))
+    record.edited_by = actor_id
+    record.edited_at = utc_now_naive()
+    record.edit_note = reason
+    db.session.commit()
+
+    actor = db.session.get(User, actor_id)
+    send_push(
+        target.id,
+        "Attendance updated",
+        f"{actor.full_name} corrected your attendance for {record.work_date.isoformat()}.",
+        data={"type": "attendance_corrected", "record_id": record.id},
+    )
+    return jsonify(record.to_dict())
+
+
 @bp.put("/manager/day")
 @jwt_required()
 def manager_edit_day():
@@ -1673,9 +1858,12 @@ def manager_edit_day():
         record = Attendance(user_id=target.id, work_date=work_date, status="absent")
         db.session.add(record)
         db.session.flush()
+    was_legacy_record = not record.sessions and record.clock_in is not None
     _ensure_sessions(record)
 
     existing = {s.id: s for s in record.sessions}
+    if was_legacy_record and len(parsed) == 1 and parsed[0]["id"] is None:
+        parsed[0]["id"] = record.sessions[0].id
     before_times = _audit_session_times(record.sessions)
     keep_ids = {item["id"] for item in parsed if item["id"] in existing}
     if any(item["id"] is not None and item["id"] not in existing for item in parsed):
@@ -1698,6 +1886,8 @@ def manager_edit_day():
         if sess is None:
             sess = AttendanceSession(clock_in=item["in"], session_no=n)
             record.sessions.append(sess)
+        if sess.is_automatic_clock_out and item["out"] != sess.clock_out:
+            sess.clock_out_note = None
         sess.clock_in, sess.clock_out, sess.session_no = item["in"], item["out"], n
         if n > 1:
             sess.reentry_reason = item["reason"] or sess.reentry_reason or "Added by manager"
@@ -1715,8 +1905,27 @@ def manager_edit_day():
         record.clock_in_selfie = record.clock_out_selfie = None
         record.total_hours = 0
 
+    previous_details = json.loads(record.edit_details) if record.edit_details else {}
+    audit_history = previous_details.get("history", []) if isinstance(previous_details, dict) else []
+    if not isinstance(audit_history, list):
+        audit_history = []
+    if isinstance(previous_details, dict) and "before" in previous_details and "after" in previous_details:
+        audit_history = [
+            *audit_history,
+            {
+                "edited_by": record.edited_by,
+                "edited_at": record.edited_at.isoformat() if record.edited_at else None,
+                "edit_note": record.edit_note,
+                "before": previous_details["before"],
+                "after": previous_details["after"],
+            },
+        ]
     record.edit_details = json.dumps(
-        {"before": before_times, "after": _audit_session_times(record.sessions)},
+        {
+            "before": before_times,
+            "after": _audit_session_times(record.sessions),
+            "history": audit_history,
+        },
         separators=(",", ":"),
     )
 

@@ -86,14 +86,18 @@ export default function ManagerEditDayModal({ person, day, onClose, onDone }) {
           {" "}Standard checkout is 6:30 PM; enter the actual check-out time.
         </p>
         <form onSubmit={submit}>
+          <div className="form-field">
+            <label>Attendance Date</label>
+            <input type="date" value={day.ds} disabled />
+          </div>
           {status !== "absent" && (
             <>
               {rows.map((r, i) => (
                 <div key={i}>
                   <div className="att-edit-row">
                     <div className="no">{i + 1}</div>
-                    <div><label className="muted" style={{ fontSize: 11.5 }}>Check-in</label><input type="datetime-local" value={r.in} onChange={(e) => setRow(i, { in: e.target.value })} required /></div>
-                    <div><label className="muted" style={{ fontSize: 11.5 }}>Check-out {i === rows.length - 1 ? "(empty = still in, today only)" : ""}</label><input type="datetime-local" value={r.out} onChange={(e) => setRow(i, { out: e.target.value })} /></div>
+                    <div><label className="muted" style={{ fontSize: 11.5 }}>Check-in Time</label><input type="datetime-local" value={r.in} onChange={(e) => setRow(i, { in: e.target.value })} required /></div>
+                    <div><label className="muted" style={{ fontSize: 11.5 }}>Check-out Time {i === rows.length - 1 ? "(empty = still in, today only)" : ""}</label><input type="datetime-local" value={r.out} onChange={(e) => setRow(i, { out: e.target.value })} /></div>
                     <button type="button" className="btn btn-sm btn-outline" title="Remove this check-in" onClick={() => setRows((rs) => rs.filter((_, k) => k !== i))} disabled={rows.length === 1 && !rec?.sessions?.length}>✕</button>
                   </div>
                   {i > 0 && (
