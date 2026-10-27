@@ -242,7 +242,15 @@ function AttendancePolicyPanel() {
 
 export default function Attendance() {
   const { user } = useAuth();
-  const [tab, setTab] = useState("calendar");
+  const [tab, setTab] = useState(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested === "team" && TEAM_VIEW_ROLES.includes(user.role)) return "team";
+    if (requested === "reports" && TEAM_VIEW_ROLES.includes(user.role)) return "team";
+    if (requested === "approvals" && APPROVER_ROLES.includes(user.role)) return "approvals";
+    if (requested === "policy" && APPROVER_ROLES.includes(user.role)) return "policy";
+    if (requested === "mine") return "mine";
+    return "calendar";
+  });
   const [history, setHistory] = useState([]);
   const [histMonth, setHistMonth] = useState(localDateStr().slice(0, 7));
   const [regularizationRequests, setRegularizationRequests] = useState([]);

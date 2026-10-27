@@ -1,12 +1,13 @@
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { NAV_BY_ROLE, NAV_ITEMS } from "../config/roles";
 
 const STORAGE_KEY = "hrms_sidebar_collapsed";
 
 export default function Sidebar() {
-  const { user, roleLabel } = useAuth();
+  const { user, roleLabel, logout } = useAuth();
+  const location = useLocation();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(STORAGE_KEY) === "1");
 
   if (!user) return null;
@@ -51,13 +52,21 @@ export default function Sidebar() {
             key={item.key}
             to={item.path}
             end={item.path === "/"}
-            className={({ isActive }) => `sidebar-link${isActive ? " active" : ""}`}
+            className={() => {
+              const [path, search = ""] = item.path.split("?");
+              const isActive = location.pathname === path && location.search.slice(1) === search;
+              return `sidebar-link${isActive ? " active" : ""}`;
+            }}
             title={collapsed ? item.label : undefined}
           >
             <span className="icon">{item.icon}</span>
             <span className="label">{item.label}</span>
           </NavLink>
         ))}
+        <button type="button" className="sidebar-link sidebar-logout-link" onClick={logout}>
+          <span className="icon">{"\u21AA"}</span>
+          <span className="label">Logout</span>
+        </button>
       </nav>
 
       <div className="sidebar-footer">
