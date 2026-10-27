@@ -3,6 +3,7 @@ import client from "../api/client";
 import Badge from "./Badge";
 import RemoveEmployeeModal from "./RemoveEmployeeModal";
 import LeaveBalanceSummary from "./LeaveBalanceSummary";
+import EmployeeAttendanceSection from "./EmployeeAttendanceSection";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, ROLE_LABELS } from "../config/roles";
 
@@ -13,8 +14,6 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
 
   const [snapshot, setSnapshot] = useState(null);
   const [recruiterPerf, setRecruiterPerf] = useState(null);
-  const [permissions, setPermissions] = useState([]);
-  const [catalogue, setCatalogue] = useState([]);
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leaveBalanceLoading, setLeaveBalanceLoading] = useState(true);
   const [leaveBalanceError, setLeaveBalanceError] = useState("");
@@ -26,14 +25,8 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [snapRes, catRes, permRes] = await Promise.all([
-      client.get(`/employees/${employeeId}/performance-snapshot`),
-      client.get("/employees/permissions/catalogue"),
-      client.get(`/employees/${employeeId}/permissions`).catch(() => ({ data: [] })),
-    ]);
+    const snapRes = await client.get(`/employees/${employeeId}/performance-snapshot`);
     setSnapshot(snapRes.data);
-    setCatalogue(catRes.data);
-    setPermissions(permRes.data);
     setForm({
       full_name: snapRes.data.employee.full_name,
       phone: snapRes.data.employee.phone || "",
@@ -87,20 +80,6 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
     }
   };
 
-  const togglePermission = async (key, currentlyGranted) => {
-    setError("");
-    try {
-      if (currentlyGranted) {
-        await client.delete(`/employees/${employeeId}/permissions/${key}`);
-      } else {
-        await client.post(`/employees/${employeeId}/permissions`, { permission_key: key });
-      }
-      load();
-    } catch (err) {
-      setError(err?.response?.data?.message || "Could not update permission.");
-    }
-  };
-
   if (loading || !snapshot) {
     return (
       <div className="modal-overlay" onClick={onClose}>
@@ -125,8 +104,6 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
       setError(err?.response?.data?.message || "Could not restore this person.");
     }
   };
-  const grantedKeys = permissions.map((p) => p.permission_key);
-
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" style={{ width: 600 }} onClick={(e) => e.stopPropagation()}>
@@ -235,28 +212,8 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
           />
         )}
 
-        {/* Roles & Permissions */}
-        {canManage && (
-          <div className="card" style={{ padding: 14 }}>
-            <div className="card-title-row"><h3 style={{ fontSize: 13 }}>Roles &amp; Permissions</h3></div>
-            <p className="muted" style={{ fontSize: 11.5, marginBottom: 10 }}>
-              Extend specific approval capabilities to this employee without changing their base role.
-            </p>
-            {catalogue.map((perm) => {
-              const granted = grantedKeys.includes(perm.key);
-              return (
-                <div key={perm.key} className="flex-between" style={{ padding: "7px 0", borderBottom: "1px solid var(--color-border)" }}>
-                  <span style={{ fontSize: 12.5 }}>{perm.label}</span>
-                  <button
-                    className={`btn btn-sm ${granted ? "btn-danger" : "btn-outline"}`}
-                    onClick={() => togglePermission(perm.key, granted)}
-                  >
-                    {granted ? "Revoke" : "Grant"}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+        {emp.is_active && emp.role !== ROLES.CONTRACT_EMPLOYEE && (isAdmin || isOwnReport) && (
+          <EmployeeAttendanceSection employee={emp} />
         )}
 
         <div className="flex-between" style={{ marginTop: 16 }}>
