@@ -24,11 +24,11 @@ export const ROLE_LABELS = {
 export const NAV_BY_ROLE = {
   [ROLES.SUPER_ADMIN]: ["dashboard", "employees", "attendance", "leave", "assets", "documents", "profile"],
   [ROLES.HR_OPERATIONS]: ["dashboard", "employees", "attendance", "leave", "payroll", "recruitment", "allCandidates", "recruiters", "vendors", "allPlacements", "announcements", "assets", "documents", "profile"],
-  [ROLES.MANAGER]: ["dashboard", "employees", "attendance", "team", "leave", "reports", "managerSettings", "recruitment", "allCandidates", "recruiters", "vendors", "allPlacements", "documents", "profile"],
+  [ROLES.MANAGER]: ["dashboard", "employees", "attendance", "leave", "reports", "recruitment", "allCandidates", "recruiters", "vendors", "allPlacements", "documents", "profile"],
   [ROLES.FINANCE_ACCOUNTS]: ["dashboard", "attendance", "leave", "payroll", "allCandidates", "recruiters", "vendors", "allPlacements", "documents", "profile"],
   [ROLES.OPERATIONS]: ["dashboard", "attendance", "assets", "employees", "documents", "profile"],
   [ROLES.HR_RECRUITER]: ["dashboard", "attendance", "leave", "recruitment", "allCandidates", "documents", "profile"],
-  [ROLES.EMPLOYEE]: ["home", "myAttendance", "leave", "payslips", "profile", "employeeSettings", "documents"],
+  [ROLES.EMPLOYEE]: ["home", "myAttendance", "leave", "payslips", "profile", "documents"],
   [ROLES.CONTRACT_EMPLOYEE]: ["dashboard", "documents", "payroll", "profile"],
 };
 
@@ -40,8 +40,6 @@ export const NAV_ITEMS = {
   myAttendance: { path: "/attendance", label: "My Attendance", icon: "\u23F1" },
   team: { path: "/attendance?tab=team", label: "Team", icon: "\u25A5" },
   reports: { path: "/attendance?tab=reports", label: "Reports", icon: "\u25A4" },
-  managerSettings: { path: "/attendance?tab=policy", label: "Settings", icon: "\u2699" },
-  employeeSettings: { path: "/profile?tab=settings", label: "Settings", icon: "\u2699" },
   leave: { path: "/leave", label: "Leave", icon: "\u2708" },
   payroll: { path: "/payroll", label: "Payroll", icon: "\u20B9" },
   payslips: { path: "/payroll", label: "Payslips", icon: "\u20B9" },
