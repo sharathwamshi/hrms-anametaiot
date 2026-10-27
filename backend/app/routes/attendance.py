@@ -1295,6 +1295,95 @@ def team_overview():
     return jsonify(_build_overview(claims, viewer_id, target_date))
 
 
+@bp.get("/team/analytics")
+@jwt_required()
+def team_attendance_analytics():
+    """Attendance rows for the viewer's authorized team and a bounded date range.
+
+    The response intentionally contains only dashboard fields; location and selfie
+    metadata remain on the individual calendar endpoints.
+    """
+    claims, viewer_id = get_jwt(), int(get_jwt_identity())
+    if claims.get("role") not in VIEWER_ROLES:
+        return jsonify({"message": "You do not have permission to view team attendance."}), 403
+    date_range, error = _parse_range(default_days=0, max_days=92)
+    if error:
+        return error
+    start, end = date_range
+    scope = _viewer_scope(claims, viewer_id)
+    users = (
+        User.query.filter(
+            User.id.in_(scope or {0}),
+            User.is_active.is_(True),
+            User.role != "contract_employee",
+        )
+        .order_by(User.full_name.asc())
+        .all()
+    )
+    user_ids = [user.id for user in users]
+    records = (
+        Attendance.query.filter(
+            Attendance.user_id.in_(user_ids or {0}),
+            Attendance.work_date >= start,
+            Attendance.work_date <= end,
+        )
+        .order_by(Attendance.work_date.asc())
+        .all()
+    )
+    holidays = Holiday.query.filter(
+        Holiday.holiday_date >= start, Holiday.holiday_date <= end
+    ).order_by(Holiday.holiday_date.asc()).all()
+    approved_leaves = LeaveRequest.query.filter(
+        LeaveRequest.user_id.in_(user_ids or {0}),
+        LeaveRequest.status == "approved",
+        LeaveRequest.start_date <= end,
+        LeaveRequest.end_date >= start,
+    ).all()
+    settings = _get_settings()
+
+    records_by_user = {}
+    for record in records:
+        records_by_user.setdefault(record.user_id, []).append({
+            "id": record.id,
+            "work_date": record.work_date.isoformat(),
+            "clock_in": record.clock_in.isoformat() if record.clock_in else None,
+            "clock_out": record.clock_out.isoformat() if record.clock_out else None,
+            "status": record.status,
+        })
+
+    leave_days_by_user = {}
+    for leave in approved_leaves:
+        current = max(leave.start_date, start)
+        last = min(leave.end_date, end)
+        days = leave_days_by_user.setdefault(leave.user_id, set())
+        while current <= last:
+            days.add(current.isoformat())
+            current += timedelta(days=1)
+
+    return jsonify({
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "company_timezone": current_app.config.get("COMPANY_TIMEZONE", "Asia/Kolkata"),
+        "policy": {
+            "official_check_in": "09:30",
+            "official_check_out": "18:30",
+            "attendance_buffer_minutes": settings.attendance_buffer_minutes,
+        },
+        "holidays": [holiday.to_dict() for holiday in holidays],
+        "employees": [
+            {
+                "id": user.id,
+                "employee_code": user.employee_code,
+                "full_name": user.full_name,
+                "designation": user.designation,
+                "department": user.department.name if user.department else "Unassigned",
+                "records": records_by_user.get(user.id, []),
+                "approved_leave_dates": sorted(leave_days_by_user.get(user.id, set())),
+            }
+            for user in users
+        ],
+    })
+
 
 
 @bp.get("/records/<int:record_id>/selfie/<kind>")

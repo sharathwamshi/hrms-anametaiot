@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import client from "../api/client";
-import { parseUtc } from "../utils/datetime";
 import AppLayout from "../components/AppLayout";
 import StatCard from "../components/StatCard";
 import Loader from "../components/Loader";
-import ClockWidget from "../components/ClockWidget";
+import DashboardTopWidgets from "../components/DashboardTopWidgets";
 import Badge from "../components/Badge";
 import CandidateDetailModal from "../components/CandidateDetailModal";
 import LeaveBalanceSummary from "../components/LeaveBalanceSummary";
+import AttendanceDashboard from "../components/AttendanceDashboard";
+import DashboardPendingRequests from "../components/DashboardPendingRequests";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
 
@@ -27,6 +28,7 @@ const STAT_META = {
   candidates_added_today: { label: "Candidates Added Today", icon: "\u002B", color: "green" },
   pending_verification_count: { label: "Pending Verification", icon: "\u2753", color: "amber" },
 };
+const APPROVAL_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.SUPER_ADMIN];
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -36,6 +38,7 @@ export default function Dashboard() {
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leaveBalancesLoading, setLeaveBalancesLoading] = useState(user.role !== ROLES.CONTRACT_EMPLOYEE);
   const [leaveBalancesError, setLeaveBalancesError] = useState("");
+  const attendanceDashboardRole = user.role === ROLES.MANAGER || user.role === ROLES.EMPLOYEE;
 
   useEffect(() => {
     let active = true;
@@ -69,30 +72,18 @@ export default function Dashboard() {
     };
   }, [user.role]);
 
-  const showClock = user.role !== ROLES.HR_OPERATIONS; // HR ops dashboard is admin-focused; still reachable via Attendance page
-
   return (
     <AppLayout title={`Welcome, ${user.full_name.split(" ")[0]}`} subtitle="Here's what's happening today.">
-      {loading ? (
-        <Loader />
-      ) : !summary ? (
-        <div className="login-error" role="alert">{summaryError || "Could not load the dashboard."}</div>
-      ) : (
+      {attendanceDashboardRole ? (
         <>
-          <div className="stat-grid">
-            {Object.entries(summary)
-              .filter(([key]) => STAT_META[key])
-              .map(([key, value]) => (
-                <StatCard
-                  key={key}
-                  label={STAT_META[key].label}
-                  value={value}
-                  icon={STAT_META[key].icon}
-                  color={STAT_META[key].color}
-                />
-              ))}
-          </div>
-
+          <AttendanceDashboard
+            user={user}
+            manager={user.role === ROLES.MANAGER}
+            summary={summary}
+            summaryLoading={loading}
+            summaryError={summaryError}
+            pendingRequests={user.role === ROLES.MANAGER && <DashboardPendingRequests />}
+          />
           {user.role !== ROLES.CONTRACT_EMPLOYEE && (
             <LeaveBalanceSummary
               balances={leaveBalances}
@@ -100,33 +91,42 @@ export default function Dashboard() {
               error={leaveBalancesError}
             />
           )}
-
-          <div className="two-col">
-            {showClock ? <ClockWidget /> : <div />}
-
-            <div className="card">
-              <div className="card-title-row">
-                <h3>Announcements</h3>
-              </div>
-              {summary.recent_announcements?.length ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  {summary.recent_announcements.map((a) => (
-                    <div key={a.id} style={{ borderBottom: "1px solid var(--color-border)", paddingBottom: 12 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13.5 }}>{a.title}</div>
-                      <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>{a.body}</div>
-                      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                        {a.author_name} &middot; {parseUtc(a.created_at).toLocaleDateString("en-IN")}
-                      </div>
-                    </div>
+        </>
+      ) : (
+        <>
+          <DashboardTopWidgets summary={summary} loading={loading} error={summaryError} />
+          {loading ? (
+            <Loader />
+          ) : !summary ? (
+            <div className="login-error" role="alert">{summaryError || "Could not load the dashboard."}</div>
+          ) : (
+            <>
+              {APPROVAL_ROLES.includes(user.role) && <DashboardPendingRequests />}
+              <div className="stat-grid">
+                {Object.entries(summary)
+                  .filter(([key]) => STAT_META[key])
+                  .map(([key, value]) => (
+                    <StatCard
+                      key={key}
+                      label={STAT_META[key].label}
+                      value={value}
+                      icon={STAT_META[key].icon}
+                      color={STAT_META[key].color}
+                    />
                   ))}
-                </div>
-              ) : (
-                <div className="muted" style={{ fontSize: 13 }}>No announcements yet.</div>
-              )}
-            </div>
-          </div>
+              </div>
 
-          {user.role === ROLES.HR_RECRUITER && <RecruiterPanel summary={summary} />}
+              {user.role !== ROLES.CONTRACT_EMPLOYEE && (
+                <LeaveBalanceSummary
+                  balances={leaveBalances}
+                  loading={leaveBalancesLoading}
+                  error={leaveBalancesError}
+                />
+              )}
+
+              {user.role === ROLES.HR_RECRUITER && <RecruiterPanel summary={summary} />}
+            </>
+          )}
         </>
       )}
     </AppLayout>
