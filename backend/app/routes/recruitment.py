@@ -773,6 +773,8 @@ def _recruiter_summary(user):
         return round(float(total or 0), 2)
 
     structure = getattr(user, "salary_structure", None)
+    if structure and structure.is_ctc_only:
+        structure = None
     manager = User.query.get(user.manager_id) if user.manager_id else None
     return {
         "id": user.id, "full_name": user.full_name, "employee_code": user.employee_code,

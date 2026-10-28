@@ -11,6 +11,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   const { user } = useAuth();
   const isSuperAdmin = user.role === ROLES.SUPER_ADMIN;
   const isAdmin = user.role === ROLES.HR_OPERATIONS || isSuperAdmin;
+  const canManageCtc = isAdmin;
 
   const [snapshot, setSnapshot] = useState(null);
   const [recruiterPerf, setRecruiterPerf] = useState(null);
@@ -21,6 +22,9 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
   const [error, setError] = useState("");
+  const [ctcError, setCtcError] = useState("");
+  const [ctcLoaded, setCtcLoaded] = useState(!canManageCtc);
+  const [saveSuccess, setSaveSuccess] = useState("");
   const [removing, setRemoving] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewLastWorkingDay, setReviewLastWorkingDay] = useState("");
@@ -30,11 +34,24 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
     setReviewLastWorkingDay("");
     const snapRes = await client.get(`/employees/${employeeId}/performance-snapshot`);
     setSnapshot(snapRes.data);
+    let ctcFormValue = {};
+    if (canManageCtc) {
+      setCtcLoaded(false);
+      setCtcError("");
+      try {
+        const { data } = await client.get(`/employees/${employeeId}/compensation`);
+        ctcFormValue.annual_ctc = data.annual_ctc ?? "";
+        setCtcLoaded(true);
+      } catch (err) {
+        setCtcError(err?.response?.data?.message || "Could not load Annual CTC.");
+      }
+    }
     setForm({
       full_name: snapRes.data.employee.full_name,
       phone: snapRes.data.employee.phone || "",
       designation: snapRes.data.employee.designation || "",
       role: snapRes.data.employee.role,
+      ...ctcFormValue,
     });
 
     const targetEmployee = snapRes.data.employee;
@@ -60,7 +77,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
       }
     }
     setLoading(false);
-  }, [employeeId, isAdmin, user.id]);
+  }, [employeeId, isAdmin, canManageCtc, user.id]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -73,10 +90,30 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
 
   const saveInfo = async () => {
     setError("");
+    setSaveSuccess("");
+    const payload = { ...form };
+    if (canManageCtc && ctcLoaded) {
+      if (String(form.annual_ctc).trim() === "") {
+        payload.annual_ctc = null;
+      } else {
+        const annualCtc = Number(form.annual_ctc);
+        if (!Number.isFinite(annualCtc) || annualCtc < 0) {
+          setError("Annual CTC must be a non-negative finite amount.");
+          return;
+        }
+        payload.annual_ctc = annualCtc;
+      }
+    } else {
+      delete payload.annual_ctc;
+    }
     try {
-      await client.put(`/employees/${employeeId}`, form);
+      await client.put(`/employees/${employeeId}`, payload);
       setEditing(false);
-      load();
+      setSaveSuccess("Employee details updated successfully.");
+      load().catch(() => {
+        setLoading(false);
+        setError("Employee details were saved, but refreshed details could not be loaded.");
+      });
       onChanged && onChanged();
     } catch (err) {
       setError(err?.response?.data?.message || "Could not save changes.");
@@ -166,6 +203,8 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
           {emp.employee_code} · {ROLE_LABELS[emp.role] || emp.role} · {emp.department || "—"}
         </div>
         {error && <div className="login-error">{error}</div>}
+        {saveSuccess && <p role="status" className="muted">{saveSuccess}</p>}
+        {ctcError && canManageCtc && <div className="login-error">{ctcError}</div>}
 
         {!emp.is_active && (
           <div className="callout warn" style={{ marginBottom: 14, fontSize: 12.5 }}>
@@ -239,6 +278,9 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
               <div><span className="muted">Phone</span><div>{emp.phone || "—"}</div></div>
               <div><span className="muted">Designation</span><div>{emp.designation || "—"}</div></div>
               <div><span className="muted">Manager</span><div>{emp.manager_name || "—"}</div></div>
+              {canManageCtc && ctcLoaded && (
+                <div><span className="muted">Annual CTC</span><div>{form.annual_ctc === "" ? "—" : `₹${Number(form.annual_ctc).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</div></div>
+              )}
             </div>
           ) : (
             <>
@@ -264,6 +306,19 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
                   </select>
                 </div>
               </div>
+              {canManageCtc && ctcLoaded && (
+                <div className="form-field">
+                  <label htmlFor="edit-employee-annual-ctc">Annual CTC (₹)</label>
+                  <input
+                    id="edit-employee-annual-ctc"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.annual_ctc}
+                    onChange={(e) => setForm({ ...form, annual_ctc: e.target.value })}
+                  />
+                </div>
+              )}
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button className="btn btn-sm btn-outline" onClick={() => setEditing(false)}>Cancel</button>
                 <button className="btn btn-sm btn-primary" onClick={saveInfo}>Save</button>

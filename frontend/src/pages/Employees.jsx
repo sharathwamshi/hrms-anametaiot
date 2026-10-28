@@ -10,13 +10,14 @@ import EmployeeDetailModal from "../components/EmployeeDetailModal";
 
 const emptyForm = {
   employee_code: "", full_name: "", email: "", password: "", role: ROLES.EMPLOYEE,
-  designation: "", department_id: "", date_of_joining: "",
+  designation: "", department_id: "", date_of_joining: "", annual_ctc: "",
 };
 
 export default function Employees() {
   const { user } = useAuth();
   const isSuperAdmin = user.role === ROLES.SUPER_ADMIN;
   const isHrOps = user.role === ROLES.HR_OPERATIONS || isSuperAdmin; // Super Admin has HR-Operations-level people admin
+  const canManageCtc = isHrOps;
   const isManager = user.role === ROLES.MANAGER;
   const canOnboard = isHrOps || isManager;
   const [employees, setEmployees] = useState([]);
@@ -81,8 +82,19 @@ export default function Employees() {
   const submit = async (e) => {
     e.preventDefault();
     setError("");
+    const payload = { ...form };
+    if (!canManageCtc || String(form.annual_ctc).trim() === "") {
+      delete payload.annual_ctc;
+    } else {
+      const annualCtc = Number(form.annual_ctc);
+      if (!Number.isFinite(annualCtc) || annualCtc < 0) {
+        setError("Annual CTC must be a non-negative finite amount.");
+        return;
+      }
+      payload.annual_ctc = annualCtc;
+    }
     try {
-      await client.post("/employees", form);
+      await client.post("/employees", payload);
       setShowForm(false);
       setForm(emptyForm);
       load(q);
@@ -255,6 +267,19 @@ export default function Employees() {
                   <input type="date" value={form.date_of_joining} onChange={(e) => setForm({ ...form, date_of_joining: e.target.value })} />
                 </div>
               </div>
+              {canManageCtc && (
+                <div className="form-field">
+                  <label htmlFor="new-employee-annual-ctc">Annual CTC (₹)</label>
+                  <input
+                    id="new-employee-annual-ctc"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.annual_ctc}
+                    onChange={(e) => setForm({ ...form, annual_ctc: e.target.value })}
+                  />
+                </div>
+              )}
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
                 <button type="submit" className="btn btn-success">Create Employee</button>

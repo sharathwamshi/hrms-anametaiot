@@ -63,7 +63,7 @@ def generate_payslips():
 
     for user in User.query.filter_by(is_active=True).all():
         structure = SalaryStructure.query.filter_by(user_id=user.id).first()
-        if not structure:
+        if not structure or structure.is_ctc_only:
             continue
 
         present_days = Attendance.query.filter(
@@ -153,7 +153,11 @@ def payroll_coverage():
         query = query.filter_by(department_id=department_id)
     users = query.order_by(User.full_name.asc()).all()
 
-    structures = {s.user_id: s for s in SalaryStructure.query.all()}
+    structures = {
+        s.user_id: s
+        for s in SalaryStructure.query.all()
+        if not s.is_ctc_only
+    }
     slips = {p.user_id: p for p in Payslip.query.filter_by(month=month, year=year).all()}
     managers = {u.id: u.full_name for u in User.query.filter(User.id.in_({u.manager_id for u in users if u.manager_id})).all()}
 

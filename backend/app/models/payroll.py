@@ -8,6 +8,7 @@ class SalaryStructure(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True, nullable=False)
 
+    annual_ctc = db.Column(db.Numeric(12, 2), nullable=True)
     basic = db.Column(db.Float, default=0)
     hra = db.Column(db.Float, default=0)
     special_allowance = db.Column(db.Float, default=0)
@@ -33,6 +34,15 @@ class SalaryStructure(db.Model):
     @property
     def net(self):
         return round(self.gross - self.total_deductions, 2)
+
+    @property
+    def is_ctc_only(self):
+        amounts = (
+            self.basic, self.hra, self.special_allowance, self.other_allowance,
+            self.pf_employee, self.esi_employee, self.insurance,
+            self.professional_tax, self.tds,
+        )
+        return self.annual_ctc is not None and all(value in (None, 0) for value in amounts)
 
     def to_dict(self):
         return {
