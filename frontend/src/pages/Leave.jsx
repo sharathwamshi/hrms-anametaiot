@@ -123,7 +123,7 @@ export default function Leave() {
     <AppLayout title="Leave" subtitle="Apply for leave and track approvals.">
       {error && <div className="login-error" role="alert">{error}</div>}
       {success && <div className="notice-success" role="status">{success}</div>}
-      <LeaveBalanceSummary balances={balances} />
+      <LeaveBalanceSummary balances={balances} showLink={false} />
       {isManager && <ManagerLeaveDashboard />}
 
       <div className="card section-gap">

@@ -22,9 +22,12 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   const [form, setForm] = useState(null);
   const [error, setError] = useState("");
   const [removing, setRemoving] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewLastWorkingDay, setReviewLastWorkingDay] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
+    setReviewLastWorkingDay("");
     const snapRes = await client.get(`/employees/${employeeId}/performance-snapshot`);
     setSnapshot(snapRes.data);
     setForm({
@@ -93,6 +96,54 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   const canRemove = (isAdmin || isOwnReport) && emp.id !== user.id && emp.is_active && (emp.role !== ROLES.SUPER_ADMIN || isSuperAdmin);
   // A Manager can only undo a removal they made themselves.
   const canRestore = !emp.is_active && (isAdmin || (isOwnReport && emp.removed_by === user.id));
+  const canReviewResignation = (
+    user.role === ROLES.HR_OPERATIONS
+    || user.role === ROLES.SUPER_ADMIN
+    || (user.role === ROLES.MANAGER && isOwnReport)
+  ) && emp.id !== user.id;
+  const today = new Date();
+  const todayDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const validNoticePeriod = /^\d{4}-\d{2}-\d{2}$/.test(reviewLastWorkingDay)
+    && reviewLastWorkingDay >= todayDate;
+  const employmentStatusLabels = {
+    active: "Active",
+    resignation_pending: "Resignation pending manager review",
+    notice_period: "Serving notice period",
+    left: "Left the company",
+  };
+
+  const reviewResignation = async (decision) => {
+    if (decision === "rejected" && !window.confirm(`Reject ${emp.full_name}'s resignation request? Their employment status will remain Active.`)) return;
+    setReviewBusy(true);
+    setError("");
+    try {
+      await client.post(`/employees/${emp.id}/resignation/review`, {
+        decision,
+        ...(decision === "accepted" ? { last_working_day: reviewLastWorkingDay } : {}),
+      });
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not review this resignation request.");
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const markAsLeft = async () => {
+    if (!window.confirm(`Mark ${emp.full_name} as having left the company?`)) return;
+    setReviewBusy(true);
+    setError("");
+    try {
+      await client.post(`/employees/${emp.id}/employment-status`, { employment_status: "left" });
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not update employment status.");
+    } finally {
+      setReviewBusy(false);
+    }
+  };
 
   const restore = async () => {
     setError("");
@@ -129,6 +180,52 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
             </div>
           </div>
         )}
+
+        <div className="callout" style={{ marginBottom: 14, fontSize: 12.5 }}>
+          <div className="flex-between" style={{ gap: 12, alignItems: "flex-start" }}>
+            <div>
+              <strong>Employment status: {employmentStatusLabels[emp.employment_status || "active"] || "Active"}</strong>
+              {emp.employment_status === "resignation_pending" && (
+                <div className="muted" style={{ marginTop: 4 }}>
+                  Requested {emp.resignation_requested_at ? new Date(emp.resignation_requested_at).toLocaleDateString("en-IN") : "date unavailable"}.
+                </div>
+              )}
+              {emp.employment_status === "notice_period" && (
+                <div className="muted" style={{ marginTop: 4 }}>
+                  Last working day: {emp.last_working_day || "Not set"}
+                </div>
+              )}
+              {emp.employment_status === "left" && emp.left_company_at && (
+                <div className="muted" style={{ marginTop: 4 }}>
+                  Left on {emp.left_company_at}.
+                </div>
+              )}
+            </div>
+            {canReviewResignation && emp.employment_status === "notice_period" && (
+              <button className="btn btn-sm btn-danger" disabled={reviewBusy} onClick={markAsLeft}>Mark as left</button>
+            )}
+          </div>
+          {canReviewResignation && emp.employment_status === "resignation_pending" && (
+            <div style={{ marginTop: 12 }}>
+              <div className="form-field" style={{ maxWidth: 240, marginBottom: 10 }}>
+                <label htmlFor="resignation-notice-period">Notice period end date if accepted</label>
+                <input
+                  id="resignation-notice-period"
+                  type="date"
+                  min={todayDate}
+                  required
+                  value={reviewLastWorkingDay}
+                  onChange={(event) => setReviewLastWorkingDay(event.target.value)}
+                />
+                <span className="muted" style={{ fontSize: 11.5 }}>Choose the agreed last working day from the calendar.</span>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn btn-sm btn-success" disabled={reviewBusy || !validNoticePeriod} onClick={() => reviewResignation("accepted")}>Accept resignation</button>
+                <button className="btn btn-sm btn-outline" disabled={reviewBusy} onClick={() => reviewResignation("rejected")}>Reject</button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Info */}
         <div className="card" style={{ marginBottom: 14, padding: 14 }}>
