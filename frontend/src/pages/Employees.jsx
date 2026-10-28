@@ -20,6 +20,7 @@ export default function Employees() {
   const isManager = user.role === ROLES.MANAGER;
   const canOnboard = isHrOps || isManager;
   const [employees, setEmployees] = useState([]);
+  const [resignationRequests, setResignationRequests] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -34,12 +35,17 @@ export default function Employees() {
     const params = {};
     if (query) params.q = query;
     if (removed) params.status = "removed";
-    const [empRes, deptRes] = await Promise.all([
+    const requestsPromise = !removed && (isHrOps || isManager)
+      ? client.get("/employees", { params: { status: "resignation_pending", ...(query ? { q: query } : {}) } })
+      : Promise.resolve({ data: [] });
+    const [empRes, deptRes, requestsRes] = await Promise.all([
       client.get("/employees", { params }),
       client.get("/employees/departments"),
+      requestsPromise,
     ]);
     setEmployees(empRes.data);
     setDepartments(deptRes.data);
+    setResignationRequests(requestsRes.data);
     setLoading(false);
   };
 
@@ -159,6 +165,39 @@ export default function Employees() {
           </div>
         )}
       </div>
+
+      {!showRemoved && (isHrOps || isManager) && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="card-title-row">
+            <h3>Resignation requests</h3>
+            <span className="chip orange">{resignationRequests.length} pending</span>
+          </div>
+          <p className="muted" style={{ fontSize: 12, marginTop: -4 }}>
+            Review requests from your direct reports{isHrOps ? " and employees across the organization" : ""}.
+          </p>
+          {loading ? <Loader /> : resignationRequests.length === 0 ? (
+            <p className="muted" style={{ fontSize: 13 }}>There are no pending resignation requests.</p>
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead><tr><th>Employee</th><th>Code</th><th>Department</th><th>Request date</th><th>Manager</th><th></th></tr></thead>
+                <tbody>
+                  {resignationRequests.map((employee) => (
+                    <tr key={employee.id} onClick={() => setSelectedEmployeeId(employee.id)} style={{ cursor: "pointer" }}>
+                      <td>{employee.full_name}</td>
+                      <td>{employee.employee_code}</td>
+                      <td>{employee.department || "—"}</td>
+                      <td>{fmtDate(employee.resignation_requested_at)}</td>
+                      <td>{employee.manager_name || "—"}</td>
+                      <td><button className="btn btn-sm btn-primary" onClick={(event) => { event.stopPropagation(); setSelectedEmployeeId(employee.id); }}>Review</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {showForm && (
         <div className="modal-overlay" onClick={() => setShowForm(false)}>

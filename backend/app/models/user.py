@@ -37,6 +37,16 @@ class User(db.Model):
     avatar_url = db.Column(db.String(255))
     is_active = db.Column(db.Boolean, default=True)
 
+    employment_status = db.Column(db.String(30), nullable=False, default="active", server_default="active")
+    resignation_requested_at = db.Column(db.DateTime, nullable=True)
+    resignation_reviewed_at = db.Column(db.DateTime, nullable=True)
+    resignation_reviewed_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    resignation_decision = db.Column(db.String(20), nullable=True)
+    notice_period_days = db.Column(db.Integer, nullable=True)
+    last_working_day = db.Column(db.Date, nullable=True)
+    resignation_withdrawn_at = db.Column(db.DateTime, nullable=True)
+    left_company_at = db.Column(db.Date, nullable=True)
+
     # Removal audit trail. People are never hard-deleted (payslips, attendance, leave,
     # placements and 40+ other records point at them and must be kept), so "removing" a
     # person deactivates them and records who did it, when, and why.
@@ -49,6 +59,7 @@ class User(db.Model):
     restrict_set_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     restrict_set_at = db.Column(db.DateTime, nullable=True)
     remover = db.relationship("User", remote_side=[id], foreign_keys=[removed_by])
+    resignation_reviewer = db.relationship("User", remote_side=[id], foreign_keys=[resignation_reviewed_by])
 
     # --- Recruiter-specific policy fields (meaningful only when role == hr_recruiter) ---
     self_verify_rights = db.Column(db.Boolean, default=False)
@@ -80,6 +91,16 @@ class User(db.Model):
             "date_of_joining": self.date_of_joining.isoformat() if self.date_of_joining else None,
             "avatar_url": self.avatar_url,
             "is_active": self.is_active,
+            "employment_status": self.employment_status or "active",
+            "resignation_requested_at": self.resignation_requested_at.isoformat() + "Z" if self.resignation_requested_at else None,
+            "resignation_reviewed_at": self.resignation_reviewed_at.isoformat() + "Z" if self.resignation_reviewed_at else None,
+            "resignation_reviewed_by": self.resignation_reviewed_by,
+            "resignation_reviewed_by_name": self.resignation_reviewer.full_name if self.resignation_reviewer else None,
+            "resignation_decision": self.resignation_decision,
+            "notice_period_days": self.notice_period_days,
+            "last_working_day": self.last_working_day.isoformat() if self.last_working_day else None,
+            "resignation_withdrawn_at": self.resignation_withdrawn_at.isoformat() + "Z" if self.resignation_withdrawn_at else None,
+            "left_company_at": self.left_company_at.isoformat() if self.left_company_at else None,
             "restrict_to_office": bool(self.restrict_to_office),
             "removed_at": self.removed_at.isoformat() + "Z" if self.removed_at else None,
             "removed_by": self.removed_by,

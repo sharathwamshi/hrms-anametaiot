@@ -64,8 +64,9 @@ def list_employees():
     q = request.args.get("q", "").strip()
     department_id = request.args.get("department_id", type=int)
     role = request.args.get("role")
+    status = request.args.get("status")
 
-    if request.args.get("status") == "removed":
+    if status == "removed":
         # Removed people: HR Operations sees everyone's, a Manager only their own reports'.
         claims, actor_id = get_jwt(), int(get_jwt_identity())
         if claims.get("role") in (HR_OPERATIONS, SUPER_ADMIN):
@@ -74,6 +75,18 @@ def list_employees():
             query = User.query.filter_by(is_active=False, manager_id=actor_id)
         else:
             return jsonify({"message": "You do not have permission to view removed employees."}), 403
+    elif status == "resignation_pending":
+        claims, actor_id = get_jwt(), int(get_jwt_identity())
+        if claims.get("role") in (HR_OPERATIONS, SUPER_ADMIN):
+            query = User.query.filter_by(is_active=True, employment_status="resignation_pending")
+        elif claims.get("role") == MANAGER:
+            query = User.query.filter_by(
+                is_active=True,
+                employment_status="resignation_pending",
+                manager_id=actor_id,
+            )
+        else:
+            return jsonify({"message": "You do not have permission to view pending resignation requests."}), 403
     else:
         query = User.query.filter_by(is_active=True)
     if q:
@@ -84,7 +97,7 @@ def list_employees():
     if role:
         query = query.filter_by(role=role)
 
-    if request.args.get("status") == "removed":
+    if status == "removed":
         rows = query.order_by(User.removed_at.desc(), User.full_name.asc()).all()
     else:
         rows = query.order_by(User.full_name.asc()).all()
@@ -193,6 +206,113 @@ def update_employee(emp_id):
 
     db.session.commit()
     return jsonify(user.to_dict())
+
+
+@bp.post("/me/resignation")
+@jwt_required()
+def request_resignation():
+    user = User.query.get_or_404(int(get_jwt_identity()))
+    if not user.is_active:
+        return jsonify({"message": "Your account is inactive."}), 403
+    if user.employment_status != "active":
+        return jsonify({"message": "A resignation request can only be submitted while your employment status is Active."}), 409
+
+    user.employment_status = "resignation_pending"
+    user.resignation_requested_at = datetime.utcnow()
+    user.resignation_reviewed_at = None
+    user.resignation_reviewed_by = None
+    user.resignation_decision = "pending"
+    user.notice_period_days = None
+    user.last_working_day = None
+    user.resignation_withdrawn_at = None
+    user.left_company_at = None
+    db.session.commit()
+    return jsonify({"message": "Your resignation request was sent to your manager.", "user": user.to_dict()}), 201
+
+
+@bp.post("/me/resignation/withdraw")
+@jwt_required()
+def withdraw_resignation():
+    user = User.query.get_or_404(int(get_jwt_identity()))
+    if user.employment_status not in ("resignation_pending", "notice_period"):
+        return jsonify({"message": "There is no active resignation to withdraw."}), 409
+
+    user.employment_status = "active"
+    user.resignation_decision = "withdrawn"
+    user.resignation_withdrawn_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({"message": "Your resignation has been withdrawn. Your employment status is Active.", "user": user.to_dict()})
+
+
+@bp.post("/<int:emp_id>/resignation/review")
+@jwt_required()
+def review_resignation(emp_id):
+    user = User.query.get_or_404(emp_id)
+    actor_id = int(get_jwt_identity())
+    actor_role = get_jwt().get("role")
+    can_review = (
+        actor_role in (HR_OPERATIONS, SUPER_ADMIN)
+        or (actor_role == MANAGER and user.manager_id == actor_id)
+    )
+    if not can_review:
+        return jsonify({"message": "Only the employee's direct manager or HR Operations can review this resignation."}), 403
+    if user.employment_status != "resignation_pending":
+        return jsonify({"message": "This employee has no pending resignation request."}), 409
+
+    payload = request.get_json(silent=True) or {}
+    decision = payload.get("decision")
+    if decision not in ("accepted", "rejected"):
+        return jsonify({"message": "Decision must be accepted or rejected."}), 400
+    last_working_day = None
+    if decision == "accepted":
+        raw_last_working_day = payload.get("last_working_day")
+        try:
+            last_working_day = date.fromisoformat(raw_last_working_day)
+        except (TypeError, ValueError):
+            return jsonify({"message": "Choose a valid notice-period end date."}), 400
+        if last_working_day.isoformat() != raw_last_working_day:
+            return jsonify({"message": "Choose a valid notice-period end date."}), 400
+        if last_working_day < date.today():
+            return jsonify({"message": "The notice-period end date cannot be in the past."}), 400
+
+    user.resignation_reviewed_at = datetime.utcnow()
+    user.resignation_reviewed_by = actor_id
+    user.resignation_decision = decision
+    if decision == "accepted":
+        user.employment_status = "notice_period"
+        user.last_working_day = last_working_day
+        user.notice_period_days = (last_working_day - date.today()).days
+    else:
+        user.employment_status = "active"
+        user.notice_period_days = None
+        user.last_working_day = None
+    db.session.commit()
+    return jsonify({"message": f"Resignation {decision}.", "employee": user.to_dict()})
+
+
+@bp.post("/<int:emp_id>/employment-status")
+@jwt_required()
+def update_employment_status(emp_id):
+    user = User.query.get_or_404(emp_id)
+    actor_id = int(get_jwt_identity())
+    actor_role = get_jwt().get("role")
+    can_manage_status = (
+        actor_role in (HR_OPERATIONS, SUPER_ADMIN)
+        or (actor_role == MANAGER and user.manager_id == actor_id)
+    )
+    if not can_manage_status:
+        return jsonify({"message": "Only the employee's direct manager or HR Operations can update their employment status."}), 403
+
+    payload = request.get_json(silent=True) or {}
+    if payload.get("employment_status") != "left":
+        return jsonify({"message": "The only manual employment-status update available is Left the company."}), 400
+    if user.employment_status == "left":
+        return jsonify({"message": "This employee is already marked as having left the company."}), 409
+
+    user.employment_status = "left"
+    user.left_company_at = date.today()
+    db.session.commit()
+    return jsonify({"message": f"{user.full_name} is marked as having left the company.", "employee": user.to_dict()})
 
 
 @bp.delete("/<int:emp_id>")
