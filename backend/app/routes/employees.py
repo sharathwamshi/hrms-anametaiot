@@ -1,17 +1,20 @@
 from datetime import date, datetime
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 from app.extensions import db
-from app.models import User, Department, DeviceToken, LeaveRequest
+from app.models import User, Department, DeviceToken, LeaveRequest, SalaryStructure
 from app.models.leave import ensure_leave_balances
+from app.utils.compensation import normalize_annual_ctc
 from app.utils.security import roles_required
-from app.roles import ALL_ROLES, HR_OPERATIONS, HR_RECRUITER, MANAGER, SUPER_ADMIN
+from app.roles import ADMIN_ROLES, ALL_ROLES, HR_OPERATIONS, HR_RECRUITER, MANAGER, SUPER_ADMIN
+from sqlalchemy.exc import SQLAlchemyError
 
 bp = Blueprint("employees", __name__, url_prefix="/api/employees")
 
 
 MAX_REMOVAL_REASON = 255
+COMPENSATION_FIELDS = {"annual_ctc", "ctc", "compensation"}
 
 
 def _remove_user(user, actor_id, actor_role, reason):
@@ -111,6 +114,18 @@ def get_employee(emp_id):
     return jsonify(user.to_dict())
 
 
+@bp.get("/<int:emp_id>/compensation")
+@roles_required(*ADMIN_ROLES)
+def get_employee_compensation(emp_id):
+    user = User.query.get_or_404(emp_id)
+    structure = SalaryStructure.query.filter_by(user_id=user.id).first()
+    annual_ctc = structure.annual_ctc if structure else None
+    return jsonify({
+        "user_id": user.id,
+        "annual_ctc": format(annual_ctc, ".2f") if annual_ctc is not None else None,
+    })
+
+
 @bp.post("")
 @roles_required(HR_OPERATIONS, MANAGER, SUPER_ADMIN)
 def create_employee():
@@ -119,9 +134,21 @@ def create_employee():
     forced to the creating Manager, regardless of what's in the payload, so a
     Manager can only ever create their own direct reports."""
     payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"message": "Employee data must be a JSON object."}), 400
     claims = get_jwt()
     actor_id = int(get_jwt_identity())
     is_manager = claims.get("role") == MANAGER
+    has_compensation = bool(COMPENSATION_FIELDS.intersection(payload))
+
+    if has_compensation and claims.get("role") not in ADMIN_ROLES:
+        return jsonify({"message": "You do not have permission to set employee compensation."}), 403
+    if "ctc" in payload or "compensation" in payload:
+        return jsonify({"message": "Use the annual_ctc field to set employee compensation."}), 400
+    try:
+        annual_ctc = normalize_annual_ctc(payload["annual_ctc"]) if "annual_ctc" in payload and payload["annual_ctc"] not in (None, "") else None
+    except ValueError as exc:
+        return jsonify({"message": str(exc)}), 400
 
     required = ["employee_code", "full_name", "email", "password", "role"]
     missing = [f for f in required if not payload.get(f)]
@@ -154,9 +181,16 @@ def create_employee():
     )
     user.set_password(payload["password"])
     db.session.add(user)
-    db.session.flush()
-    ensure_leave_balances(user.id, date.today().year)
-    db.session.commit()
+    try:
+        db.session.flush()
+        if annual_ctc is not None:
+            db.session.add(SalaryStructure(user_id=user.id, annual_ctc=annual_ctc))
+        ensure_leave_balances(user.id, date.today().year)
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.exception("Employee creation failed while saving employee data.")
+        return jsonify({"message": "Could not create employee. Please try again."}), 500
     return jsonify(user.to_dict()), 201
 
 
@@ -171,11 +205,23 @@ def update_employee(emp_id):
     claims = get_jwt()
     actor_id = int(get_jwt_identity())
     is_manager = claims.get("role") == MANAGER
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"message": "Employee data must be a JSON object."}), 400
+    has_compensation = bool(COMPENSATION_FIELDS.intersection(payload))
+    if has_compensation and claims.get("role") not in ADMIN_ROLES:
+        return jsonify({"message": "You do not have permission to change employee compensation."}), 403
+    if "ctc" in payload or "compensation" in payload:
+        return jsonify({"message": "Use the annual_ctc field to update employee compensation."}), 400
+    try:
+        annual_ctc = normalize_annual_ctc(payload["annual_ctc"]) if "annual_ctc" in payload and payload["annual_ctc"] not in (None, "") else None
+    except ValueError as exc:
+        return jsonify({"message": str(exc)}), 400
     if claims.get("role") != SUPER_ADMIN:
         # Only a Super Admin may touch a Super Admin, or hand out the role.
         if user.role == SUPER_ADMIN:
             return jsonify({"message": "Only a Super Admin can change a Super Admin."}), 403
-        if (request.get_json(silent=True) or {}).get("role") == SUPER_ADMIN:
+        if payload.get("role") == SUPER_ADMIN:
             return jsonify({"message": "Only a Super Admin can grant the Super Admin role."}), 403
 
     if is_manager:
@@ -185,7 +231,6 @@ def update_employee(emp_id):
     else:
         editable_fields = ["full_name", "phone", "designation", "department_id", "manager_id", "role"]
 
-    payload = request.get_json(silent=True) or {}
     for field in editable_fields:
         if field in payload:
             if field == "role" and payload[field] not in ALL_ROLES:
@@ -204,7 +249,20 @@ def update_employee(emp_id):
                 db.session.rollback()
                 return err
 
-    db.session.commit()
+    if "annual_ctc" in payload:
+        structure = SalaryStructure.query.filter_by(user_id=user.id).first()
+        if structure is None and annual_ctc is not None:
+            structure = SalaryStructure(user_id=user.id)
+            db.session.add(structure)
+        if structure is not None:
+            structure.annual_ctc = annual_ctc
+
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.exception("Employee update failed while saving employee data.")
+        return jsonify({"message": "Could not update employee. Please try again."}), 500
     return jsonify(user.to_dict())
 
 
