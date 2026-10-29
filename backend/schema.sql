@@ -34,6 +34,14 @@ CREATE TABLE users (
 	email VARCHAR(150) NOT NULL, 
 	phone VARCHAR(20), 
 	password_hash VARCHAR(255) NOT NULL, 
+	date_of_birth DATE,
+	gender VARCHAR(30),
+	residential_address TEXT,
+	permanent_address TEXT,
+	emergency_contact_name VARCHAR(150),
+	emergency_contact_relationship VARCHAR(100),
+	emergency_contact_phone VARCHAR(30),
+	uan VARCHAR(12),
 	`role` VARCHAR(30) NOT NULL, 
 	designation VARCHAR(120), 
 	department_id INTEGER, 
@@ -143,8 +151,55 @@ CREATE TABLE employee_documents (
 	title VARCHAR(150) NOT NULL, 
 	file_path VARCHAR(255) NOT NULL, 
 	uploaded_at DATETIME, 
+	original_filename VARCHAR(255),
+	storage_key VARCHAR(255),
+	mime_type VARCHAR(100),
+	file_size BIGINT,
+	uploaded_by INTEGER,
+	verification_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+	verification_note VARCHAR(500),
+	verified_by INTEGER,
+	verified_at DATETIME,
 	PRIMARY KEY (id), 
+	FOREIGN KEY(user_id) REFERENCES users (id),
+	FOREIGN KEY(uploaded_by) REFERENCES users (id),
+	FOREIGN KEY(verified_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE employee_family_members (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	user_id INTEGER NOT NULL,
+	name VARCHAR(150) NOT NULL,
+	relationship VARCHAR(100) NOT NULL,
+	date_of_birth DATE,
+	phone VARCHAR(30),
+	is_emergency_contact BOOL NOT NULL DEFAULT 0,
+	notes VARCHAR(500),
+	created_at DATETIME NOT NULL,
+	updated_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	INDEX ix_employee_family_members_user_id (user_id),
 	FOREIGN KEY(user_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE employee_emergency_communications (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	employee_id INTEGER NOT NULL,
+	family_member_id INTEGER,
+	contact_name VARCHAR(150) NOT NULL,
+	relationship VARCHAR(100),
+	contact_phone VARCHAR(30),
+	communication_method VARCHAR(30) NOT NULL,
+	purpose VARCHAR(255) NOT NULL,
+	notes VARCHAR(1000),
+	outcome VARCHAR(255),
+	contacted_at DATETIME NOT NULL,
+	recorded_by INTEGER NOT NULL,
+	PRIMARY KEY (id),
+	INDEX ix_employee_emergency_communications_employee_id (employee_id),
+	FOREIGN KEY(employee_id) REFERENCES users (id),
+	FOREIGN KEY(family_member_id) REFERENCES employee_family_members (id) ON DELETE SET NULL,
+	FOREIGN KEY(recorded_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE employee_permissions (
@@ -343,6 +398,10 @@ CREATE TABLE attendance (
 	regularization_reviewed_by INTEGER, 
 	regularization_reviewed_at DATETIME, 
 	regularization_review_comment VARCHAR(255), 
+	absence_reason VARCHAR(100),
+	absence_note VARCHAR(500),
+	absence_recorded_by INTEGER,
+	absence_recorded_at DATETIME,
 	clock_in_lat FLOAT, 
 	clock_in_lng FLOAT, 
 	clock_in_within_geofence BOOL, 
@@ -362,7 +421,8 @@ CREATE TABLE attendance (
 	FOREIGN KEY(user_id) REFERENCES users (id), 
 	FOREIGN KEY(regularization_reason_id) REFERENCES attendance_regularization_reasons (id), 
 	FOREIGN KEY(regularization_reviewed_by) REFERENCES users (id), 
-	FOREIGN KEY(edited_by) REFERENCES users (id)
+	FOREIGN KEY(edited_by) REFERENCES users (id),
+	FOREIGN KEY(absence_recorded_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE attendance_regularization_requests (

@@ -4,6 +4,10 @@ import Badge from "./Badge";
 import RemoveEmployeeModal from "./RemoveEmployeeModal";
 import LeaveBalanceSummary from "./LeaveBalanceSummary";
 import EmployeeAttendanceSection from "./EmployeeAttendanceSection";
+import EmployeeFamilyPanel from "./EmployeeFamilyPanel";
+import EmployeeDocumentsPanel from "./EmployeeDocumentsPanel";
+import EmployeeManagementPanel from "./EmployeeManagementPanel";
+import EmployeePersonalDetailsPanel from "./EmployeePersonalDetailsPanel";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, ROLE_LABELS } from "../config/roles";
 
@@ -28,6 +32,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   const [removing, setRemoving] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewLastWorkingDay, setReviewLastWorkingDay] = useState("");
+  const [activeTab, setActiveTab] = useState("overview");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,6 +85,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   }, [employeeId, isAdmin, canManageCtc, user.id]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setActiveTab("overview"); }, [employeeId]);
 
   // A Manager can manage permissions/edit only for their own direct report;
   // the backend enforces this too — this just avoids showing controls that
@@ -129,11 +135,28 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   }
 
   const emp = snapshot.employee;
+  const canViewEmployeeRecords = isAdmin || isOwnReport;
+  const canManageHrRecords = isAdmin || (isOwnReport && (!targetIsSuper || isSuperAdmin));
+  const tabs = [
+    { id: "overview", label: "Overview" },
+    ...(canViewEmployeeRecords ? [
+      { id: "personal", label: "Personal & Family" },
+      { id: "documents", label: "Documents & HR" },
+    ] : []),
+    ...(canViewEmployeeRecords || emp.id === user.id
+      ? [{ id: "leave-attendance", label: "Leave & Attendance" }]
+      : []),
+  ];
   // Admin can remove anyone; a Manager only their own direct reports; nobody removes themselves.
   const canRemove = (isAdmin || isOwnReport) && emp.id !== user.id && emp.is_active && (emp.role !== ROLES.SUPER_ADMIN || isSuperAdmin);
   // A Manager can only undo a removal they made themselves.
   const canRestore = !emp.is_active && (isAdmin || (isOwnReport && emp.removed_by === user.id));
   const canReviewResignation = (
+    user.role === ROLES.HR_OPERATIONS
+    || user.role === ROLES.SUPER_ADMIN
+    || (user.role === ROLES.MANAGER && isOwnReport)
+  ) && emp.id !== user.id;
+  const canManageEmploymentStatus = (
     user.role === ROLES.HR_OPERATIONS
     || user.role === ROLES.SUPER_ADMIN
     || (user.role === ROLES.MANAGER && isOwnReport)
@@ -182,6 +205,21 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
     }
   };
 
+  const reactivateEmployment = async () => {
+    if (!window.confirm(`Reactivate ${emp.full_name}'s employment and change their status to Active?`)) return;
+    setReviewBusy(true);
+    setError("");
+    try {
+      await client.post(`/employees/${emp.id}/employment-status`, { employment_status: "active" });
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not reactivate this employee.");
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
   const restore = async () => {
     setError("");
     try {
@@ -194,7 +232,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   };
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" style={{ width: 600 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal-box" style={{ width: 800, maxWidth: "95vw" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex-between" style={{ marginBottom: 4 }}>
           <h3>{emp.full_name}</h3>
           <Badge status={emp.is_active ? "present" : "absent"} />
@@ -220,6 +258,43 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
           </div>
         )}
 
+        <div className="employee-detail-tabs" role="tablist" aria-label="Employee details">
+          {tabs.map((tab, index) => (
+            <button
+              key={tab.id}
+              id={`employee-detail-tab-${tab.id}`}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              aria-controls="employee-detail-tabpanel"
+              tabIndex={activeTab === tab.id ? 0 : -1}
+              className={`employee-detail-tab${activeTab === tab.id ? " active" : ""}`}
+              onClick={() => setActiveTab(tab.id)}
+              onKeyDown={(event) => {
+                let nextIndex = index;
+                if (event.key === "ArrowRight") nextIndex = (index + 1) % tabs.length;
+                else if (event.key === "ArrowLeft") nextIndex = (index - 1 + tabs.length) % tabs.length;
+                else if (event.key === "Home") nextIndex = 0;
+                else if (event.key === "End") nextIndex = tabs.length - 1;
+                else return;
+                event.preventDefault();
+                const nextTab = tabs[nextIndex];
+                setActiveTab(nextTab.id);
+                document.getElementById(`employee-detail-tab-${nextTab.id}`)?.focus();
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div
+          id="employee-detail-tabpanel"
+          className="employee-detail-tabpanel"
+          role="tabpanel"
+          aria-labelledby={`employee-detail-tab-${activeTab}`}
+          tabIndex={0}
+        >
+        {activeTab === "overview" && <>
         <div className="callout" style={{ marginBottom: 14, fontSize: 12.5 }}>
           <div className="flex-between" style={{ gap: 12, alignItems: "flex-start" }}>
             <div>
@@ -240,8 +315,17 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
                 </div>
               )}
             </div>
-            {canReviewResignation && emp.employment_status === "notice_period" && (
-              <button className="btn btn-sm btn-danger" disabled={reviewBusy} onClick={markAsLeft}>Mark as left</button>
+            {canManageEmploymentStatus && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {emp.employment_status === "notice_period" && (
+                  <button className="btn btn-sm btn-danger" disabled={reviewBusy} onClick={markAsLeft}>Mark as left</button>
+                )}
+                {emp.employment_status === "left" && (
+                  <button className="btn btn-sm btn-success" disabled={reviewBusy} onClick={reactivateEmployment}>
+                    {reviewBusy ? "Please wait…" : "Reactivate employment"}
+                  </button>
+                )}
+              </div>
             )}
           </div>
           {canReviewResignation && emp.employment_status === "resignation_pending" && (
@@ -354,19 +438,39 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
             </div>
           )}
         </div>
+        </>}
 
-        {(isAdmin || isOwnReport || emp.id === user.id) && (
+        {activeTab === "leave-attendance" && (isAdmin || isOwnReport || emp.id === user.id) && <>
           <LeaveBalanceSummary
             balances={leaveBalances}
             loading={leaveBalanceLoading}
             error={leaveBalanceError}
             showLink={false}
           />
-        )}
 
         {emp.is_active && emp.role !== ROLES.CONTRACT_EMPLOYEE && (isAdmin || isOwnReport) && (
           <EmployeeAttendanceSection employee={emp} />
         )}
+        </>}
+
+        {activeTab === "personal" && canViewEmployeeRecords && (
+          <div style={{ display: "grid", gap: 14, marginTop: 16 }}>
+            <EmployeePersonalDetailsPanel employeeId={emp.id} canEdit onChanged={onChanged} />
+            <EmployeeFamilyPanel employeeId={emp.id} canEdit />
+          </div>
+        )}
+
+        {activeTab === "documents" && canViewEmployeeRecords && (
+          <div style={{ display: "grid", gap: 14, marginTop: 16 }}>
+            <EmployeeDocumentsPanel
+              employeeId={emp.id}
+              canUpload
+              canReview={canManageHrRecords}
+            />
+            {canManageHrRecords && <EmployeeManagementPanel employeeId={emp.id} />}
+          </div>
+        )}
+        </div>
 
         <div className="flex-between" style={{ marginTop: 16 }}>
           <div>

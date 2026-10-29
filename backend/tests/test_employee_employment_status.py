@@ -163,5 +163,19 @@ with app.app_context():
         json={"employment_status": "left"},
     )
     check("direct manager can mark an employee as having left", response.status_code == 200 and response.get_json()["employee"]["employment_status"] == "left")
+    check("marking employee as left records departure date", response.get_json()["employee"]["left_company_at"] == date.today().isoformat())
+    response = client.post(
+        f"/api/employees/{employee.id}/employment-status",
+        headers=employee_headers,
+        json={"employment_status": "active"},
+    )
+    check("employee cannot reactivate their own employment", response.status_code == 403)
+    response = client.post(
+        f"/api/employees/{employee.id}/employment-status",
+        headers=manager_headers,
+        json={"employment_status": "active"},
+    )
+    check("direct manager can reactivate employment", response.status_code == 200 and response.get_json()["employee"]["employment_status"] == "active")
+    check("reactivation clears the departure date", response.get_json()["employee"]["left_company_at"] is None)
 
 print("All employment-status checks passed.")

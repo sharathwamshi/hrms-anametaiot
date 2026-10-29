@@ -24,6 +24,14 @@ class User(db.Model):
     email = db.Column(db.String(150), unique=True, nullable=False)
     phone = db.Column(db.String(20))
     password_hash = db.Column(db.String(255), nullable=False)
+    date_of_birth = db.Column(db.Date, nullable=True)
+    gender = db.Column(db.String(30), nullable=True)
+    residential_address = db.Column(db.Text, nullable=True)
+    permanent_address = db.Column(db.Text, nullable=True)
+    emergency_contact_name = db.Column(db.String(150), nullable=True)
+    emergency_contact_relationship = db.Column(db.String(100), nullable=True)
+    emergency_contact_phone = db.Column(db.String(30), nullable=True)
+    uan = db.Column(db.String(12), nullable=True)
 
     role = db.Column(db.String(30), nullable=False)  # see app/roles.py
     designation = db.Column(db.String(120))
@@ -110,3 +118,18 @@ class User(db.Model):
             "revalidation_interval_days": self.revalidation_interval_days,
         }
         return data
+
+    def personal_profile_dict(self):
+        return {
+            "id": self.id,
+            "full_name": self.full_name,
+            "email": self.email,
+            "phone": self.phone,
+            "date_of_birth": self.date_of_birth.isoformat() if self.date_of_birth else None,
+            "gender": self.gender,
+            "residential_address": self.residential_address,
+            "permanent_address": self.permanent_address,
+            "emergency_contact_name": self.emergency_contact_name,
+            "emergency_contact_relationship": self.emergency_contact_relationship,
+            "emergency_contact_phone": self.emergency_contact_phone,
+        }

@@ -41,6 +41,10 @@ class Attendance(db.Model):
     regularization_reviewed_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     regularization_reviewed_at = db.Column(db.DateTime, nullable=True)
     regularization_review_comment = db.Column(db.String(255), nullable=True)
+    absence_reason = db.Column(db.String(100), nullable=True)
+    absence_note = db.Column(db.String(500), nullable=True)
+    absence_recorded_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    absence_recorded_at = db.Column(db.DateTime, nullable=True)
 
     # Geofencing is advisory ("soft") by design: the punch is always accepted,
     # but if it's outside every active office's radius we record that and flag
@@ -187,6 +191,10 @@ class Attendance(db.Model):
             "regularization_reviewed_by_name": self.reviewed_by_user.full_name if self.reviewed_by_user else None,
             "regularization_reviewed_at": self.regularization_reviewed_at.isoformat() if self.regularization_reviewed_at else None,
             "regularization_review_comment": self.regularization_review_comment,
+            "absence_reason": self.absence_reason,
+            "absence_note": self.absence_note,
+            "absence_recorded_by": self.absence_recorded_by,
+            "absence_recorded_at": self.absence_recorded_at.isoformat() if self.absence_recorded_at else None,
             "edited_by_name": self.edited_by_user.full_name if self.edited_by_user else None,
             "edited_at": self.edited_at.isoformat() if self.edited_at else None,
             "edit_note": self.edit_note,

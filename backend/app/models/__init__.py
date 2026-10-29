@@ -11,6 +11,7 @@ from app.models.screening import ScreeningCall
 from app.models.collab import CandidateAuditLog, CandidateNote
 from app.models.offer import Offer
 from app.models.documents import EmployeeDocument
+from app.models.employee_profile import EmployeeFamilyMember, EmployeeEmergencyCommunication
 from app.models.vendor import (
     CompanySettings, Vendor, VendorAgreement, VendorAgreementRole,
     VendorHire, VendorInvoice, VendorInvoiceItem,
@@ -34,6 +35,7 @@ __all__ = [
     "CandidateAuditLog", "CandidateNote",
     "Offer",
     "EmployeeDocument",
+    "EmployeeFamilyMember", "EmployeeEmergencyCommunication",
     "CompanySettings", "Vendor", "VendorAgreement", "VendorAgreementRole",
     "VendorHire", "VendorInvoice", "VendorInvoiceItem",
     "EmployeePermission",
