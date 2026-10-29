@@ -1,16 +1,29 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import client from "../api/client";
 
-export default function AddVendorModal({ onClose, onSaved }) {
+const EMPTY_VENDOR = {
+  name: "", address: "", state: "Karnataka", gstin: "", pan: "",
+  contact_person: "", contact_email: "", contact_phone: "",
+  company_id: "", status: "active",
+};
+
+export default function AddVendorModal({ onClose, onSaved, vendor = null }) {
+  const [companies, setCompanies] = useState([]);
   const [form, setForm] = useState({
-    name: "", address: "", state: "Karnataka", gstin: "", pan: "",
-    contact_person: "", contact_email: "", contact_phone: "",
-    bank_name: "", bank_account_no: "", bank_ifsc: "", bank_branch: "",
+    ...EMPTY_VENDOR,
+    ...(vendor || {}),
+    company_id: vendor?.company_id || "",
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const set = (field) => (e) => setForm({ ...form, [field]: e.target.value });
+  useEffect(() => {
+    client.get("/vendors/companies")
+      .then(({ data }) => setCompanies(data))
+      .catch((err) => setError(err?.response?.data?.message || "Could not load companies."));
+  }, []);
+
+  const set = (field) => (e) => setForm((current) => ({ ...current, [field]: e.target.value }));
 
   const save = async () => {
     setError("");
@@ -20,7 +33,10 @@ export default function AddVendorModal({ onClose, onSaved }) {
     }
     setSaving(true);
     try {
-      const { data } = await client.post("/vendors", form);
+      const { data } = await client.put(`/vendors/${vendor.id}`, {
+        ...form,
+        company_id: form.company_id || null,
+      });
       onSaved(data);
     } catch (err) {
       setError(err?.response?.data?.message || "Could not add this vendor.");
@@ -32,13 +48,20 @@ export default function AddVendorModal({ onClose, onSaved }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" style={{ width: 560 }} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginBottom: 6 }}>Add Vendor</h3>
+        <h3 style={{ marginBottom: 6 }}>{vendor ? "Edit Vendor" : "Add Vendor"}</h3>
         <p className="muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
-          Add a vendor directly — useful if the relationship starts before the agreement is signed. You can upload the agreement for this vendor anytime afterward.
+          Update the vendor's details. Existing agreements, hires, invoices, and bank information are preserved.
         </p>
         {error && <div className="login-error">{error}</div>}
 
-        <h4 style={{ fontSize: 12.5, color: "var(--color-text-muted)", marginBottom: 6 }}>Basic Information</h4>
+        <h4 style={{ fontSize: 12.5, color: "var(--color-text-muted)", marginBottom: 6 }}>Company &amp; Vendor Information</h4>
+        <div className="form-field">
+          <label>Company</label>
+          <select value={form.company_id} onChange={set("company_id")}>
+            <option value="">No company selected</option>
+            {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+          </select>
+        </div>
         <div className="form-grid">
           <div className="form-field">
             <label>Vendor Name</label>
@@ -67,8 +90,15 @@ export default function AddVendorModal({ onClose, onSaved }) {
           <label>Contact Phone</label>
           <input value={form.contact_phone} onChange={set("contact_phone")} />
         </div>
+        <div className="form-field">
+          <label>Vendor Status</label>
+          <select value={form.status} onChange={set("status")}>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
 
-        <h4 style={{ fontSize: 12.5, color: "var(--color-text-muted)", margin: "14px 0 6px" }}>Billing Information</h4>
+        <h4 style={{ fontSize: 12.5, color: "var(--color-text-muted)", margin: "14px 0 6px" }}>Tax Information</h4>
         <div className="form-grid">
           <div className="form-field">
             <label>GSTIN</label>
@@ -79,31 +109,10 @@ export default function AddVendorModal({ onClose, onSaved }) {
             <input value={form.pan} onChange={set("pan")} />
           </div>
         </div>
-        <div className="form-grid">
-          <div className="form-field">
-            <label>Bank Name</label>
-            <input value={form.bank_name} onChange={set("bank_name")} />
-          </div>
-          <div className="form-field">
-            <label>Account No.</label>
-            <input value={form.bank_account_no} onChange={set("bank_account_no")} />
-          </div>
-        </div>
-        <div className="form-grid">
-          <div className="form-field">
-            <label>IFSC</label>
-            <input value={form.bank_ifsc} onChange={set("bank_ifsc")} />
-          </div>
-          <div className="form-field">
-            <label>Branch</label>
-            <input value={form.bank_branch} onChange={set("bank_branch")} />
-          </div>
-        </div>
-
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" disabled={saving} onClick={save}>
-            {saving ? "Adding..." : "Add Vendor"}
+            {saving ? "Saving..." : "Save Changes"}
           </button>
         </div>
       </div>

@@ -31,12 +31,25 @@ class CompanySettings(db.Model):
         }
 
 
+class VendorCompany(db.Model):
+    __tablename__ = "vendor_companies"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False, unique=True)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {"id": self.id, "name": self.name}
+
+
 class Vendor(db.Model):
     """A staffing/recruitment vendor who supplies manpower to AnametaIOT
     under one or more signed agreements."""
     __tablename__ = "vendors"
 
     id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey("vendor_companies.id"), nullable=True)
     name = db.Column(db.String(150), nullable=False)
     normalized_name = db.Column(db.String(150), index=True)  # for dedup matching
     address = db.Column(db.Text, nullable=True)
@@ -61,10 +74,39 @@ class Vendor(db.Model):
         "VendorAgreement", backref="vendor", cascade="all, delete-orphan",
         order_by="VendorAgreement.effective_from.desc()",
     )
+    company = db.relationship("VendorCompany")
 
     def to_dict(self, include_agreements=False):
+        from app.services.vendor_agreements import agreement_status
+
+        agreements = self.agreements
+        current_agreements = [
+            agreement for agreement in agreements
+            if agreement_status(agreement) in ("active", "expiring_soon")
+        ]
+        active_agreement = min(
+            current_agreements,
+            key=lambda agreement: agreement.effective_to or datetime.max.date(),
+            default=None,
+        )
+        visible_agreements = [
+            agreement for agreement in agreements
+            if agreement_status(agreement) != "terminated"
+        ]
+        upcoming_agreements = [
+            agreement for agreement in visible_agreements
+            if agreement_status(agreement) == "upcoming"
+        ]
+        summary_agreement = (
+            active_agreement
+            or min(upcoming_agreements, key=lambda a: a.effective_from or datetime.max.date(), default=None)
+            or max(visible_agreements, key=lambda a: a.effective_to or datetime.min.date(), default=None)
+        )
+        from app.services.vendor_agreements import agreement_days_remaining
         data = {
             "id": self.id,
+            "company_id": self.company_id,
+            "company_name": self.company.name if self.company else None,
             "name": self.name,
             "address": self.address,
             "state": self.state,
@@ -73,19 +115,46 @@ class Vendor(db.Model):
             "contact_person": self.contact_person,
             "contact_email": self.contact_email,
             "contact_phone": self.contact_phone,
+            "status": self.status,
+            "agreement_count": len(agreements),
+            "active_agreement": active_agreement.to_dict() if active_agreement else None,
+            "agreement_status": agreement_status(summary_agreement) if summary_agreement else None,
+            "agreement_expiry": (
+                summary_agreement.effective_to.isoformat()
+                if summary_agreement and summary_agreement.effective_to else None
+            ),
+            "agreement_days_to_expiry": agreement_days_remaining(summary_agreement) if summary_agreement else None,
+            "agreement_title": summary_agreement.title if summary_agreement else None,
+            "expiring_agreement_count": sum(
+                agreement_status(agreement) == "expiring_soon" for agreement in agreements
+            ),
+            "expired_agreement_count": sum(
+                agreement_status(agreement) == "expired" for agreement in agreements
+            ),
+            "expiring_agreements": [
+                {
+                    "id": agreement.id,
+                    "title": agreement.title,
+                    "expiry_date": agreement.effective_to.isoformat(),
+                    "days_remaining": agreement_days_remaining(agreement),
+                }
+                for agreement in agreements
+                if agreement_status(agreement) == "expiring_soon"
+            ],
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+        if include_agreements:
+            data["agreements"] = [a.to_dict(include_roles=True) for a in agreements]
+        return data
+
+    def to_sensitive_dict(self, include_agreements=False):
+        data = self.to_dict(include_agreements=include_agreements)
+        data.update({
             "bank_name": self.bank_name,
             "bank_account_no": self.bank_account_no,
             "bank_ifsc": self.bank_ifsc,
             "bank_branch": self.bank_branch,
-            "status": self.status,
-            "agreement_count": len(self.agreements),
-            "active_agreement": next(
-                (a.to_dict() for a in self.agreements if a.status == "active"), None
-            ),
-            "created_at": self.created_at.isoformat(),
-        }
-        if include_agreements:
-            data["agreements"] = [a.to_dict(include_roles=True) for a in self.agreements]
+        })
         return data
 
 
@@ -118,23 +187,52 @@ class VendorAgreement(db.Model):
     )
 
     def to_dict(self, include_roles=False):
+        from app.services.vendor_agreements import agreement_status
+
         data = {
             "id": self.id,
             "vendor_id": self.vendor_id,
             "title": self.title,
-            "file_path": self.file_path,
             "effective_from": self.effective_from.isoformat() if self.effective_from else None,
             "effective_to": self.effective_to.isoformat() if self.effective_to else None,
             "termination_notice_days": self.termination_notice_days,
             "confidentiality_days": self.confidentiality_days,
             "feedback_days": self.feedback_days,
-            "status": self.status,
+            "status": agreement_status(self),
+            "download_url": f"/vendors/agreements/{self.id}/download",
             "parsed_with_ai": self.parsed_with_ai,
             "uploaded_at": self.uploaded_at.isoformat(),
         }
         if include_roles:
             data["roles"] = [r.to_dict() for r in self.roles]
         return data
+
+
+class VendorAgreementReminder(db.Model):
+    __tablename__ = "vendor_agreement_reminders"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "agreement_id", "reminder_type", "expiry_date",
+            name="uq_vendor_agreement_reminder",
+        ),
+        db.Index("ix_vendor_agreement_reminder_status", "status", "expiry_date"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    agreement_id = db.Column(
+        db.Integer,
+        db.ForeignKey("vendor_agreements.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    reminder_type = db.Column(db.String(40), nullable=False)
+    expiry_date = db.Column(db.Date, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="pending")
+    attempted_at = db.Column(db.DateTime, nullable=True)
+    sent_at = db.Column(db.DateTime, nullable=True)
+    error_message = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    agreement = db.relationship("VendorAgreement")
 
 
 class VendorAgreementRole(db.Model):

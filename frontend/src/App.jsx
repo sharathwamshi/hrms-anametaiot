@@ -15,6 +15,7 @@ import AllCandidates from "./pages/AllCandidates";
 import AllPlacements from "./pages/AllPlacements";
 import Recruiters from "./pages/Recruiters";
 import Vendors from "./pages/Vendors";
+import VendorCreatePage from "./pages/VendorCreatePage";
 import MockTestTake from "./pages/MockTestTake";
 import Announcements from "./pages/Announcements";
 import Assets from "./pages/Assets";
@@ -116,8 +117,16 @@ export default function App() {
       <Route
         path="/vendors"
         element={
-          <ProtectedRoute allow={[ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS, ROLES.MANAGER]}>
+          <ProtectedRoute allow={[ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS, ROLES.MANAGER, ROLES.OPERATIONS]}>
             <Vendors />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/vendors/new"
+        element={
+          <ProtectedRoute allow={[ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS, ROLES.OPERATIONS]}>
+            <VendorCreatePage />
           </ProtectedRoute>
         }
       />

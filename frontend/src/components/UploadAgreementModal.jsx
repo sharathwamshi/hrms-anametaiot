@@ -1,9 +1,7 @@
 import { useState, useEffect } from "react";
 import client from "../api/client";
 
-const NEW_VENDOR_VALUE = "__new__";
-
-export default function UploadAgreementModal({ onClose, onSaved }) {
+export default function UploadAgreementModal({ onClose, onSaved, initialVendorId = null }) {
   const [file, setFile] = useState(null);
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -11,12 +9,7 @@ export default function UploadAgreementModal({ onClose, onSaved }) {
   const [parsed, setParsed] = useState(null);
 
   const [allVendors, setAllVendors] = useState([]);
-  const [selectedVendorValue, setSelectedVendorValue] = useState(""); // vendor id (string) or NEW_VENDOR_VALUE
-  const [newVendor, setNewVendor] = useState({
-    name: "", address: "", state: "Karnataka", gstin: "", pan: "",
-    contact_person: "", contact_email: "", contact_phone: "",
-    bank_name: "", bank_account_no: "", bank_ifsc: "", bank_branch: "",
-  });
+  const [selectedVendorValue, setSelectedVendorValue] = useState(initialVendorId ? String(initialVendorId) : "");
   const [effectiveFrom, setEffectiveFrom] = useState("");
   const [effectiveTo, setEffectiveTo] = useState("");
   const [terminationDays, setTerminationDays] = useState(90);
@@ -25,7 +18,9 @@ export default function UploadAgreementModal({ onClose, onSaved }) {
   const [roles, setRoles] = useState([]);
 
   useEffect(() => {
-    client.get("/vendors").then(({ data }) => setAllVendors(data));
+    client.get("/vendors")
+      .then(({ data }) => setAllVendors(data))
+      .catch((err) => setError(err?.response?.data?.message || "Could not load vendors."));
   }, []);
 
   const runParse = async () => {
@@ -46,23 +41,17 @@ export default function UploadAgreementModal({ onClose, onSaved }) {
       setFeedbackDays(data.feedback_days || 2);
       setRoles(data.roles || []);
 
-      if (data.matched_vendor) {
+      if (initialVendorId) {
+        setSelectedVendorValue(String(initialVendorId));
+      } else if (data.matched_vendor) {
         setSelectedVendorValue(String(data.matched_vendor.id));
       } else {
-        setSelectedVendorValue(NEW_VENDOR_VALUE);
-        setNewVendor((v) => ({ ...v, name: data.likely_vendor_name || "" }));
+        setSelectedVendorValue("");
       }
     } catch (err) {
       setError(err?.response?.data?.message || "Could not read this agreement. Try a text-based PDF (not a scanned image).");
     } finally {
       setParsing(false);
-    }
-  };
-
-  const onVendorChange = (value) => {
-    setSelectedVendorValue(value);
-    if (value === NEW_VENDOR_VALUE) {
-      setNewVendor((v) => ({ ...v, name: v.name || parsed?.likely_vendor_name || "" }));
     }
   };
 
@@ -78,7 +67,7 @@ export default function UploadAgreementModal({ onClose, onSaved }) {
   const confirm = async () => {
     setError("");
     if (!selectedVendorValue) {
-      setError("Select a vendor (or choose + Add New Vendor) before continuing.");
+      setError("Select the vendor for this agreement.");
       return;
     }
     if (!effectiveFrom) {
@@ -89,11 +78,6 @@ export default function UploadAgreementModal({ onClose, onSaved }) {
       setError("At least one role with a service fee is required.");
       return;
     }
-    if (selectedVendorValue === NEW_VENDOR_VALUE && !newVendor.name.trim()) {
-      setError("Vendor name is required.");
-      return;
-    }
-
     setSaving(true);
     try {
       const body = {
@@ -108,11 +92,7 @@ export default function UploadAgreementModal({ onClose, onSaved }) {
           replacement_days: Number(r.replacement_days), tenure_days: Number(r.tenure_days),
         })),
       };
-      if (selectedVendorValue === NEW_VENDOR_VALUE) {
-        body.new_vendor = newVendor;
-      } else {
-        body.vendor_id = Number(selectedVendorValue);
-      }
+      body.vendor_id = Number(selectedVendorValue);
       const { data } = await client.post("/vendors/agreements/confirm", body);
       onSaved(data);
     } catch (err) {
@@ -127,9 +107,9 @@ export default function UploadAgreementModal({ onClose, onSaved }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginBottom: 6 }}>Upload Vendor Agreement</h3>
+        <h3 style={{ marginBottom: 6 }}>Add Agreement</h3>
         <p className="muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
-          Upload the signed agreement — the vendor, effective dates, and role-wise fee table are read automatically for you to review before anything is saved.
+          Upload the signed agreement for this vendor — extracted dates and role terms can be reviewed before saving.
         </p>
         {error && <div className="login-error">{error}</div>}
 
@@ -153,19 +133,17 @@ export default function UploadAgreementModal({ onClose, onSaved }) {
               </div>
             )}
 
-            {/* Step 1: Vendor selection — always a dropdown, always shown first */}
             <div className="card" style={{ marginBottom: 14, padding: 14 }}>
-              <div className="card-title-row"><h3 style={{ fontSize: 14 }}>Which vendor is this?</h3></div>
-              {matchedVendor && (
+              <div className="card-title-row"><h3 style={{ fontSize: 14 }}>Vendor</h3></div>
+              {!initialVendorId && matchedVendor && (
                 <div className="callout note" style={{ marginBottom: 10, fontSize: 11.5 }}>
-                  We matched this agreement to <strong>{matchedVendor.name}</strong> automatically — change the selection below if that's wrong.
+                  We matched this agreement to <strong>{matchedVendor.name}</strong> automatically.
                 </div>
               )}
               <div className="form-field">
-                <label>Vendor</label>
-                <select value={selectedVendorValue} onChange={(e) => onVendorChange(e.target.value)}>
+                <label htmlFor="agreement-vendor">Vendor</label>
+                <select id="agreement-vendor" value={selectedVendorValue} disabled={Boolean(initialVendorId)} onChange={(e) => setSelectedVendorValue(e.target.value)}>
                   <option value="" disabled>Select a vendor...</option>
-                  <option value={NEW_VENDOR_VALUE}>+ Add New Vendor{parsed.likely_vendor_name ? ` ("${parsed.likely_vendor_name}")` : ""}</option>
                   {allVendors.map((v) => (
                     <option key={v.id} value={v.id}>{v.name}{v.id === matchedVendor?.id ? " (matched)" : ""}</option>
                   ))}
@@ -173,61 +151,6 @@ export default function UploadAgreementModal({ onClose, onSaved }) {
               </div>
             </div>
 
-            {selectedVendorValue === NEW_VENDOR_VALUE && (
-              <div className="card" style={{ marginBottom: 14, padding: 14 }}>
-                <div className="card-title-row"><h3 style={{ fontSize: 14 }}>New Vendor Details</h3></div>
-                <div className="form-grid">
-                  <div className="form-field">
-                    <label>Vendor Name</label>
-                    <input value={newVendor.name} onChange={(e) => setNewVendor({ ...newVendor, name: e.target.value })} />
-                  </div>
-                  <div className="form-field">
-                    <label>State</label>
-                    <input value={newVendor.state} onChange={(e) => setNewVendor({ ...newVendor, state: e.target.value })} />
-                  </div>
-                </div>
-                <div className="form-field">
-                  <label>Address</label>
-                  <input value={newVendor.address} onChange={(e) => setNewVendor({ ...newVendor, address: e.target.value })} />
-                </div>
-                <div className="form-grid">
-                  <div className="form-field">
-                    <label>GSTIN</label>
-                    <input value={newVendor.gstin} onChange={(e) => setNewVendor({ ...newVendor, gstin: e.target.value })} />
-                  </div>
-                  <div className="form-field">
-                    <label>PAN</label>
-                    <input value={newVendor.pan} onChange={(e) => setNewVendor({ ...newVendor, pan: e.target.value })} />
-                  </div>
-                </div>
-                <div className="form-grid">
-                  <div className="form-field">
-                    <label>Contact Person</label>
-                    <input value={newVendor.contact_person} onChange={(e) => setNewVendor({ ...newVendor, contact_person: e.target.value })} />
-                  </div>
-                  <div className="form-field">
-                    <label>Contact Email</label>
-                    <input value={newVendor.contact_email} onChange={(e) => setNewVendor({ ...newVendor, contact_email: e.target.value })} />
-                  </div>
-                </div>
-                <div className="form-grid">
-                  <div className="form-field">
-                    <label>Bank Name</label>
-                    <input value={newVendor.bank_name} onChange={(e) => setNewVendor({ ...newVendor, bank_name: e.target.value })} />
-                  </div>
-                  <div className="form-field">
-                    <label>Account No.</label>
-                    <input value={newVendor.bank_account_no} onChange={(e) => setNewVendor({ ...newVendor, bank_account_no: e.target.value })} />
-                  </div>
-                </div>
-                <div className="form-field">
-                  <label>IFSC</label>
-                  <input value={newVendor.bank_ifsc} onChange={(e) => setNewVendor({ ...newVendor, bank_ifsc: e.target.value })} />
-                </div>
-              </div>
-            )}
-
-            {/* Step 2: Agreement terms — only shown once a vendor is chosen */}
             {selectedVendorValue && (
               <>
                 <div className="form-grid">
@@ -269,7 +192,7 @@ export default function UploadAgreementModal({ onClose, onSaved }) {
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
               <button className="btn btn-outline" onClick={onClose}>Cancel</button>
               <button className="btn btn-primary" disabled={saving || !selectedVendorValue} onClick={confirm}>
-                {saving ? "Saving..." : selectedVendorValue === NEW_VENDOR_VALUE ? "Add New Vendor & Agreement" : "Add Agreement to Vendor"}
+                {saving ? "Saving..." : "Add Agreement"}
               </button>
             </div>
           </>

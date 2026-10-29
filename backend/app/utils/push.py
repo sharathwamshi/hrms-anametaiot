@@ -23,20 +23,29 @@ def send_push(user_ids, title, body, data=None):
     `user_ids` may be a single id or a list. Silently does nothing if push is
     disabled, the user has no registered device, or sending fails."""
     if not user_ids:
-        return
+        return False
     if isinstance(user_ids, int):
         user_ids = [user_ids]
     if not current_app.config.get("EXPO_PUSH_ENABLED", True):
         logger.info("Push disabled — would have sent %r to users %s", title, user_ids)
-        return
+        return False
 
     tokens = [t.token for t in DeviceToken.query.filter(DeviceToken.user_id.in_(user_ids)).all()]
     if not tokens:
-        return
+        return False
 
     messages = [{"to": tok, "title": title, "body": body, "data": data or {}, "sound": "default"} for tok in tokens]
     try:
-        requests.post(EXPO_PUSH_URL, json=messages, timeout=5,
-                       headers={"Content-Type": "application/json", "Accept": "application/json"})
+        response = requests.post(EXPO_PUSH_URL, json=messages, timeout=5,
+                                 headers={"Content-Type": "application/json", "Accept": "application/json"})
+        if not response.ok:
+            logger.error("Push service rejected notification with HTTP %s", response.status_code)
+            return False
+        tickets = response.json().get("data", [])
+        if tickets and any(ticket.get("status") != "ok" for ticket in tickets):
+            logger.error("Push service reported a delivery ticket error.")
+            return False
+        return True
     except Exception:
         logger.exception("Push send failed for users %s", user_ids)
+        return False

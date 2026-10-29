@@ -3,12 +3,20 @@ import client from "../api/client";
 import Badge from "./Badge";
 import Loader from "./Loader";
 import AssignHireModal from "./AssignHireModal";
+import AddVendorModal from "./AddVendorModal";
+import UploadAgreementModal from "./UploadAgreementModal";
+import EditVendorAgreementModal from "./EditVendorAgreementModal";
+import { downloadFile } from "../utils/download";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
 
 export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
   const { user } = useAuth();
-  const canManage = [ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS].includes(user.role);
+  const canManageAgreements = [ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS, ROLES.OPERATIONS].includes(user.role);
+  const canManageHires = [ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS].includes(user.role);
+  const canManageInvoices = [ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS].includes(user.role);
+  const canEditVendor = user.role === ROLES.HR_OPERATIONS;
+  const canDeleteVendor = user.role === ROLES.HR_OPERATIONS;
   const canApprove = [ROLES.MANAGER, ROLES.HR_OPERATIONS].includes(user.role);
 
   const [vendor, setVendor] = useState(null);
@@ -16,20 +24,33 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAssign, setShowAssign] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [editingVendor, setEditingVendor] = useState(false);
+  const [editingAgreement, setEditingAgreement] = useState(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleted, setDeleted] = useState(false);
+  const [downloadingAgreementId, setDownloadingAgreementId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [vRes, hRes, iRes] = await Promise.all([
-      client.get(`/vendors/${vendorId}`),
-      client.get("/vendors/hires", { params: { vendor_id: vendorId } }),
-      client.get("/vendors/invoices", { params: { vendor_id: vendorId } }),
-    ]);
-    setVendor(vRes.data);
-    setHires(hRes.data);
-    setInvoices(iRes.data);
-    setLoading(false);
+    setError("");
+    try {
+      const [vRes, hRes, iRes] = await Promise.all([
+        client.get(`/vendors/${vendorId}`),
+        client.get("/vendors/hires", { params: { vendor_id: vendorId } }),
+        client.get("/vendors/invoices", { params: { vendor_id: vendorId } }),
+      ]);
+      setVendor(vRes.data);
+      setHires(hRes.data);
+      setInvoices(iRes.data);
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not load vendor details.");
+    } finally {
+      setLoading(false);
+    }
   }, [vendorId]);
 
   useEffect(() => { load(); }, [load]);
@@ -95,11 +116,41 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
     load();
   };
   const markPaid = async (invoiceId) => { await client.post(`/vendors/invoices/${invoiceId}/mark-paid`); load(); };
+  const deleteVendor = async () => {
+    if (!window.confirm(
+      `Delete "${vendor.name}" permanently?\n\nAssociated agreements, uploaded PDFs, hires, invoices, or requisitions prevent deletion and will not be removed.`,
+    )) return;
+    setError("");
+    setDeleting(true);
+    try {
+      await client.delete(`/vendors/${vendor.id}`);
+      setDeleted(true);
+      setNotice(`Vendor "${vendor.name}" was deleted.`);
+      onChanged?.();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not delete this vendor.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+  const downloadAgreement = async (agreement) => {
+    setError("");
+    setDownloadingAgreementId(agreement.id);
+    try {
+      await downloadFile(agreement.download_url, `vendor-agreement-${agreement.id}.pdf`);
+    } catch (err) {
+      setError(err.message || "Could not download this agreement.");
+    } finally {
+      setDownloadingAgreementId(null);
+    }
+  };
 
   if (loading || !vendor) {
     return (
       <div className="modal-overlay" onClick={onClose}>
-        <div className="modal-box" onClick={(e) => e.stopPropagation()}><Loader /></div>
+        <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+          {loading ? <Loader /> : <><div className="login-error" role="alert">{error || "Vendor details are unavailable."}</div><button className="btn btn-outline" onClick={onClose}>Close</button></>}
+        </div>
       </div>
     );
   }
@@ -109,26 +160,40 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
       <div className="modal-box" style={{ width: 720 }} onClick={(e) => e.stopPropagation()}>
         <div className="flex-between" style={{ marginBottom: 4 }}>
           <h3>{vendor.name}</h3>
-          <Badge status={vendor.status} />
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <Badge status={vendor.status} />
+            {canEditVendor && !deleted && <button className="btn btn-sm btn-outline" onClick={() => setEditingVendor(true)}>Edit Vendor</button>}
+            {canDeleteVendor && !deleted && <button className="btn btn-sm btn-danger" disabled={deleting} onClick={deleteVendor}>{deleting ? "Deleting..." : "Delete Vendor"}</button>}
+          </div>
         </div>
+        {vendor.company_name && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{vendor.company_name}</div>}
         <div className="muted" style={{ fontSize: 12, marginBottom: 14 }}>
           {vendor.gstin && `GSTIN: ${vendor.gstin} · `}{vendor.state}
           {vendor.contact_person && ` · ${vendor.contact_person}`}
         </div>
         {error && <div className="login-error">{error}</div>}
+        {notice && <div role="status" style={{ color: "#067647", fontSize: 12.5, marginBottom: 8 }}>{notice}</div>}
 
         {/* Agreements & rate card */}
         <div style={{ marginBottom: 16 }}>
-          <strong style={{ fontSize: 13 }}>Agreements</strong>
+          <div className="flex-between">
+            <strong style={{ fontSize: 13 }}>Agreements</strong>
+            {canManageAgreements && !deleted && <button className="btn btn-sm btn-outline" onClick={() => setShowUpload(true)}>+ Add Agreement</button>}
+          </div>
+          {vendor.agreements.length === 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>No agreements recorded for this vendor.</div>}
           {vendor.agreements.map((a) => (
             <div key={a.id} style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, marginTop: 6 }}>
               <div className="flex-between">
                 <span style={{ fontSize: 12.5 }}>
-                  {a.effective_from} → {a.effective_to || "open-ended"}
+                  <strong>{a.title || "Vendor Agreement"}</strong>
+                  <span className="muted" style={{ display: "block", fontSize: 11 }}>{a.effective_from || "—"} → {a.effective_to || "open-ended"}</span>
                 </span>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <Badge status={a.status} />
-                  <a href={a.file_path} target="_blank" rel="noreferrer" style={{ fontSize: 11.5 }}>View PDF</a>
+                  <button className="btn btn-sm btn-outline" disabled={downloadingAgreementId === a.id} onClick={() => downloadAgreement(a)}>
+                    {downloadingAgreementId === a.id ? "Downloading..." : "Download"}
+                  </button>
+                  {canManageAgreements && !deleted && <button className="btn btn-sm btn-outline" onClick={() => setEditingAgreement(a)}>Edit</button>}
                 </div>
               </div>
               <div className="table-wrap" style={{ marginTop: 6 }}>
@@ -152,7 +217,7 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
         <div style={{ marginBottom: 16 }}>
           <div className="flex-between">
             <strong style={{ fontSize: 13 }}>Hires</strong>
-            {canManage && <button className="btn btn-sm btn-outline" onClick={() => setShowAssign(true)}>+ Assign Hire</button>}
+            {canManageHires && !deleted && <button className="btn btn-sm btn-outline" onClick={() => setShowAssign(true)}>+ Assign Hire</button>}
           </div>
           {hires.length === 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>No hires assigned yet.</div>}
           {hires.map((h) => (
@@ -184,7 +249,7 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
                   </span>
                 </div>
               )}
-              {canManage && (h.status === "active" || h.status === "invoiced") && (
+              {canManageHires && !deleted && (h.status === "active" || h.status === "invoiced") && (
                 <button className="btn btn-sm btn-outline" style={{ marginTop: 6 }} onClick={() => replaceHire(h)}>Replace</button>
               )}
             </div>
@@ -195,7 +260,7 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
         <div>
           <div className="flex-between">
             <strong style={{ fontSize: 13 }}>Invoices</strong>
-            {canManage && (
+            {canManageInvoices && !deleted && (
               <div style={{ display: "flex", gap: 6 }}>
                 <button className="btn btn-sm btn-outline" disabled={!recurringDueCount || generating} onClick={generateRecurringInvoice}>
                   {generating ? "Generating..." : `Generate Monthly Invoice${recurringDueCount ? ` (${recurringDueCount} due)` : ""}`}
@@ -215,7 +280,7 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
               </div>
               <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                 {inv.pdf_path && <a className="btn btn-sm btn-outline" href={inv.pdf_path} target="_blank" rel="noreferrer">View PDF</a>}
-                {inv.status === "draft" && canManage && (
+                {inv.status === "draft" && canManageInvoices && !deleted && (
                   <button className="btn btn-sm btn-outline" onClick={() => submitForApproval(inv.id)}>Submit for Approval</button>
                 )}
                 {inv.status === "pending_approval" && canApprove && (
@@ -224,7 +289,7 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
                     <button className="btn btn-sm btn-danger" onClick={() => rejectInvoice(inv.id)}>Reject</button>
                   </>
                 )}
-                {inv.status === "approved" && canManage && (
+                {inv.status === "approved" && canManageInvoices && !deleted && (
                   <button className="btn btn-sm btn-success" onClick={() => markPaid(inv.id)}>Mark Paid</button>
                 )}
               </div>
@@ -242,6 +307,32 @@ export default function VendorDetailModal({ vendorId, onClose, onChanged }) {
           vendor={vendor}
           onClose={() => setShowAssign(false)}
           onAssigned={() => { setShowAssign(false); load(); onChanged && onChanged(); }}
+        />
+      )}
+      {editingVendor && (
+        <AddVendorModal
+          vendor={vendor}
+          onClose={() => setEditingVendor(false)}
+          onSaved={() => {
+            setEditingVendor(false);
+            setNotice("Vendor details updated.");
+            load();
+            onChanged?.();
+          }}
+        />
+      )}
+      {showUpload && (
+        <UploadAgreementModal
+          initialVendorId={vendor.id}
+          onClose={() => setShowUpload(false)}
+          onSaved={() => { setShowUpload(false); setNotice("Agreement added."); load(); onChanged?.(); }}
+        />
+      )}
+      {editingAgreement && (
+        <EditVendorAgreementModal
+          agreement={editingAgreement}
+          onClose={() => setEditingAgreement(null)}
+          onSaved={() => { setEditingAgreement(null); setNotice("Agreement changes saved."); load(); onChanged?.(); }}
         />
       )}
     </div>

@@ -1,3 +1,4 @@
+
 from flask import Flask, jsonify
 import os
 
@@ -12,17 +13,20 @@ def create_app(config_class=Config):
     db.init_app(app)
     jwt.init_app(app)
     bcrypt.init_app(app)
-    cors.init_app(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}}, supports_credentials=True)
+    cors.init_app(
+        app,
+        resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}},
+        supports_credentials=True,
+    )
 
     from app.models import User
 
-    # A removed/deactivated person must lose access IMMEDIATELY, not when their 12-hour
-    # access token happens to expire. Checked on every authenticated request (one indexed
-    # lookup). Refresh tokens are left to /auth/refresh, which has its own is_active check.
+    # Immediately revoke access for removed or deactivated users.
     @jwt.token_in_blocklist_loader
     def _account_no_longer_active(_jwt_header, jwt_payload):
         if jwt_payload.get("type") != "access":
             return False
+
         user = db.session.get(User, int(jwt_payload["sub"]))
         return user is None or not user.is_active
 
@@ -64,15 +68,27 @@ def create_app(config_class=Config):
     app.register_blueprint(notifications_bp)
     app.register_blueprint(exports_bp)
 
-    # Serve uploaded files (resumes, generated job-post images)
+    # Serve public uploaded files while blocking protected document paths.
     from flask import send_from_directory
 
     @app.get("/static/uploads/<path:filepath>")
     def uploaded_file(filepath):
-        normalized_path = os.path.normpath(filepath.replace("/", os.sep).replace("\\", os.sep))
+        normalized_path = os.path.normpath(
+            filepath.replace("/", os.sep).replace("\\", os.sep)
+        )
         normalized_path = normalized_path.replace("\\", "/").casefold()
+        path_parts = normalized_path.split("/")
+
+        # Employee documents require authenticated access.
         if normalized_path.startswith("documents/"):
-            return jsonify({"message": "Employee documents require authenticated access."}), 404
+            return jsonify({
+                "message": "Employee documents require authenticated access."
+            }), 404
+
+        # Vendor agreement PDFs must not be served through this public route.
+        if "vendor_agreements" in path_parts:
+            return jsonify({"message": "Resource not found."}), 404
+
         return send_from_directory(app.config["UPLOAD_FOLDER"], filepath)
 
     @app.get("/api/health")
@@ -91,6 +107,8 @@ def create_app(config_class=Config):
 
     @app.errorhandler(500)
     def server_error(_e):
-        return jsonify({"message": "Something went wrong on our end. Please try again."}), 500
+        return jsonify({
+            "message": "Something went wrong on our end. Please try again."
+        }), 500
 
     return app

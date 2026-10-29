@@ -175,6 +175,9 @@ def parse_agreement(file_stream):
 
     made_date, party_a, party_b = _extract_party_names(text)
     effective_from, effective_to = _extract_effective_dates(text)
+    termination_notice_days = _extract_termination_notice_days(text)
+    confidentiality_days = _extract_confidentiality_days(text)
+    feedback_days = _extract_feedback_days(text)
 
     parsed = {
         "party_a": party_a,
@@ -182,9 +185,9 @@ def parse_agreement(file_stream):
         "made_date": made_date,
         "effective_from": effective_from.isoformat() if effective_from else None,
         "effective_to": effective_to.isoformat() if effective_to else None,
-        "termination_notice_days": _extract_termination_notice_days(text) or 90,
-        "confidentiality_days": _extract_confidentiality_days(text) or 60,
-        "feedback_days": _extract_feedback_days(text) or 2,
+        "termination_notice_days": termination_notice_days or 90,
+        "confidentiality_days": confidentiality_days or 60,
+        "feedback_days": feedback_days or 2,
         "roles": _parse_fee_table(_find_fee_table(tables)),
         "raw_text": text,
         "used_ai_fallback": False,
@@ -195,4 +198,17 @@ def parse_agreement(file_stream):
         parsed = _ai_fill_gaps(text, parsed)
         parsed["used_ai_fallback"] = parsed != before
 
+    parsed["extracted_fields"] = [
+        field for field, value in (
+            ("party_a", parsed["party_a"]),
+            ("party_b", parsed["party_b"]),
+            ("effective_from", parsed["effective_from"]),
+            ("effective_to", parsed["effective_to"]),
+            ("termination_notice_days", termination_notice_days),
+            ("confidentiality_days", confidentiality_days),
+            ("feedback_days", feedback_days),
+            ("roles", parsed["roles"]),
+        )
+        if value
+    ]
     return parsed
