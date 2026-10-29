@@ -280,6 +280,82 @@ class EmployeeCtcTests(unittest.TestCase):
         self.assertNotIn("annual_ctc", detail.get_json())
         self.assertTrue(all("annual_ctc" not in row for row in rows.get_json()))
 
+    def test_manager_assignment_create_edit_clear_and_manager_options(self):
+        self.manager.full_name = "Morgan Manager"
+        second_manager = self.add_user(
+            "MGR2", "manager2@test.com", MANAGER, self.manager.department_id
+        )
+        second_manager.full_name = "Taylor Manager"
+        db.session.commit()
+
+        options = self.client.get(
+            "/api/employees/managers",
+            headers=self.headers["hr"],
+        )
+        self.assertEqual(options.status_code, 200)
+        self.assertEqual(
+            {manager["full_name"] for manager in options.get_json()},
+            {"Morgan Manager", "Taylor Manager"},
+        )
+        self.assertTrue(
+            all("employee_code" not in manager for manager in options.get_json())
+        )
+
+        created = self.create_employee(manager_id=str(self.manager.id))
+        self.assertEqual(created.status_code, 201)
+        employee_id = created.get_json()["id"]
+        self.assertEqual(created.get_json()["manager_id"], self.manager.id)
+        self.assertEqual(created.get_json()["manager_name"], "Morgan Manager")
+
+        listed = self.client.get("/api/employees", headers=self.headers["hr"])
+        listed_employee = next(
+            employee for employee in listed.get_json() if employee["id"] == employee_id
+        )
+        self.assertEqual(listed_employee["manager_name"], "Morgan Manager")
+
+        updated = self.client.put(
+            f"/api/employees/{employee_id}",
+            headers=self.headers["hr"],
+            json={"manager_id": str(second_manager.id)},
+        )
+        self.assertEqual(updated.status_code, 200)
+        refreshed = self.client.get(
+            f"/api/employees/{employee_id}",
+            headers=self.headers["hr"],
+        )
+        self.assertEqual(refreshed.get_json()["manager_id"], second_manager.id)
+        self.assertEqual(refreshed.get_json()["manager_name"], "Taylor Manager")
+
+        cleared = self.client.put(
+            f"/api/employees/{employee_id}",
+            headers=self.headers["hr"],
+            json={"manager_id": None},
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.get_json()["manager_id"])
+
+    def test_manager_assignment_rejects_non_managers_and_keeps_manager_onboarding(self):
+        invalid = self.create_employee(manager_id=self.hr.id)
+        self.assertEqual(invalid.status_code, 400)
+
+        self.assertEqual(
+            self.client.put(
+                f"/api/employees/{self.employee.id}",
+                headers=self.headers["hr"],
+                json={"manager_id": self.employee.id},
+            ).status_code,
+            400,
+        )
+
+        manager_created = self.create_employee(
+            role="manager",
+            employee_code="MGR3",
+            email="manager3@test.com",
+            manager_id=self.hr.id,
+        )
+        self.assertEqual(manager_created.status_code, 201)
+        self.assertEqual(manager_created.get_json()["manager_id"], self.manager.id)
+
     def test_ctc_only_structure_does_not_count_as_payroll_structure(self):
         created = self.create_employee(annual_ctc=600000)
         employee_id = created.get_json()["id"]

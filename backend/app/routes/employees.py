@@ -61,6 +61,23 @@ def _remove_user(user, actor_id, actor_role, reason):
     return None
 
 
+def _validate_manager_id(value, employee_id=None):
+    if value in (None, ""):
+        return None, None
+    if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
+        return None, "Please select a valid active manager."
+    try:
+        manager_id = int(value)
+    except (TypeError, ValueError):
+        return None, "Please select a valid active manager."
+    if manager_id == employee_id:
+        return None, "An employee cannot be their own manager."
+    manager = User.query.filter_by(id=manager_id, role=MANAGER, is_active=True).first()
+    if manager is None:
+        return None, "Please select a valid active manager."
+    return manager_id, None
+
+
 @bp.get("")
 @jwt_required()
 def list_employees():
@@ -107,6 +124,19 @@ def list_employees():
     return jsonify([u.to_dict() for u in rows])
 
 
+@bp.get("/managers")
+@jwt_required()
+def list_managers():
+    managers = User.query.filter_by(role=MANAGER, is_active=True).order_by(User.full_name.asc()).all()
+    return jsonify([{
+        "id": manager.id,
+        "full_name": manager.full_name,
+        "designation": manager.designation,
+        "email": manager.email,
+        "department": manager.department.name if manager.department else None,
+    } for manager in managers])
+
+
 @bp.get("/<int:emp_id>")
 @jwt_required()
 def get_employee(emp_id):
@@ -149,6 +179,10 @@ def create_employee():
         annual_ctc = normalize_annual_ctc(payload["annual_ctc"]) if "annual_ctc" in payload and payload["annual_ctc"] not in (None, "") else None
     except ValueError as exc:
         return jsonify({"message": str(exc)}), 400
+    requested_manager_id = actor_id if is_manager else payload.get("manager_id")
+    manager_id, manager_error = _validate_manager_id(requested_manager_id)
+    if manager_error:
+        return jsonify({"message": manager_error}), 400
 
     required = ["employee_code", "full_name", "email", "password", "role"]
     missing = [f for f in required if not payload.get(f)]
@@ -174,7 +208,7 @@ def create_employee():
         role=payload["role"],
         designation=payload.get("designation"),
         department_id=payload.get("department_id"),
-        manager_id=actor_id if is_manager else payload.get("manager_id"),
+        manager_id=manager_id,
         date_of_joining=datetime.strptime(payload["date_of_joining"], "%Y-%m-%d").date()
         if payload.get("date_of_joining")
         else None,
@@ -231,11 +265,17 @@ def update_employee(emp_id):
     else:
         editable_fields = ["full_name", "phone", "designation", "department_id", "manager_id", "role"]
 
+    manager_id = None
+    if not is_manager and "manager_id" in payload:
+        manager_id, manager_error = _validate_manager_id(payload["manager_id"], employee_id=user.id)
+        if manager_error:
+            return jsonify({"message": manager_error}), 400
+
     for field in editable_fields:
         if field in payload:
             if field == "role" and payload[field] not in ALL_ROLES:
                 return jsonify({"message": "Invalid role."}), 400
-            setattr(user, field, payload[field])
+            setattr(user, field, manager_id if field == "manager_id" else payload[field])
 
     if payload.get("date_of_joining"):
         user.date_of_joining = datetime.strptime(payload["date_of_joining"], "%Y-%m-%d").date()
