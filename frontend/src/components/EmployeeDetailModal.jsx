@@ -10,6 +10,7 @@ import EmployeeManagementPanel from "./EmployeeManagementPanel";
 import EmployeePersonalDetailsPanel from "./EmployeePersonalDetailsPanel";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, ROLE_LABELS } from "../config/roles";
+import { DESIGNATION_OPTIONS } from "../config/employeeOptions";
 import ManagerSelector from "./ManagerSelector";
 
 export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) {
@@ -397,11 +398,20 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
               </div>
               <div className="form-grid">
                 <div className="form-field">
-                  <label>Designation</label>
-                  <input value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} />
+                  <label>Designation (job title)</label>
+                  <input
+                    list="edit-employee-designation-options"
+                    value={form.designation}
+                    onChange={(e) => setForm({ ...form, designation: e.target.value })}
+                  />
+                  <datalist id="edit-employee-designation-options">
+                    {DESIGNATION_OPTIONS.map((designation) => (
+                      <option key={designation} value={designation} />
+                    ))}
+                  </datalist>
                 </div>
                 <div className="form-field">
-                  <label>Role</label>
+                  <label>Role (system access)</label>
                   <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
                     {Object.entries(ROLE_LABELS).filter(([val]) => val !== ROLES.SUPER_ADMIN || isSuperAdmin).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
                   </select>

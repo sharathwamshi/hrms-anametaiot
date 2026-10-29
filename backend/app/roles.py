@@ -13,6 +13,14 @@ EMPLOYEE = "employee"
 # Owns the organisation-wide setup (office geofences) and sees/acts on everything the
 # Manager, HR Operations and Operations roles can, for attendance.
 SUPER_ADMIN = "super_admin"
+ADMIN = "admin"
+TEAM_LEAD = "team_lead"
+DEVELOPER = "developer"
+TESTER_QA = "tester_qa"
+SCRUM_MASTER = "scrum_master"
+BUSINESS_ANALYST = "business_analyst"
+HR = "hr"
+HR_EXECUTIVE = "hr_executive"
 
 ALL_ROLES = [
     MANAGER,
@@ -23,22 +31,47 @@ ALL_ROLES = [
     HR_RECRUITER,
     EMPLOYEE,
     SUPER_ADMIN,
+    ADMIN,
+    TEAM_LEAD,
+    DEVELOPER,
+    TESTER_QA,
+    SCRUM_MASTER,
+    BUSINESS_ANALYST,
+    HR,
+    HR_EXECUTIVE,
 ]
 
 ROLE_LABELS = {
+    SUPER_ADMIN: "Super Admin",
+    ADMIN: "Admin",
     MANAGER: "Manager",
+    TEAM_LEAD: "Team Lead",
+    DEVELOPER: "Developer",
+    TESTER_QA: "Tester / QA",
+    SCRUM_MASTER: "Scrum Master",
+    BUSINESS_ANALYST: "Business Analyst",
+    HR: "HR",
+    HR_RECRUITER: "HR Recruiter",
+    HR_EXECUTIVE: "HR Executive",
+    EMPLOYEE: "Employee",
     CONTRACT_EMPLOYEE: "Contract Employee",
     HR_OPERATIONS: "HR Operations",
     FINANCE_ACCOUNTS: "Finance & Accounts",
     OPERATIONS: "Operations",
-    HR_RECRUITER: "HR Recruiter",
-    EMPLOYEE: "Employee",
-    SUPER_ADMIN: "Super Admin",
 }
 
 # Contract employees are engaged on a fixed deliverable/timesheet basis and do
 # not use the biometric-style clock in/out flow that regular staff use.
-ROLES_WITH_CLOCK_IN_OUT = [r for r in ALL_ROLES if r != CONTRACT_EMPLOYEE]
+# Keep clock eligibility explicit so adding a recognized role does not grant attendance access.
+ROLES_WITH_CLOCK_IN_OUT = [
+    MANAGER,
+    HR_OPERATIONS,
+    FINANCE_ACCOUNTS,
+    OPERATIONS,
+    HR_RECRUITER,
+    EMPLOYEE,
+    SUPER_ADMIN,
+]
 
 # Roles that can approve leave / attendance regularization requests raised by
 # an Employee or Contract Employee reporting to them.
