@@ -37,6 +37,10 @@ class Config:
 
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB uploads
     UPLOAD_FOLDER = os.path.join(basedir, "app", "static", "uploads")
+    VENDOR_AGREEMENT_FOLDER = os.environ.get(
+        "VENDOR_AGREEMENT_FOLDER",
+        os.path.join(basedir, "app", "private_uploads", "vendor_agreements"),
+    )
     # Attendance selfies live OUTSIDE the publicly-served static/uploads tree.
     SELFIE_FOLDER = os.environ.get("SELFIE_FOLDER", os.path.join(basedir, "app", "private_uploads", "selfies"))
     EMPLOYEE_DOCUMENT_FOLDER = os.environ.get(

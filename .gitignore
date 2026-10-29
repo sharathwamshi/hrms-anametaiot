@@ -24,6 +24,7 @@ __pycache__/
 
 backend/__pycache__/
 backend/**/__pycache__/
+backend/app/private_uploads/
 
 # Virtual environments
 venv/

@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import ExportButton from "../components/ExportButton";
 import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
 import Loader from "../components/Loader";
-import UploadAgreementModal from "../components/UploadAgreementModal";
-import AddVendorModal from "../components/AddVendorModal";
 import VendorDetailModal from "../components/VendorDetailModal";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
@@ -14,13 +13,19 @@ const TABS_BY_ROLE = {
   [ROLES.FINANCE_ACCOUNTS]: ["overview", "vendors", "invoices"],
   [ROLES.HR_OPERATIONS]: ["overview", "vendors", "invoices"],
   [ROLES.MANAGER]: ["overview", "vendors", "invoices"],
+  [ROLES.OPERATIONS]: ["overview", "vendors", "invoices"],
 };
 
 export default function Vendors() {
   const { user } = useAuth();
-  const canManage = [ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS].includes(user.role);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const canCreate = [ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS, ROLES.OPERATIONS].includes(user.role);
   const tabs = TABS_BY_ROLE[user.role] || ["overview"];
-  const [tab, setTab] = useState(tabs[0]);
+  const [tab, setTab] = useState(
+    location.state?.vendorId || location.state?.tab === "vendors" ? "vendors" : tabs[0],
+  );
+  const addVendor = () => navigate("/vendors/new");
 
   return (
     <AppLayout title="Vendors" subtitle="Recruitment vendor agreements, hires, and billing.">
@@ -32,8 +37,8 @@ export default function Vendors() {
         ))}
       </div>
 
-      {tab === "overview" && <OverviewTab canManage={canManage} onGoToVendors={() => setTab("vendors")} />}
-      {tab === "vendors" && <VendorsTab canManage={canManage} />}
+      {tab === "overview" && <OverviewTab canCreate={canCreate} onAddVendor={addVendor} onGoToVendors={() => setTab("vendors")} />}
+      {tab === "vendors" && <VendorsTab canCreate={canCreate} initialVendorId={location.state?.vendorId} />}
       {tab === "invoices" && <InvoicesTab />}
     </AppLayout>
   );
@@ -43,28 +48,34 @@ export default function Vendors() {
 // Overview — the dashboard "wow" landing view
 // ============================================================================
 
-function OverviewTab({ canManage, onGoToVendors }) {
+function OverviewTab({ canCreate, onAddVendor, onGoToVendors }) {
   const [vendors, setVendors] = useState([]);
   const [hires, setHires] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showUpload, setShowUpload] = useState(false);
-  const [showAddVendor, setShowAddVendor] = useState(false);
   const [selectedVendorId, setSelectedVendorId] = useState(null);
+  const [error, setError] = useState("");
 
   const load = async () => {
     setLoading(true);
-    const [vRes, hRes, iRes] = await Promise.all([
-      client.get("/vendors"), client.get("/vendors/hires"), client.get("/vendors/invoices"),
-    ]);
-    setVendors(vRes.data);
-    setHires(hRes.data);
-    setInvoices(iRes.data);
-    setLoading(false);
+    setError("");
+    try {
+      const [vRes, hRes, iRes] = await Promise.all([
+        client.get("/vendors"), client.get("/vendors/hires"), client.get("/vendors/invoices"),
+      ]);
+      setVendors(vRes.data);
+      setHires(hRes.data);
+      setInvoices(iRes.data);
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not load vendor overview.");
+    } finally {
+      setLoading(false);
+    }
   };
   useEffect(() => { load(); }, []);
 
   if (loading) return <Loader />;
+  if (error) return <div className="card"><div className="login-error" role="alert">{error}</div><button className="btn btn-outline" onClick={load}>Retry</button></div>;
 
   const activeVendors = vendors.filter((v) => v.status === "active").length;
   const billableHires = hires.filter((h) => h.is_billable);
@@ -77,9 +88,11 @@ function OverviewTab({ canManage, onGoToVendors }) {
     .slice(0, 6);
 
   const expiringAgreements = vendors
-    .filter((v) => v.active_agreement?.effective_to)
-    .map((v) => ({ vendor: v, daysLeft: Math.ceil((new Date(v.active_agreement.effective_to) - new Date()) / 86400000) }))
-    .filter((x) => x.daysLeft <= 60 && x.daysLeft >= 0)
+    .flatMap((vendor) => (vendor.expiring_agreements || []).map((agreement) => ({
+      vendor,
+      agreement,
+      daysLeft: agreement.days_remaining,
+    })))
     .sort((a, b) => a.daysLeft - b.daysLeft);
 
   return (
@@ -114,48 +127,34 @@ function OverviewTab({ canManage, onGoToVendors }) {
         <div className="card">
           <div className="card-title-row">
             <h3>Agreements Expiring Soon</h3>
-            <span className="muted" style={{ fontSize: 11 }}>Within 60 days</span>
+            <span className="muted" style={{ fontSize: 11 }}>Within 7 days</span>
           </div>
           {expiringAgreements.length === 0 && <div className="muted" style={{ fontSize: 13 }}>Nothing expiring soon.</div>}
-          {expiringAgreements.map(({ vendor, daysLeft }) => (
-            <div key={vendor.id} onClick={() => setSelectedVendorId(vendor.id)}
+          {expiringAgreements.map(({ vendor, agreement, daysLeft }) => (
+            <div key={agreement.id} onClick={() => setSelectedVendorId(vendor.id)}
               className="flex-between" style={{ padding: "8px 0", borderBottom: "1px solid var(--color-border)", fontSize: 12.5, cursor: "pointer" }}>
-              <span>{vendor.name}</span>
+              <span>{vendor.name} — {agreement.title || "Agreement"} · expires {agreement.expiry_date}</span>
               <span className="chip orange">{daysLeft} day(s) left</span>
             </div>
           ))}
         </div>
       </div>
 
-      {canManage && (
+      {canCreate && (
         <div className="card section-gap" style={{ marginTop: 20 }}>
           <div className="card-title-row">
             <h3>Onboard a Vendor</h3>
           </div>
           <p className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
-            Upload a signed agreement — AnametaIOT HRMS reads the vendor, terms, and role-wise fee table automatically.
-            Or add a vendor directly if the agreement isn't signed yet.
+            Create a vendor and add its agreement, role details, and signed PDF together.
           </p>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-primary" onClick={() => setShowUpload(true)}>+ Upload Agreement</button>
-            <button className="btn btn-outline" onClick={() => setShowAddVendor(true)}>+ Add Vendor</button>
+            <button className="btn btn-primary" onClick={onAddVendor}>+ Add Vendor &amp; Agreement</button>
             <button className="btn btn-outline" onClick={onGoToVendors}>View All Vendors</button>
           </div>
         </div>
       )}
 
-      {showUpload && (
-        <UploadAgreementModal
-          onClose={() => setShowUpload(false)}
-          onSaved={(vendor) => { setShowUpload(false); load(); setSelectedVendorId(vendor.id); }}
-        />
-      )}
-      {showAddVendor && (
-        <AddVendorModal
-          onClose={() => setShowAddVendor(false)}
-          onSaved={(vendor) => { setShowAddVendor(false); load(); setSelectedVendorId(vendor.id); }}
-        />
-      )}
       {selectedVendorId && (
         <VendorDetailModal vendorId={selectedVendorId} onClose={() => setSelectedVendorId(null)} onChanged={load} />
       )}
@@ -167,70 +166,119 @@ function OverviewTab({ canManage, onGoToVendors }) {
 // Vendors list
 // ============================================================================
 
-function VendorsTab({ canManage }) {
+function VendorsTab({ canCreate, initialVendorId = null }) {
+  const navigate = useNavigate();
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showUpload, setShowUpload] = useState(false);
-  const [showAddVendor, setShowAddVendor] = useState(false);
-  const [selectedVendorId, setSelectedVendorId] = useState(null);
+  const [error, setError] = useState("");
+  const [selectedVendorId, setSelectedVendorId] = useState(initialVendorId);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [agreementFilter, setAgreementFilter] = useState("");
 
   const load = async () => {
     setLoading(true);
-    const { data } = await client.get("/vendors");
-    setVendors(data);
-    setLoading(false);
+    setError("");
+    try {
+      const { data } = await client.get("/vendors", {
+        params: {
+          ...(search ? { q: search } : {}),
+          ...(statusFilter ? { status: statusFilter } : {}),
+          ...(agreementFilter ? { agreement_status: agreementFilter } : {}),
+        },
+      });
+      setVendors(data);
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not load vendors.");
+    } finally {
+      setLoading(false);
+    }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [search, statusFilter, agreementFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const expiringCount = vendors.reduce((total, vendor) => total + vendor.expiring_agreement_count, 0);
+  const expiredCount = vendors.reduce((total, vendor) => total + vendor.expired_agreement_count, 0);
 
   return (
-    <div className="card">
-      <div className="card-title-row">
-        <h3>All Vendors</h3>
-        {canManage && (
-          <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn btn-outline btn-sm" onClick={() => setShowAddVendor(true)}>+ Add Vendor</button>
-            <button className="btn btn-primary btn-sm" onClick={() => setShowUpload(true)}>+ Upload Agreement</button>
+    <>
+      <div className="stat-grid">
+        <div className="stat-card"><div><div className="label">Total Vendors</div><div className="value">{vendors.length}</div></div></div>
+        <div className="stat-card"><div><div className="label">Expiring in 7 Days</div><div className="value">{expiringCount}</div></div></div>
+        <div className="stat-card"><div><div className="label">Expired Agreements</div><div className="value">{expiredCount}</div></div></div>
+      </div>
+      <div className="card">
+        <div className="card-title-row">
+          <h3>All Vendors</h3>
+          {canCreate && <button className="btn btn-primary btn-sm" onClick={() => navigate("/vendors/new")}>+ Add Vendor &amp; Agreement</button>}
+        </div>
+        {error && <div className="login-error" role="alert">{error}</div>}
+        <div className="vendor-filters">
+          <input
+            type="search"
+            aria-label="Search vendors"
+            placeholder="Search name, GSTIN, PAN, contact or email"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <select aria-label="Filter vendors by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="">All vendor statuses</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          <select aria-label="Filter vendors by agreement status" value={agreementFilter} onChange={(event) => setAgreementFilter(event.target.value)}>
+            <option value="">All agreement statuses</option>
+            <option value="upcoming">Upcoming</option>
+            <option value="active">Active</option>
+            <option value="expiring_soon">Expiring Soon</option>
+            <option value="expired">Expired</option>
+            <option value="terminated">Terminated</option>
+          </select>
+        </div>
+        {loading ? <Loader /> : vendors.length === 0 ? (
+          <div className="muted" style={{ fontSize: 13, padding: 18 }}>
+            {search || statusFilter || agreementFilter ? "No vendors match these filters." : "No vendors yet — upload an agreement or add one directly."}
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="data-table vendor-directory-table">
+              <thead>
+                <tr><th>Company</th><th>Vendor</th><th>Contact</th><th>GSTIN</th><th>Status</th><th>Agreements</th><th>Agreement Expiry</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                {vendors.map((vendor) => (
+                  <tr key={vendor.id}>
+                    <td>{vendor.company_name || "—"}</td>
+                    <td>
+                      <button className="vendor-name-link" onClick={() => setSelectedVendorId(vendor.id)}>{vendor.name}</button>
+                      <div className="muted" style={{ fontSize: 11 }}>{vendor.state || "—"}</div>
+                    </td>
+                    <td>
+                      {vendor.contact_person || "—"}
+                      <div className="muted" style={{ fontSize: 11 }}>{vendor.contact_email || vendor.contact_phone || ""}</div>
+                    </td>
+                    <td>{vendor.gstin || "—"}</td>
+                    <td><Badge status={vendor.status} /></td>
+                    <td>{vendor.agreement_count}</td>
+                    <td>
+                      {vendor.agreement_status ? (
+                        <><Badge status={vendor.agreement_status} />{vendor.agreement_title && <div className="muted" style={{ fontSize: 11 }}>{vendor.agreement_title}</div>}{vendor.agreement_expiry && <div className="muted" style={{ fontSize: 11 }}>{vendor.agreement_expiry}</div>}</>
+                      ) : "—"}
+                    </td>
+                    <td>
+                      <button className="btn btn-sm btn-outline" onClick={() => setSelectedVendorId(vendor.id)}>View</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
-      {loading ? <Loader /> : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {vendors.length === 0 && <div className="muted" style={{ fontSize: 13 }}>No vendors yet — upload an agreement or add one directly.</div>}
-          {vendors.map((v) => (
-            <div key={v.id} onClick={() => setSelectedVendorId(v.id)}
-              style={{ cursor: "pointer", border: "1px solid var(--color-border)", borderRadius: 10, padding: 14 }}>
-              <div className="flex-between">
-                <div>
-                  <strong>{v.name}</strong>
-                  <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
-                    {v.agreement_count} agreement(s)
-                    {v.active_agreement && ` · active through ${v.active_agreement.effective_to || "open-ended"}`}
-                    {v.gstin && ` · GSTIN ${v.gstin}`}
-                  </div>
-                </div>
-                <Badge status={v.status} />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
 
-      {showAddVendor && (
-        <AddVendorModal
-          onClose={() => setShowAddVendor(false)}
-          onSaved={(vendor) => { setShowAddVendor(false); load(); setSelectedVendorId(vendor.id); }}
-        />
-      )}
-      {showUpload && (
-        <UploadAgreementModal
-          onClose={() => setShowUpload(false)}
-          onSaved={(vendor) => { setShowUpload(false); load(); setSelectedVendorId(vendor.id); }}
-        />
-      )}
       {selectedVendorId && (
         <VendorDetailModal vendorId={selectedVendorId} onClose={() => setSelectedVendorId(null)} onChanged={load} />
       )}
-    </div>
+    </>
   );
 }
 

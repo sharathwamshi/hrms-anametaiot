@@ -97,6 +97,8 @@ fallback. Nothing breaks or needs code changes if you leave them blank:
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM_NUMBER` | Real AI voice-bot screening calls | Calls are simulated (clearly labeled `[SIMULATED]` in the transcript) so the Yes/No/Neutral flow, reschedule loop, and call history all still work end to end |
 | `LINKEDIN_API_TOKEN` | Real one-click LinkedIn job posting | Endpoint responds with a clear "not configured" status — requires a LinkedIn Talent Solutions partnership, which is a business step outside this codebase |
 | `NAUKRI_API_TOKEN` | Real one-click Naukri job posting | Same — requires a Naukri RMS corporate account |
+| `VENDOR_AGREEMENT_FOLDER` | Private directory for uploaded vendor agreements | Uses `backend/app/private_uploads/vendor_agreements` |
+| `INTERNAL_TASK_SECRET` | Authenticates scheduled internal maintenance requests | Uses the development-only default; set a long random value in production |
 
 ## 3. Frontend (React)
 
@@ -309,15 +311,56 @@ in the UI:
   rather than a plain link, since the JWT lives in `localStorage`, not a cookie — a plain
   `<a href>` to a protected endpoint would silently fail.
 
-### Vendor onboarding, refined
+### Vendor management
 
-- **Vendor-first upload flow** — after an agreement is parsed, a vendor **dropdown** is
-  always shown first (pre-selected to any auto-matched vendor), with "+ Add New Vendor" as
-  an explicit option — only once a vendor is chosen do the agreement terms and rate card
-  appear for review.
-- **Add Vendor directly** — a vendor can now be created with full basic + billing
-  information (`POST /api/vendors`) independent of any agreement, for when the
-  relationship starts before a contract is signed.
+- **Combined vendor and agreement form** — create the vendor, company association,
+  agreement terms, role rate card, and PDF in one submission (`POST
+  /api/vendors/create-with-agreement`). The transaction rolls back associated records and
+  removes the newly uploaded file if database creation fails. Hires and invoices remain
+  available in vendor details after the vendor is saved.
+- **Vendor directory and agreement management** — search and filter the directory, view
+  company, vendor and agreement expiry details, and securely download agreement PDFs.
+  HR Operations can edit vendor details and delete eligible vendors. Finance & Accounts
+  and Operations can create vendors and manage agreements, but cannot edit existing
+  vendor details or delete vendors. Managers are view-only. Other roles are denied.
+  Vendors with agreements, hires, invoices, or client requisitions cannot be permanently
+  deleted; the endpoint explains the dependencies and preserves associated files.
+- **Company choices** — `GET /api/vendors/companies` lists the initial legal entities.
+  Selecting “Add another company” saves the new company and vendor association as part of
+  the combined creation transaction.
+- **Expiry reminders** — one calendar month and seven calendar days before an active
+  agreement expires, the daily external scheduler sends duplicate-safe Expo push reminders
+  to active HR Operations, Finance & Accounts and Operations users. Attempt history is
+  stored in `vendor_agreement_reminders`; reminder keys include the expiry date, so changing
+  the agreement expiry produces a new reminder schedule. Failed sends can be retried.
+
+The reminder-history and company-association structures require manual migrations. Do not
+edit either schema snapshot or run these against an unintended database:
+
+```bash
+cd backend
+mysql --host=localhost --port=3306 --user=root --password anametaiot_hrms < migration_vendor_agreement_reminders.sql
+mysql --host=localhost --port=3306 --user=root --password anametaiot_hrms < migration_vendor_companies.sql
+```
+
+Use the configured database host, user and database name in production; MySQL prompts
+for the password. Agreement documents are stored in the private `VENDOR_AGREEMENT_FOLDER`;
+set it to writable, persistent deployment storage (not an ephemeral developer/container
+filesystem) and back it up separately. Existing agreement paths under
+`/static/uploads/vendor_agreements/` remain readable through the authorized download
+endpoint, and direct static access to that folder is blocked.
+
+Configure one external scheduler (for example, cron) to call the reminder endpoint daily.
+Date calculations use the configured company timezone; no scheduler is started inside Flask,
+so this works with multiple Gunicorn workers:
+
+```cron
+30 9 * * * curl --fail --silent --show-error -X POST http://127.0.0.1:5000/api/vendors/internal/agreement-expiry-reminders -H "X-Internal-Secret: YOUR_INTERNAL_TASK_SECRET"
+```
+
+Keep the secret in the scheduler's protected environment/configuration rather than in
+source control. Expo push delivery requires the existing `EXPO_PUSH_ENABLED` setting and
+registered device tokens.
 
 ### Manager-facing employee management
 
@@ -351,7 +394,5 @@ in the UI:
   differently-structured agreement will still be readable and editable in the upload
   preview, but may need more manual correction — the parser degrades gracefully rather than
   failing, since every field is reviewed before saving regardless.
-- Vendor invoices currently only send PDF generation — there's no automated emailing of the
-  invoice to the vendor or reminder system for upcoming agreement expiry beyond the
-  dashboard's "Agreements Expiring Soon" panel. Both would be natural next additions using
-  the same optional-integration pattern as the AI screening calls.
+- Vendor invoices currently only generate PDFs; they are not automatically emailed to
+  vendors.

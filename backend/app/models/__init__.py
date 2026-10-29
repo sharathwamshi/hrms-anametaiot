@@ -1,3 +1,4 @@
+
 from app.models.user import User, Department
 from app.models.attendance import (
     Attendance, AttendanceRegularizationReason, AttendanceRegularizationRequest,
@@ -13,8 +14,8 @@ from app.models.offer import Offer
 from app.models.documents import EmployeeDocument
 from app.models.employee_profile import EmployeeFamilyMember, EmployeeEmergencyCommunication
 from app.models.vendor import (
-    CompanySettings, Vendor, VendorAgreement, VendorAgreementRole,
-    VendorHire, VendorInvoice, VendorInvoiceItem,
+    CompanySettings, VendorCompany, Vendor, VendorAgreement, VendorAgreementRole,
+    VendorHire, VendorInvoice, VendorInvoiceItem, VendorAgreementReminder,
 )
 from app.models.permission import EmployeePermission, PERMISSION_CATALOGUE
 from app.models.mocktest import (
@@ -36,8 +37,10 @@ __all__ = [
     "Offer",
     "EmployeeDocument",
     "EmployeeFamilyMember", "EmployeeEmergencyCommunication",
-    "CompanySettings", "Vendor", "VendorAgreement", "VendorAgreementRole",
+    "CompanySettings",
+    "VendorCompany", "Vendor", "VendorAgreement", "VendorAgreementRole",
     "VendorHire", "VendorInvoice", "VendorInvoiceItem",
+    "VendorAgreementReminder",
     "EmployeePermission",
     "TopicLibrary", "MockTestTemplate", "MockTestQuestion",
     "MockTestAssignment", "MockTestAnswer", "MockTestResult",

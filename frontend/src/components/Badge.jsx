@@ -13,6 +13,7 @@ const MAP = {
   yes: "badge-success",
 
   pending: "badge-warning",
+  expiring_soon: "badge-warning",
   half_day: "badge-warning",
   processed: "badge-warning",
   screening: "badge-warning",
