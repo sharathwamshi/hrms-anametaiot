@@ -252,7 +252,7 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
 
         {(rec?.regularization_status || regularized) && (
           <div
-            className="note-box"
+            className="note-box att-regularization-box"
             style={{
               background: "var(--color-brand-orange-50)",
               borderRadius: 8,
@@ -268,7 +268,9 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
               ? ` — ${rec.regularization_reason_label}`
               : ""}
             {rec.regularization_note && (
-              <div className="muted">Note: {rec.regularization_note}</div>
+              <div className="muted att-regularization-note">
+                Note: {rec.regularization_note}
+              </div>
             )}
             {rec.regularization_reviewed_by_name && (
               <div className="muted">
