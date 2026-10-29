@@ -10,6 +10,7 @@ import EmployeeManagementPanel from "./EmployeeManagementPanel";
 import EmployeePersonalDetailsPanel from "./EmployeePersonalDetailsPanel";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, ROLE_LABELS } from "../config/roles";
+import ManagerSelector from "./ManagerSelector";
 
 export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) {
   const { user } = useAuth();
@@ -18,6 +19,8 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
   const canManageCtc = isAdmin;
 
   const [snapshot, setSnapshot] = useState(null);
+  const [managers, setManagers] = useState([]);
+  const [managerLoadError, setManagerLoadError] = useState("");
   const [recruiterPerf, setRecruiterPerf] = useState(null);
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leaveBalanceLoading, setLeaveBalanceLoading] = useState(true);
@@ -39,6 +42,19 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
     setReviewLastWorkingDay("");
     const snapRes = await client.get(`/employees/${employeeId}/performance-snapshot`);
     setSnapshot(snapRes.data);
+    if (canManageCtc) {
+      try {
+        const managersRes = await client.get("/employees/managers");
+        setManagers(managersRes.data);
+        setManagerLoadError("");
+      } catch (err) {
+        setManagers([]);
+        setManagerLoadError(err?.response?.data?.message || "Could not load available managers.");
+      }
+    } else {
+      setManagers([]);
+      setManagerLoadError("");
+    }
     let ctcFormValue = {};
     if (canManageCtc) {
       setCtcLoaded(false);
@@ -56,6 +72,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
       phone: snapRes.data.employee.phone || "",
       designation: snapRes.data.employee.designation || "",
       role: snapRes.data.employee.role,
+      manager_id: snapRes.data.employee.manager_id ? String(snapRes.data.employee.manager_id) : "",
       ...ctcFormValue,
     });
 
@@ -401,6 +418,20 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
                     value={form.annual_ctc}
                     onChange={(e) => setForm({ ...form, annual_ctc: e.target.value })}
                   />
+                </div>
+              )}
+              {canManageCtc && (
+                <div className="form-field">
+                  <label>Manager</label>
+                  {managerLoadError ? (
+                    <div className="login-error">{managerLoadError}</div>
+                  ) : (
+                    <ManagerSelector
+                      managers={managers}
+                      value={form.manager_id}
+                      onChange={(managerId) => setForm({ ...form, manager_id: managerId })}
+                    />
+                  )}
                 </div>
               )}
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>

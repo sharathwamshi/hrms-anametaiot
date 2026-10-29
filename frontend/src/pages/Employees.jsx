@@ -7,10 +7,11 @@ import Loader from "../components/Loader";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, ROLE_LABELS } from "../config/roles";
 import EmployeeDetailModal from "../components/EmployeeDetailModal";
+import ManagerSelector from "../components/ManagerSelector";
 
 const emptyForm = {
   employee_code: "", full_name: "", email: "", password: "", role: ROLES.EMPLOYEE,
-  designation: "", department_id: "", date_of_joining: "", annual_ctc: "",
+  designation: "", department_id: "", date_of_joining: "", annual_ctc: "", manager_id: "",
 };
 
 export default function Employees() {
@@ -23,6 +24,8 @@ export default function Employees() {
   const [employees, setEmployees] = useState([]);
   const [resignationRequests, setResignationRequests] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [managers, setManagers] = useState([]);
+  const [managerLoadError, setManagerLoadError] = useState("");
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -52,6 +55,14 @@ export default function Employees() {
 
   useEffect(() => {
     load();
+    client.get("/employees/managers")
+      .then(({ data }) => {
+        setManagers(data);
+        setManagerLoadError("");
+      })
+      .catch((err) => {
+        setManagerLoadError(err?.response?.data?.message || "Could not load available managers.");
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -77,6 +88,12 @@ export default function Employees() {
   const handleSearch = (e) => {
     e.preventDefault();
     load(q);
+  };
+
+  const openCreateForm = () => {
+    setForm({ ...emptyForm, manager_id: isManager ? String(user.id) : "" });
+    setError("");
+    setShowForm(true);
   };
 
   const submit = async (e) => {
@@ -125,7 +142,7 @@ export default function Employees() {
               </button>
             )}
             {canOnboard && !showRemoved && (
-              <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>
+              <button className="btn btn-primary btn-sm" onClick={openCreateForm}>
                 + {isManager ? "Add to My Team" : "Add Employee"}
               </button>
             )}
@@ -280,6 +297,19 @@ export default function Employees() {
                   />
                 </div>
               )}
+              <div className="form-field">
+                <label>Manager</label>
+                {managerLoadError ? (
+                  <div className="login-error">{managerLoadError}</div>
+                ) : (
+                  <ManagerSelector
+                    managers={managers}
+                    value={form.manager_id}
+                    onChange={(managerId) => setForm({ ...form, manager_id: managerId })}
+                    disabled={isManager}
+                  />
+                )}
+              </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
                 <button type="submit" className="btn btn-success">Create Employee</button>
