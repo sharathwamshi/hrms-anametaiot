@@ -6,6 +6,7 @@ import Badge from "../components/Badge";
 import Loader from "../components/Loader";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, ROLE_LABELS } from "../config/roles";
+import { DESIGNATION_OPTIONS } from "../config/employeeOptions";
 import EmployeeDetailModal from "../components/EmployeeDetailModal";
 import ManagerSelector from "../components/ManagerSelector";
 
@@ -261,7 +262,7 @@ export default function Employees() {
               </div>
               <div className="form-grid">
                 <div className="form-field">
-                  <label>Role</label>
+                  <label>Role (system access)</label>
                   <select required value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
                     {Object.entries(ROLE_LABELS).filter(([val]) => val !== ROLES.SUPER_ADMIN || isSuperAdmin).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
                   </select>
@@ -276,8 +277,17 @@ export default function Employees() {
               </div>
               <div className="form-grid">
                 <div className="form-field">
-                  <label>Designation</label>
-                  <input value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} />
+                  <label>Designation (job title)</label>
+                  <input
+                    list="new-employee-designation-options"
+                    value={form.designation}
+                    onChange={(e) => setForm({ ...form, designation: e.target.value })}
+                  />
+                  <datalist id="new-employee-designation-options">
+                    {DESIGNATION_OPTIONS.map((designation) => (
+                      <option key={designation} value={designation} />
+                    ))}
+                  </datalist>
                 </div>
                 <div className="form-field">
                   <label>Date of Joining</label>

@@ -1,24 +1,40 @@
 
 export const ROLES = {
+  SUPER_ADMIN: "super_admin",
+  ADMIN: "admin",
   MANAGER: "manager",
+  TEAM_LEAD: "team_lead",
+  DEVELOPER: "developer",
+  TESTER_QA: "tester_qa",
+  SCRUM_MASTER: "scrum_master",
+  BUSINESS_ANALYST: "business_analyst",
+  HR: "hr",
+  HR_EXECUTIVE: "hr_executive",
+  HR_RECRUITER: "hr_recruiter",
+  EMPLOYEE: "employee",
   CONTRACT_EMPLOYEE: "contract_employee",
   HR_OPERATIONS: "hr_operations",
   FINANCE_ACCOUNTS: "finance_accounts",
   OPERATIONS: "operations",
-  HR_RECRUITER: "hr_recruiter",
-  EMPLOYEE: "employee",
-  SUPER_ADMIN: "super_admin",
 };
 
 export const ROLE_LABELS = {
+  [ROLES.SUPER_ADMIN]: "Super Admin",
+  [ROLES.ADMIN]: "Admin",
   [ROLES.MANAGER]: "Manager",
+  [ROLES.TEAM_LEAD]: "Team Lead",
+  [ROLES.DEVELOPER]: "Developer",
+  [ROLES.TESTER_QA]: "Tester / QA",
+  [ROLES.SCRUM_MASTER]: "Scrum Master",
+  [ROLES.BUSINESS_ANALYST]: "Business Analyst",
+  [ROLES.HR]: "HR",
+  [ROLES.HR_RECRUITER]: "HR Recruiter",
+  [ROLES.HR_EXECUTIVE]: "HR Executive",
+  [ROLES.EMPLOYEE]: "Employee",
   [ROLES.CONTRACT_EMPLOYEE]: "Contract Employee",
   [ROLES.HR_OPERATIONS]: "HR Operations",
   [ROLES.FINANCE_ACCOUNTS]: "Finance & Accounts",
   [ROLES.OPERATIONS]: "Operations",
-  [ROLES.HR_RECRUITER]: "HR Recruiter",
-  [ROLES.EMPLOYEE]: "Employee",
-  [ROLES.SUPER_ADMIN]: "Super Admin",
 };
 
 // Which nav items each role sees. Every role gets Dashboard + Profile.
