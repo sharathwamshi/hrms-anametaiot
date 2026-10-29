@@ -1,4 +1,5 @@
 from flask import Flask, jsonify
+import os
 
 from config import Config
 from app.extensions import db, jwt, cors, bcrypt
@@ -39,6 +40,7 @@ def create_app(config_class=Config):
     from app.routes.mocktest import bp as mocktest_bp
     from app.routes.offers import bp as offers_bp
     from app.routes.documents import bp as documents_bp
+    from app.routes.employee_profile import bp as employee_profile_bp
     from app.routes.vendors import bp as vendors_bp
     from app.routes.dashboard import bp as dashboard_bp
     from app.routes.misc import bp as misc_bp
@@ -55,6 +57,7 @@ def create_app(config_class=Config):
     app.register_blueprint(mocktest_bp)
     app.register_blueprint(offers_bp)
     app.register_blueprint(documents_bp)
+    app.register_blueprint(employee_profile_bp)
     app.register_blueprint(vendors_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(misc_bp)
@@ -66,6 +69,10 @@ def create_app(config_class=Config):
 
     @app.get("/static/uploads/<path:filepath>")
     def uploaded_file(filepath):
+        normalized_path = os.path.normpath(filepath.replace("/", os.sep).replace("\\", os.sep))
+        normalized_path = normalized_path.replace("\\", "/").casefold()
+        if normalized_path.startswith("documents/"):
+            return jsonify({"message": "Employee documents require authenticated access."}), 404
         return send_from_directory(app.config["UPLOAD_FOLDER"], filepath)
 
     @app.get("/api/health")

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Loader from "./components/Loader";
@@ -18,7 +18,6 @@ import Vendors from "./pages/Vendors";
 import MockTestTake from "./pages/MockTestTake";
 import Announcements from "./pages/Announcements";
 import Assets from "./pages/Assets";
-import Documents from "./pages/Documents";
 import Profile from "./pages/Profile";
 
 import { ROLES } from "./config/roles";
@@ -153,7 +152,7 @@ export default function App() {
       />
 
       <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-      <Route path="/documents" element={<ProtectedRoute><Documents /></ProtectedRoute>} />
+      <Route path="/documents" element={<ProtectedRoute><Navigate to="/profile#documents" replace /></ProtectedRoute>} />
     </Routes>
   );
 }

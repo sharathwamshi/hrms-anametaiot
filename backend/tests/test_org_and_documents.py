@@ -74,7 +74,7 @@ with app.app_context():
 
     # --- Documents: contract employee uploads their own ---
     data = {'doc_type': 'academic', 'title': 'B.Tech Certificate'}
-    data['file'] = (io.BytesIO(b'fake pdf bytes'), 'degree.pdf')
+    data['file'] = (io.BytesIO(b'%PDF-1.4\n% test document\n'), 'degree.pdf')
     r = client.post('/api/documents', headers=ch, data=data, content_type='multipart/form-data')
     ok("contract employee uploads a document", r.status_code == 201, r.get_json())
 

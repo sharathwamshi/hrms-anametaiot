@@ -39,6 +39,11 @@ class Config:
     UPLOAD_FOLDER = os.path.join(basedir, "app", "static", "uploads")
     # Attendance selfies live OUTSIDE the publicly-served static/uploads tree.
     SELFIE_FOLDER = os.environ.get("SELFIE_FOLDER", os.path.join(basedir, "app", "private_uploads", "selfies"))
+    EMPLOYEE_DOCUMENT_FOLDER = os.environ.get(
+        "EMPLOYEE_DOCUMENT_FOLDER",
+        os.path.join(basedir, "app", "private_uploads", "employee_documents"),
+    )
+    MAX_EMPLOYEE_DOCUMENT_BYTES = 10 * 1024 * 1024
 
     COMPANY_NAME = os.environ.get("COMPANY_NAME", "AnametaIOT HRMS")
     POWERED_BY = os.environ.get("POWERED_BY", "+veGroww")

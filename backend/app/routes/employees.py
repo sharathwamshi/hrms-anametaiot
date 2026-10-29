@@ -363,7 +363,15 @@ def update_employment_status(emp_id):
 
     payload = request.get_json(silent=True) or {}
     if payload.get("employment_status") != "left":
-        return jsonify({"message": "The only manual employment-status update available is Left the company."}), 400
+        if payload.get("employment_status") == "active" and user.employment_status == "left":
+            user.employment_status = "active"
+            user.left_company_at = None
+            db.session.commit()
+            return jsonify({
+                "message": f"{user.full_name}'s employment has been reactivated.",
+                "employee": user.to_dict(),
+            })
+        return jsonify({"message": "Employment status can only be changed to Active for an employee marked as Left the company."}), 400
     if user.employment_status == "left":
         return jsonify({"message": "This employee is already marked as having left the company."}), 409
 

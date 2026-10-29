@@ -15,7 +15,7 @@ import os
 import uuid
 from datetime import timedelta
 import json
-from app.roles import ROLES_WITH_CLOCK_IN_OUT, MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN
+from app.roles import ROLES_WITH_CLOCK_IN_OUT, CONTRACT_EMPLOYEE, MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN
 
 FULL_ACCESS = (HR_OPERATIONS, SUPER_ADMIN)          # every active person, incl. locations + selfies
 APPROVER_ROLES = (MANAGER, HR_OPERATIONS, SUPER_ADMIN)
@@ -496,6 +496,10 @@ def clock_in():
     record.sessions.append(session)
     db.session.flush()
     record.recompute_from_sessions()
+    record.absence_reason = None
+    record.absence_note = None
+    record.absence_recorded_by = None
+    record.absence_recorded_at = None
     if not (is_reentry and (record.is_regularized or record.status == "regularized")):
         record.status = "present"
     db.session.commit()
@@ -504,6 +508,65 @@ def clock_in():
     out["geofence_warning"] = session.clock_in_within_geofence is False
     out["is_reentry"] = is_reentry
     return jsonify(out), 201
+
+
+@bp.post("/absence")
+@jwt_required()
+def record_absence():
+    claims, actor_id = get_jwt(), int(get_jwt_identity())
+    if claims.get("role") not in (HR_OPERATIONS, SUPER_ADMIN):
+        return jsonify({"message": "Only HR Operations or Super Admin can record an absence."}), 403
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) - {"user_id", "work_date", "reason", "note"}:
+        return jsonify({"message": "Provide user_id, work_date, reason, and optional note."}), 400
+    target = db.session.get(User, payload.get("user_id"))
+    if target is None:
+        return jsonify({"message": "Employee not found."}), 404
+    if not target.is_active or target.employment_status == "left" or target.role == CONTRACT_EMPLOYEE:
+        return jsonify({"message": "Absence can only be recorded for an active employee with attendance tracking."}), 409
+    try:
+        work_date = date.fromisoformat(payload["work_date"])
+        if work_date.isoformat() != payload["work_date"] or work_date > company_today():
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"message": "work_date must be a valid date no later than today."}), 400
+    reason = payload.get("reason")
+    note = payload.get("note", "")
+    if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 100:
+        return jsonify({"message": "Provide an absence reason of 100 characters or fewer."}), 400
+    if not isinstance(note, str) or len(note.strip()) > 500:
+        return jsonify({"message": "Absence note must be 500 characters or fewer."}), 400
+    approved_leave = LeaveRequest.query.filter(
+        LeaveRequest.user_id == target.id,
+        LeaveRequest.status == "approved",
+        LeaveRequest.start_date <= work_date,
+        LeaveRequest.end_date >= work_date,
+    ).first()
+    if approved_leave:
+        return jsonify({"message": "This employee has approved leave for that date; attendance was not changed."}), 409
+    if Holiday.query.filter_by(holiday_date=work_date).first():
+        return jsonify({"message": "This is a configured holiday; attendance was not changed."}), 409
+
+    record = Attendance.query.filter_by(user_id=target.id, work_date=work_date).first()
+    if record and (
+        record.clock_in
+        or record.clock_out
+        or record.sessions
+        or record.status not in (None, "absent")
+        or record.is_regularized
+        or record.regularization_status == "pending"
+    ):
+        return jsonify({"message": "Attendance is already marked or under review; it was not overwritten."}), 409
+    if record is None:
+        record = Attendance(user_id=target.id, work_date=work_date, status="absent")
+        db.session.add(record)
+    record.status = "absent"
+    record.absence_reason = reason.strip()
+    record.absence_note = note.strip() or None
+    record.absence_recorded_by = actor_id
+    record.absence_recorded_at = utc_now_naive()
+    db.session.commit()
+    return jsonify(record.to_dict()), 201
 
 
 def _claim_session_clock_out(session_id, clock_out_at, note, lat=None, lng=None, within_geofence=None, selfie=None):
@@ -646,6 +709,8 @@ def regularize(record_id):
     record.is_regularized = True
     record.regularization_reason = payload.get("reason", "")
     record.status = "regularized"
+    record.absence_reason = record.absence_note = None
+    record.absence_recorded_by = record.absence_recorded_at = None
     db.session.commit()
     return jsonify(record.to_dict())
 
@@ -858,6 +923,8 @@ def approve_regularization_request(record_id):
     record.regularization_status = "approved"
     record.is_regularized = True
     record.status = "regularized"
+    record.absence_reason = record.absence_note = None
+    record.absence_recorded_by = record.absence_recorded_at = None
     record.regularization_reviewed_by = reviewer_id
     record.regularization_reviewed_at = utc_now_naive()
     record.regularization_review_comment = payload.get("comment")
@@ -1936,6 +2003,9 @@ def manager_edit_day():
     elif not record.is_regularized and parsed:
         still_open = any(x["out"] is None for x in parsed)
         record.status = "present" if (still_open or (record.total_hours or 0) >= 4) else "half_day"
+    if record.status != "absent":
+        record.absence_reason = record.absence_note = None
+        record.absence_recorded_by = record.absence_recorded_at = None
     audit = f"{custom_reason}: {note}" if (custom_reason and note) else (custom_reason or note)
     record.edited_by, record.edited_at, record.edit_note = actor_id, utc_now_naive(), audit[:255]
     settled = _finalize_pending_request(record, actor_id, f"Resolved by direct correction — {audit}")
@@ -2004,6 +2074,8 @@ def manager_regularize_day():
     record.regularization_reviewed_by = actor_id
     record.regularization_reviewed_at = utc_now_naive()
     record.regularization_review_comment = "Regularized directly by the manager."
+    record.absence_reason = record.absence_note = None
+    record.absence_recorded_by = record.absence_recorded_at = None
     record.edited_by, record.edited_at, record.edit_note = actor_id, utc_now_naive(), f"Regularized: {reason.label}"[:255]
     db.session.commit()
 
