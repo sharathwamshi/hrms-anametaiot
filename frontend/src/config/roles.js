@@ -40,32 +40,32 @@ export const ROLE_LABELS = {
 // Which nav items each role sees. Every role gets Dashboard + Profile.
 export const NAV_BY_ROLE = {
   [ROLES.SUPER_ADMIN]: [
-    "dashboard", "employees", "attendance", "leave", "assets", "documents", "profile",
+    "dashboard", "employees", "attendance", "leave", "assets", "insurance", "profile",
   ],
   [ROLES.HR_OPERATIONS]: [
     "dashboard", "employees", "attendance", "leave", "payroll", "recruitment",
     "allCandidates", "recruiters", "vendors", "allPlacements", "announcements",
-    "assets", "documents", "profile",
+    "assets", "insurance", "profile",
   ],
   [ROLES.MANAGER]: [
     "dashboard", "employees", "attendance", "leave", "reports", "recruitment",
-    "allCandidates", "recruiters", "vendors", "allPlacements", "documents", "profile",
+    "allCandidates", "recruiters", "vendors", "allPlacements", "insurance", "profile",
   ],
   [ROLES.FINANCE_ACCOUNTS]: [
     "dashboard", "attendance", "leave", "payroll", "allCandidates", "recruiters",
-    "vendors", "allPlacements", "documents", "profile",
+    "vendors", "allPlacements", "insurance", "profile",
   ],
   [ROLES.OPERATIONS]: [
-    "dashboard", "attendance", "assets", "employees", "vendors", "documents", "profile",
+    "dashboard", "attendance", "assets", "employees", "vendors", "profile",
   ],
   [ROLES.HR_RECRUITER]: [
-    "dashboard", "attendance", "leave", "recruitment", "allCandidates", "documents", "profile",
+    "dashboard", "attendance", "leave", "recruitment", "allCandidates", "profile",
   ],
   [ROLES.EMPLOYEE]: [
-    "home", "myAttendance", "leave", "payslips", "profile", "documents",
+    "home", "myAttendance", "leave", "payslips", "insurance", "profile",
   ],
   [ROLES.CONTRACT_EMPLOYEE]: [
-    "dashboard", "documents", "payroll", "profile",
+    "dashboard", "payroll", "insurance", "profile",
   ],
 };
 
@@ -80,6 +80,7 @@ export const NAV_ITEMS = {
   leave: { path: "/leave", label: "Leave", icon: "\u2708" },
   payroll: { path: "/payroll", label: "Payroll", icon: "\u20B9" },
   payslips: { path: "/payroll", label: "Payslips", icon: "\u20B9" },
+  insurance: { path: "/insurance", label: "Insurance", icon: "\u2665" },
   recruitment: { path: "/recruitment", label: "Recruitment", icon: "\u2605" },
   allCandidates: { path: "/all-candidates", label: "All Candidates", icon: "\u25A4" },
   recruiters: { path: "/recruiters", label: "Recruiters", icon: "\u2691" },
@@ -87,6 +88,5 @@ export const NAV_ITEMS = {
   vendors: { path: "/vendors", label: "Vendors", icon: "\u{1F3E2}" },
   announcements: { path: "/announcements", label: "Announcements", icon: "\u266A" },
   assets: { path: "/assets", label: "Assets", icon: "\u2726" },
-  documents: { path: "/documents", label: "Documents", icon: "\u{1F4C4}" },
   profile: { path: "/profile", label: "My Profile", icon: "\u25CF" },
 };

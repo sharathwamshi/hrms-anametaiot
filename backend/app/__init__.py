@@ -45,6 +45,7 @@ def create_app(config_class=Config):
     from app.routes.offers import bp as offers_bp
     from app.routes.documents import bp as documents_bp
     from app.routes.employee_profile import bp as employee_profile_bp
+    from app.routes.insurance import bp as insurance_bp
     from app.routes.vendors import bp as vendors_bp
     from app.routes.dashboard import bp as dashboard_bp
     from app.routes.misc import bp as misc_bp
@@ -62,6 +63,7 @@ def create_app(config_class=Config):
     app.register_blueprint(offers_bp)
     app.register_blueprint(documents_bp)
     app.register_blueprint(employee_profile_bp)
+    app.register_blueprint(insurance_bp)
     app.register_blueprint(vendors_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(misc_bp)

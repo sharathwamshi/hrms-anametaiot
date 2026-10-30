@@ -13,6 +13,7 @@ from app.models.collab import CandidateAuditLog, CandidateNote
 from app.models.offer import Offer
 from app.models.documents import EmployeeDocument
 from app.models.employee_profile import EmployeeFamilyMember, EmployeeEmergencyCommunication
+from app.models.insurance import InsurancePolicy, InsuranceDocument, InsuranceReminder
 from app.models.vendor import (
     CompanySettings, VendorCompany, Vendor, VendorAgreement, VendorAgreementRole,
     VendorHire, VendorInvoice, VendorInvoiceItem, VendorAgreementReminder,
@@ -37,6 +38,7 @@ __all__ = [
     "Offer",
     "EmployeeDocument",
     "EmployeeFamilyMember", "EmployeeEmergencyCommunication",
+    "InsurancePolicy", "InsuranceDocument", "InsuranceReminder",
     "CompanySettings",
     "VendorCompany", "Vendor", "VendorAgreement", "VendorAgreementRole",
     "VendorHire", "VendorInvoice", "VendorInvoiceItem",

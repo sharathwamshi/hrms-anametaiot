@@ -3,7 +3,7 @@ import os
 import uuid
 from datetime import date
 from flask import Blueprint, request, jsonify, current_app
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 
 from app.extensions import db
 from app.models import SalaryStructure, Payslip, User, Attendance, LeaveRequest, SalaryTemplate, CompanySettings, Holiday
@@ -21,6 +21,22 @@ def get_structure(user_id):
     if not structure:
         return jsonify({"message": "No salary structure defined for this employee."}), 404
     return jsonify(structure.to_dict())
+
+
+@bp.get("/insurance/<int:user_id>")
+@jwt_required()
+def employee_insurance(user_id):
+    actor_id = int(get_jwt_identity())
+    role = get_jwt().get("role")
+    if actor_id != user_id and role not in PAYROLL_ROLES:
+        return jsonify({"message": "You do not have permission to view this insurance information."}), 403
+    user = User.query.get_or_404(user_id)
+    structure = SalaryStructure.query.filter_by(user_id=user.id).first()
+    return jsonify({
+        "user_id": user.id,
+        "insurance": structure.insurance if structure else 0,
+        "effective_from": structure.effective_from.isoformat() if structure and structure.effective_from else None,
+    })
 
 
 @bp.post("/structure/<int:user_id>")

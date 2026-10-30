@@ -1414,6 +1414,38 @@ table.data-table {
   box-shadow: var(--shadow-md);
 }
 
+.insurance-expiry-notice {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 40;
+  width: min(360px, calc(100vw - 32px));
+  padding: 16px 42px 16px 16px;
+  border: 1px solid #f59e0b;
+  border-left: 4px solid #f59e0b;
+  border-radius: var(--radius-md);
+  background: #fffaf0;
+  box-shadow: var(--shadow-md);
+  color: var(--color-text);
+}
+
+.insurance-expiry-notice p {
+  margin: 6px 0 12px;
+  font-size: 13px;
+}
+
+.insurance-expiry-notice-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .employee-detail-tabs {
   display: flex;
   gap: 4px;
