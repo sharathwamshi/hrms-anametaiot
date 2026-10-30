@@ -4,6 +4,16 @@ from app.extensions import db
 
 
 INSURANCE_TYPES = {"health", "life", "accident", "dental", "vision", "travel", "other"}
+DEFAULT_INSURANCE_TYPES = ["health"]
+
+
+class InsuranceTypeSettings(db.Model):
+    __tablename__ = "insurance_type_settings"
+
+    id = db.Column(db.Integer, primary_key=True)
+    available_types = db.Column(db.JSON, nullable=False, default=lambda: DEFAULT_INSURANCE_TYPES.copy())
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class InsurancePolicy(db.Model):
@@ -129,4 +139,3 @@ class InsuranceReminder(db.Model):
 
     policy = db.relationship("InsurancePolicy", backref="reminders")
     recipient = db.relationship("User")
-

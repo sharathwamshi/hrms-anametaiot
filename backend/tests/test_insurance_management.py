@@ -87,6 +87,12 @@ with app.app_context():
     check("expiry reminder task creates reminders", response.status_code == 200 and response.get_json()["created"] >= 1)
     response = client.post("/api/insurance/internal/expiry-reminders", headers={"X-Internal-Secret": TestConfig.INTERNAL_TASK_SECRET})
     check("expiry reminder task prevents duplicate reminders", response.status_code == 200 and response.get_json()["created"] == 0)
+    response = client.delete(f"/api/insurance/{policy_id}", headers=employee_headers)
+    check("employee cannot delete insurance policies", response.status_code == 403)
+    response = client.delete(f"/api/insurance/{policy_id}", headers=finance_headers)
+    check("authorized manager-role user deletes insurance policy", response.status_code == 200)
+    response = client.get("/api/insurance", headers=employee_headers)
+    check("deleted policy is no longer visible", response.status_code == 200 and response.get_json() == [])
 
 print("All insurance management checks passed.")
 _folder.cleanup()

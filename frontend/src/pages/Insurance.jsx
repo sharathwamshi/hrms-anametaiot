@@ -25,6 +25,13 @@ export default function Insurance() {
   const [policies, setPolicies] = useState([]);
   const [summary, setSummary] = useState(null);
   const [employees, setEmployees] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [availableTypes, setAvailableTypes] = useState(["health"]);
+  const [typeSettings, setTypeSettings] = useState(["health"]);
+  const [employeeSearch, setEmployeeSearch] = useState("");
+  const [employeeRole, setEmployeeRole] = useState("");
+  const [employeeDepartment, setEmployeeDepartment] = useState("");
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState(EMPTY);
@@ -37,18 +44,21 @@ export default function Insurance() {
   const [additionalFile, setAdditionalFile] = useState(null);
   const [additionalFileType, setAdditionalFileType] = useState("policy");
   const [preview, setPreview] = useState(null);
+  const [assignmentSuccess, setAssignmentSuccess] = useState(false);
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const requests = [client.get("/insurance")];
-      if (isManager) requests.push(client.get("/insurance/summary"), client.get("/employees"));
+      const requests = [client.get("/insurance"), client.get("/insurance/types")];
+      if (isManager) requests.push(client.get("/insurance/summary"), client.get("/employees/departments"));
       const results = await Promise.all(requests);
       setPolicies(results[0].data);
+      setAvailableTypes(results[1].data.available_types);
+      setTypeSettings(results[1].data.available_types);
       if (isManager) {
-        setSummary(results[1].data);
-        setEmployees(results[2].data);
+        setSummary(results[2].data);
+        setDepartments(results[3].data);
       }
     } catch (err) {
       setError(err?.response?.data?.message || "Could not load insurance records.");
@@ -58,6 +68,47 @@ export default function Insurance() {
   };
 
   useEffect(() => { load(); }, [isManager]);
+
+  const updateTypeSettings = async (event) => {
+    event.preventDefault();
+    try {
+      const { data } = await client.put("/insurance/types", { available_types: typeSettings });
+      setAvailableTypes(data.available_types);
+      setForm((current) => data.available_types.includes(current.insurance_type) ? current : { ...current, insurance_type: data.available_types[0] });
+      setNotice("Insurance types updated.");
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not update insurance types.");
+    }
+  };
+
+  useEffect(() => {
+    if (!isManager || selected) return undefined;
+    const query = employeeSearch.trim();
+    if (query.length < 2 && !employeeRole && !employeeDepartment) {
+      setEmployees([]);
+      return undefined;
+    }
+    let active = true;
+    const timer = setTimeout(async () => {
+      try {
+        const { data } = await client.get("/employees", {
+          params: {
+            q: query || undefined,
+            role: employeeRole || undefined,
+            department_id: employeeDepartment || undefined,
+            status: "active",
+          },
+        });
+        if (active) setEmployees(data);
+      } catch (err) {
+        if (active) setError(err?.response?.data?.message || "Could not search employees.");
+      }
+    }, 250);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [employeeDepartment, employeeRole, employeeSearch, isManager, selected]);
 
   const openPolicy = async (policy) => {
     setSelected(policy);
@@ -71,6 +122,21 @@ export default function Insurance() {
     } catch (err) {
       setError(err?.response?.data?.message || "Could not load insurance documents.");
     }
+  };
+
+  const closePolicy = () => {
+    setSelected(null);
+    setForm(EMPTY);
+    setDocuments([]);
+    setEmployees([]);
+    setEmployeeSearch("");
+    setEmployeeRole("");
+    setEmployeeDepartment("");
+    setSelectedEmployee(null);
+    setFile(null);
+    setFileType("policy");
+    setAdditionalFile(null);
+    setAdditionalFileType("policy");
   };
 
   const filtered = useMemo(() => policies.filter((policy) => {
@@ -124,8 +190,11 @@ export default function Insurance() {
         }
       }
       setNotice("Insurance policy saved.");
-      setSelected(null);
-      setForm(EMPTY);
+      if (!selected) {
+        setAssignmentSuccess(true);
+        window.setTimeout(() => setAssignmentSuccess(false), 4000);
+      }
+      closePolicy();
       setFile(null);
       setFileType("policy");
       await load();
@@ -153,6 +222,19 @@ export default function Insurance() {
       setNotice("Insurance document replaced.");
     } catch (err) {
       setError(err?.response?.data?.message || "Could not replace this document.");
+    }
+  };
+
+  const deletePolicy = async () => {
+    if (!selected || !window.confirm("Delete this insurance policy and its documents? This action cannot be undone.")) return;
+    try {
+      await client.delete(`/insurance/${selected.id}`);
+      closePolicy();
+      setDocuments([]);
+      setNotice("Insurance policy deleted.");
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not delete this insurance policy.");
     }
   };
 
@@ -197,6 +279,12 @@ export default function Insurance() {
 
   return (
     <AppLayout title="Insurance" subtitle={isManager ? "Manage employee insurance policies and documents." : "Your assigned insurance policies."}>
+      {assignmentSuccess && (
+        <div className="insurance-assignment-success" role="status">
+          <span>Insurance assigned successfully.</span>
+          <button type="button" onClick={() => setAssignmentSuccess(false)} aria-label="Close success message">×</button>
+        </div>
+      )}
       {error && <div className="login-error" role="alert">{error}</div>}
       {notice && <p className="muted" role="status">{notice}</p>}
       {isManager && summary && (
@@ -207,6 +295,16 @@ export default function Insurance() {
           <div className="stat-card"><div className="label">Expired policies</div><div className="value">{summary.expired}</div></div>
         </div>
       )}
+      {user.role === ROLES.SUPER_ADMIN && (
+        <form className="card section-gap" onSubmit={updateTypeSettings}>
+          <div className="card-title-row"><h3>Insurance type configuration</h3></div>
+          <p className="muted">Super Admin controls which insurance types are available to insurance administrators.</p>
+          <div className="form-grid">
+            {TYPES.map((type) => <label key={type} className="form-field"><span><input type="checkbox" checked={typeSettings.includes(type)} onChange={(event) => setTypeSettings((current) => event.target.checked ? [...current, type] : current.filter((value) => value !== type))} /> {type}</span></label>)}
+          </div>
+          <button type="submit" className="btn btn-primary">Save insurance types</button>
+        </form>
+      )}
       {loading ? <Loader label="Loading insurance records..." /> : (
         <section className="card">
           <div className="card-title-row">
@@ -214,7 +312,7 @@ export default function Insurance() {
           </div>
           <div className="form-grid" style={{ marginBottom: 14 }}>
             <div className="form-field"><label>{isManager ? "Search employee, provider, or policy" : "Search your insurance details"}</label><input placeholder={isManager ? "Search employee, provider, or policy" : "Search provider, policy number, or member ID"} value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} /></div>
-            <div className="form-field"><label>Insurance type</label><select value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}><option value="">All types</option>{TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></div>
+            <div className="form-field"><label>Insurance type</label><select value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}><option value="">All types</option>{availableTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></div>
             <div className="form-field"><label>Expiry status</label><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option><option value="active">Active</option><option value="expiring_soon">Expiring soon</option><option value="expired">Expired</option><option value="archived">Archived</option></select></div>
           </div>
           <div className="table-wrap"><table className="data-table"><thead><tr><th>Employee</th><th>Type</th><th>Provider</th><th>Policy number</th><th>Expiry</th><th>Status</th><th /></tr></thead><tbody>
@@ -225,24 +323,79 @@ export default function Insurance() {
       )}
       {(isManager || selected) && (
         <section className="card section-gap">
-          <div className="card-title-row"><h3>{selected ? (isManager ? "Edit insurance policy" : "Insurance policy details") : "Assign insurance"}</h3>{selected && <button className="btn btn-outline btn-sm" onClick={() => setSelected(null)}>Close</button>}</div>
+          <div className="card-title-row"><h3>{selected ? (isManager ? "Edit insurance policy" : "Insurance policy details") : "Assign insurance"}</h3>{selected && <button type="button" className="btn btn-outline btn-sm" onClick={closePolicy}>Close</button>}</div>
           <form id="insurance-policy-form" onSubmit={save}>
             <fieldset disabled={!isManager} style={{ border: 0, padding: 0, margin: 0 }}>
             <div className="form-grid">
               <div className="form-field">
                 <label>Employee</label>
                 {isManager ? (
-                  <select required disabled={Boolean(selected)} value={form.employee_id} onChange={(e) => setForm({ ...form, employee_id: e.target.value })}>
-                    <option value="">Select employee</option>
-                    {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name} ({employee.employee_code})</option>)}
-                  </select>
+                  selected ? (
+                    <div className="profile-value">{selected.employee_name} ({selected.employee_code})</div>
+                  ) : (
+                    <>
+                      <input
+                        required
+                        value={selectedEmployee ? `${selectedEmployee.full_name} (${selectedEmployee.employee_code})` : employeeSearch}
+                        placeholder="Search by employee name or number"
+                        onChange={(e) => {
+                          setEmployeeSearch(e.target.value);
+                          setSelectedEmployee(null);
+                          setForm({ ...form, employee_id: "" });
+                        }}
+                      />
+                      <div className="form-grid" style={{ marginTop: 8 }}>
+                        <div className="form-field">
+                          <label>Filter by role</label>
+                          <select value={employeeRole} onChange={(e) => { setEmployeeRole(e.target.value); setSelectedEmployee(null); setForm({ ...form, employee_id: "" }); }}>
+                            <option value="">All roles</option>
+                            <option value={ROLES.EMPLOYEE}>Employee</option>
+                            <option value={ROLES.CONTRACT_EMPLOYEE}>Contract employee</option>
+                            <option value={ROLES.MANAGER}>Manager</option>
+                            <option value={ROLES.HR_OPERATIONS}>HR Operations</option>
+                            <option value={ROLES.FINANCE_ACCOUNTS}>Finance & Accounts</option>
+                          </select>
+                        </div>
+                        <div className="form-field">
+                          <label>Filter by department</label>
+                          <select value={employeeDepartment} onChange={(e) => { setEmployeeDepartment(e.target.value); setSelectedEmployee(null); setForm({ ...form, employee_id: "" }); }}>
+                            <option value="">All departments</option>
+                            {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      {employees.length > 0 && !selectedEmployee && (
+                        <div style={{ border: "1px solid var(--color-border)", borderRadius: 6, marginTop: 4, maxHeight: 180, overflowY: "auto" }}>
+                          {employees.map((employee) => (
+                            <button
+                              type="button"
+                              key={employee.id}
+                              onClick={() => {
+                                setSelectedEmployee(employee);
+                                setEmployeeSearch(employee.full_name);
+                                setEmployees([]);
+                                setForm({ ...form, employee_id: employee.id });
+                              }}
+                              style={{ width: "100%", border: 0, background: "transparent", padding: "8px 10px", cursor: "pointer", textAlign: "left", display: "flex", justifyContent: "space-between" }}
+                            >
+                              <span>{employee.full_name} — {employee.employee_code}</span>
+                              <span className="muted">{employee.department_name || employee.role}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {!selectedEmployee && (employeeSearch.trim().length >= 2 || employeeRole || employeeDepartment) && employees.length === 0 && (
+                        <p className="muted" style={{ marginTop: 6 }}>No matching active employees found.</p>
+                      )}
+                    </>
+                  )
                 ) : (
                   <div className="profile-value">
                     {selected?.employee_name || user.full_name} ({selected?.employee_code || user.employee_code})
                   </div>
                 )}
               </div>
-              <div className="form-field"><label>Insurance type</label><select value={form.insurance_type} onChange={(e) => setForm({ ...form, insurance_type: e.target.value })}>{TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></div>
+              <div className="form-field"><label>Insurance type</label><select value={form.insurance_type} onChange={(e) => setForm({ ...form, insurance_type: e.target.value })}>{availableTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></div>
               <div className="form-field"><label>Provider/company</label><input required value={form.provider_name} onChange={(e) => setForm({ ...form, provider_name: e.target.value })} /></div>
               <div className="form-field"><label>Policy number</label><input required value={form.policy_number} onChange={(e) => setForm({ ...form, policy_number: e.target.value })} /></div>
               <div className="form-field"><label>Member / Insurance ID</label><input value={form.member_id || ""} onChange={(e) => setForm({ ...form, member_id: e.target.value })} /></div>
@@ -256,7 +409,7 @@ export default function Insurance() {
             </div>
             {!selected && (
               <div className="form-grid">
-                <div className="form-field"><label>Insurance document (optional)</label><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={(e) => setFile(e.target.files[0])} /></div>
+                <div className="form-field"><label>Insurance document (optional)</label><input type="file" accept="*/*" onChange={(e) => setFile(e.target.files[0])} /></div>
                 <div className="form-field"><label>Document type</label><select value={fileType} onChange={(e) => setFileType(e.target.value)}><option value="policy">Policy</option><option value="certificate">Certificate</option><option value="insurance_card">Insurance card</option><option value="claim_form">Claim form</option><option value="supporting">Supporting</option><option value="other">Other</option></select></div>
               </div>
             )}
@@ -267,13 +420,16 @@ export default function Insurance() {
           </form>
           {selected && <div style={{ marginTop: 20 }}>
             {isManager && <form onSubmit={uploadAdditionalDocument} className="form-grid" style={{ marginBottom: 18 }}>
-              <div className="form-field"><label>Upload additional document</label><input required type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={(e) => setAdditionalFile(e.target.files[0])} /></div>
+              <div className="form-field"><label>Upload additional document</label><input required type="file" accept="*/*" onChange={(e) => setAdditionalFile(e.target.files[0])} /></div>
               <div className="form-field"><label>Document type</label><select value={additionalFileType} onChange={(e) => setAdditionalFileType(e.target.value)}><option value="policy">Policy</option><option value="certificate">Certificate</option><option value="insurance_card">Insurance card</option><option value="claim_form">Claim form</option><option value="supporting">Supporting</option><option value="other">Other</option></select></div>
               <div className="form-field" style={{ alignSelf: "end" }}><button type="submit" className="btn btn-outline">Upload document</button></div>
             </form>}
             <h4>Policy documents</h4>
-            {documents.filter((document) => document.status === "active").map((document) => <div key={document.id} className="flex-between" style={{ borderTop: "1px solid var(--color-border)", padding: "8px 0" }}><span>{document.original_filename} <span className="muted">({document.document_type})</span></span><span><button className="btn btn-sm btn-outline" onClick={() => viewDocument(document)}>View</button> <button className="btn btn-sm btn-outline" onClick={() => downloadDocument(document)}>Download</button>{isManager && <><label className="btn btn-sm btn-outline" style={{ marginLeft: 6 }}>Replace<input type="file" hidden accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={(e) => replaceDocument(document.id, e.target.files[0])} /></label><button className="btn btn-sm btn-outline" onClick={() => archiveDocument(document.id)}>Archive</button></>}</span></div>)}
-            {isManager && <button type="submit" form="insurance-policy-form" className="btn btn-primary" style={{ marginTop: 14 }}>Save changes</button>}
+            {documents.filter((document) => document.status === "active").map((document) => <div key={document.id} className="flex-between" style={{ borderTop: "1px solid var(--color-border)", padding: "8px 0" }}><span>{document.original_filename} <span className="muted">({document.document_type})</span></span><span><button type="button" className="btn btn-sm btn-outline" onClick={() => viewDocument(document)}>View</button> <button type="button" className="btn btn-sm btn-outline" onClick={() => downloadDocument(document)}>Download</button>{isManager && <><label className="btn btn-sm btn-outline" style={{ marginLeft: 6 }}>Replace<input type="file" hidden accept="*/*" onChange={(e) => replaceDocument(document.id, e.target.files[0])} /></label><button type="button" className="btn btn-sm btn-outline" onClick={() => archiveDocument(document.id)}>Archive</button></>}</span></div>)}
+            {isManager && <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button type="submit" form="insurance-policy-form" className="btn btn-primary">Save changes</button>
+              <button type="button" className="btn btn-outline" onClick={deletePolicy}>Delete policy</button>
+            </div>}
           </div>}
         </section>
       )}
