@@ -5,29 +5,32 @@ import { ROLES } from "../config/roles";
 import { useAuth } from "../context/AuthContext";
 
 export default function InsuranceExpiryNotice() {
-  const { user } = useAuth();
+  const { user, insuranceExpiryNoticeShown, markInsuranceExpiryNoticeShown } = useAuth();
   const [policies, setPolicies] = useState([]);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     if (![ROLES.EMPLOYEE, ROLES.CONTRACT_EMPLOYEE].includes(user?.role)) return undefined;
+    if (insuranceExpiryNoticeShown) return undefined;
     let active = true;
     client.get("/insurance", { params: { status: "expiring_soon" } })
       .then(({ data }) => {
         if (!active || !data.length) return;
         setPolicies(data);
+        markInsuranceExpiryNoticeShown();
         setVisible(true);
       })
       .catch(() => {
         // The insurance page displays API errors; the shared notice is best-effort.
       });
     return () => { active = false; };
-  }, [user?.id, user?.role]);
+  }, [user?.id, user?.role, insuranceExpiryNoticeShown]);
 
   if (!visible || !policies.length) return null;
 
   const dismiss = () => {
     setVisible(false);
+    markInsuranceExpiryNoticeShown();
   };
 
   return (

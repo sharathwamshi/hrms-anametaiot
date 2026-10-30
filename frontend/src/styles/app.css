@@ -1446,6 +1446,35 @@ table.data-table {
   cursor: pointer;
 }
 
+.insurance-assignment-success {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid #abefc6;
+  border-radius: var(--radius-sm);
+  background: #ecfdf3;
+  color: #067647;
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.insurance-assignment-success button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+}
+
 .employee-detail-tabs {
   display: flex;
   gap: 4px;

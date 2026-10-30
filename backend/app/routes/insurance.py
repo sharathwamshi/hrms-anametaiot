@@ -8,23 +8,15 @@ from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.utils import secure_filename
 
 from app.extensions import db
-from app.models import InsuranceDocument, InsurancePolicy, InsuranceReminder, User
-from app.roles import INSURANCE_MANAGEMENT_ROLES
+from app.models import InsuranceDocument, InsurancePolicy, InsuranceReminder, InsuranceTypeSettings, User
+from app.roles import INSURANCE_MANAGEMENT_ROLES, SUPER_ADMIN
 from app.utils.push import send_push
 from app.utils.security import roles_required
 
 bp = Blueprint("insurance", __name__, url_prefix="/api/insurance")
 
-ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx"}
-MIME_TYPES = {
-    ".pdf": "application/pdf",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".doc": "application/msword",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-}
 DOCUMENT_TYPES = {"policy", "certificate", "insurance_card", "claim_form", "supporting", "other"}
+DEFAULT_INSURANCE_TYPES = ["health"]
 
 
 def _actor_id():
@@ -48,11 +40,39 @@ def _authorized_policy(policy_id, management=False):
     return policy, None
 
 
+def _available_insurance_types():
+    settings = InsuranceTypeSettings.query.first()
+    return settings.available_types if settings else DEFAULT_INSURANCE_TYPES
+
+
+@bp.get("/types")
+@jwt_required()
+def list_insurance_types():
+    return jsonify({"available_types": _available_insurance_types()})
+
+
+@bp.put("/types")
+@roles_required(SUPER_ADMIN)
+def update_insurance_types():
+    payload = request.get_json(silent=True) or {}
+    types = payload.get("available_types")
+    if not isinstance(types, list) or not types or any(item not in INSURANCE_TYPES for item in types):
+        return jsonify({"message": "Select at least one valid insurance type."}), 400
+    settings = InsuranceTypeSettings.query.first()
+    if settings is None:
+        settings = InsuranceTypeSettings()
+        db.session.add(settings)
+    settings.available_types = list(dict.fromkeys(types))
+    settings.updated_by = _actor_id()
+    db.session.commit()
+    return jsonify({"available_types": settings.available_types})
+
+
 def _validate_payload(payload, partial=False):
     required = {"employee_id", "insurance_type", "provider_name", "policy_number", "policy_start_date", "policy_expiry_date"}
     if not partial and not required.issubset(payload):
         raise ValueError("employee_id, insurance_type, provider_name, policy_number, policy_start_date, and policy_expiry_date are required.")
-    if "insurance_type" in payload and payload["insurance_type"] not in {"health", "life", "accident", "dental", "vision", "travel", "other"}:
+    if "insurance_type" in payload and payload["insurance_type"] not in _available_insurance_types():
         raise ValueError("Unsupported insurance type.")
     values = {}
     for field in ("employee_id", "insurance_type", "provider_name", "policy_number", "member_id",
@@ -156,6 +176,34 @@ def update_policy(policy_id):
     return jsonify(policy.to_dict(include_internal=True))
 
 
+@bp.delete("/<int:policy_id>")
+@roles_required(*INSURANCE_MANAGEMENT_ROLES)
+def delete_policy(policy_id):
+    policy = InsurancePolicy.query.get_or_404(policy_id)
+    documents = list(policy.documents)
+    for renewal in InsurancePolicy.query.filter_by(renewed_from_id=policy.id).all():
+        renewal.renewed_from_id = None
+    InsuranceReminder.query.filter_by(policy_id=policy.id).delete(synchronize_session=False)
+    for document in documents:
+        document.replaced_by_id = None
+    for document in documents:
+        db.session.delete(document)
+    db.session.delete(policy)
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"message": "Could not delete this insurance policy."}), 500
+    for document in documents:
+        try:
+            os.remove(os.path.join(current_app.config["INSURANCE_DOCUMENT_FOLDER"], document.storage_key))
+        except FileNotFoundError:
+            pass
+        except OSError:
+            current_app.logger.exception("Could not remove deleted insurance document file.")
+    return jsonify({"message": "Insurance policy deleted."})
+
+
 @bp.post("/<int:policy_id>/renew")
 @roles_required(*INSURANCE_MANAGEMENT_ROLES)
 def renew_policy(policy_id):
@@ -198,28 +246,21 @@ def list_policy_documents(policy_id):
 
 def _store_upload(file):
     filename = secure_filename(file.filename)
+    if not filename:
+        raise ValueError("A valid filename is required.")
     extension = os.path.splitext(filename)[1].lower()
-    if extension not in ALLOWED_EXTENSIONS:
-        raise ValueError("Allowed file types are PDF, JPG, PNG, DOC, and DOCX.")
     limit = current_app.config["MAX_INSURANCE_DOCUMENT_BYTES"]
     content = file.stream.read(limit + 1)
     file.stream.seek(0)
     if not content or len(content) > limit:
         raise ValueError(f"Files must be non-empty and {limit // (1024 * 1024)} MB or smaller.")
-    signatures = {
-        ".pdf": content.startswith(b"%PDF-"), ".jpg": content.startswith(b"\xff\xd8\xff"),
-        ".jpeg": content.startswith(b"\xff\xd8\xff"), ".png": content.startswith(b"\x89PNG\r\n\x1a\n"),
-        ".doc": content.startswith(bytes.fromhex("D0CF11E0A1B11AE1")), ".docx": content.startswith(b"PK\x03\x04"),
-    }
-    if not signatures[extension]:
-        raise ValueError("The file contents do not match the selected file type.")
-    key = f"{uuid.uuid4().hex}{extension}"
+    key = f"{uuid.uuid4().hex}{extension[:20]}"
     folder = current_app.config["INSURANCE_DOCUMENT_FOLDER"]
     path = os.path.join(folder, key)
     os.makedirs(folder, exist_ok=True)
     with open(path, "wb") as saved:
         saved.write(content)
-    return key, filename, MIME_TYPES[extension], len(content)
+    return key, filename, file.mimetype or "application/octet-stream", len(content)
 
 
 @bp.post("/<int:policy_id>/documents")
@@ -335,4 +376,3 @@ def run_expiry_reminders():
             sent += int(delivered)
     db.session.commit()
     return jsonify({"policies": len(policies), "created": created, "sent": sent})
-

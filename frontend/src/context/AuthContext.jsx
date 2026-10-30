@@ -8,6 +8,7 @@ export function AuthProvider({ children }) {
   const [roleLabel, setRoleLabel] = useState("");
   const [hasClockInOut, setHasClockInOut] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [insuranceExpiryNoticeShown, setInsuranceExpiryNoticeShown] = useState(false);
 
   const hydrate = useCallback(async () => {
     const token = localStorage.getItem("hrms_token");
@@ -18,6 +19,7 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await client.get("/auth/me");
       setUser(data.user);
+      setInsuranceExpiryNoticeShown(false);
       setRoleLabel(data.role_label);
       setHasClockInOut(data.has_clock_in_out);
     } catch (e) {
@@ -35,6 +37,7 @@ export function AuthProvider({ children }) {
     const { data } = await client.post("/auth/login", { email, password });
     localStorage.setItem("hrms_token", data.access_token);
     setUser(data.user);
+    setInsuranceExpiryNoticeShown(false);
     setRoleLabel(data.role_label);
     setHasClockInOut(data.has_clock_in_out);
     return data;
@@ -43,10 +46,15 @@ export function AuthProvider({ children }) {
   const logout = () => {
     localStorage.removeItem("hrms_token");
     setUser(null);
+    setInsuranceExpiryNoticeShown(false);
   };
 
   return (
-    <AuthContext.Provider value={{ user, roleLabel, hasClockInOut, loading, login, logout, setUser }}>
+    <AuthContext.Provider value={{
+      user, roleLabel, hasClockInOut, loading, login, logout, setUser,
+      insuranceExpiryNoticeShown,
+      markInsuranceExpiryNoticeShown: () => setInsuranceExpiryNoticeShown(true),
+    }}>
       {children}
     </AuthContext.Provider>
   );

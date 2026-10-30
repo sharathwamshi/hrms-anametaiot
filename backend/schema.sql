@@ -388,6 +388,15 @@ CREATE TABLE insurance_policies (
 	FOREIGN KEY(updated_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE insurance_type_settings (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	available_types JSON NOT NULL,
+	updated_by INTEGER,
+	updated_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(updated_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
 CREATE TABLE insurance_documents (
 	id INTEGER NOT NULL AUTO_INCREMENT,
 	policy_id INTEGER NOT NULL,
