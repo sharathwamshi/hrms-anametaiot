@@ -20,6 +20,7 @@ import MockTestTake from "./pages/MockTestTake";
 import Announcements from "./pages/Announcements";
 import Assets from "./pages/Assets";
 import Profile from "./pages/Profile";
+import Insurance from "./pages/Insurance";
 
 import { ROLES } from "./config/roles";
 
@@ -161,6 +162,7 @@ export default function App() {
       />
 
       <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+      <Route path="/insurance" element={<ProtectedRoute><Insurance /></ProtectedRoute>} />
       <Route path="/documents" element={<ProtectedRoute><Navigate to="/profile#documents" replace /></ProtectedRoute>} />
     </Routes>
   );

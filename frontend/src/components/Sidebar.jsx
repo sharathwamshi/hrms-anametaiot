@@ -6,7 +6,7 @@ import { NAV_BY_ROLE, NAV_ITEMS } from "../config/roles";
 const STORAGE_KEY = "hrms_sidebar_collapsed";
 
 export default function Sidebar() {
-  const { user, roleLabel, logout } = useAuth();
+  const { user, roleLabel } = useAuth();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(STORAGE_KEY) === "1");
 
@@ -63,10 +63,6 @@ export default function Sidebar() {
             <span className="label">{item.label}</span>
           </NavLink>
         ))}
-        <button type="button" className="sidebar-link sidebar-logout-link" onClick={logout}>
-          <span className="icon">{"\u21AA"}</span>
-          <span className="label">Logout</span>
-        </button>
       </nav>
 
       <div className="sidebar-footer">
