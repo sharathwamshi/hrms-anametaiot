@@ -90,6 +90,8 @@ def create_app(config_class=Config):
         # Vendor agreement PDFs must not be served through this public route.
         if "vendor_agreements" in path_parts:
             return jsonify({"message": "Resource not found."}), 404
+        if "payslips" in path_parts:
+            return jsonify({"message": "Payslips require authenticated access."}), 404
 
         return send_from_directory(app.config["UPLOAD_FOLDER"], filepath)
 

@@ -9,10 +9,11 @@ import { ROLES, ROLE_LABELS } from "../config/roles";
 import { DESIGNATION_OPTIONS } from "../config/employeeOptions";
 import EmployeeDetailModal from "../components/EmployeeDetailModal";
 import ManagerSelector from "../components/ManagerSelector";
+import { PAYROLL_COMPANIES } from "../config/companies";
 
 const emptyForm = {
   employee_code: "", full_name: "", email: "", password: "", role: ROLES.EMPLOYEE,
-  designation: "", department_id: "", date_of_joining: "", annual_ctc: "", manager_id: "",
+  company_name: PAYROLL_COMPANIES[1], designation: "", department_id: "", date_of_joining: "", annual_ctc: "", manager_id: "",
 };
 
 export default function Employees() {
@@ -29,6 +30,7 @@ export default function Employees() {
   const [managerLoadError, setManagerLoadError] = useState("");
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
@@ -40,6 +42,7 @@ export default function Employees() {
     const params = {};
     if (query) params.q = query;
     if (removed) params.status = "removed";
+    if (!removed && companyFilter) params.company_name = companyFilter;
     const requestsPromise = !removed && (isHrOps || isManager)
       ? client.get("/employees", { params: { status: "resignation_pending", ...(query ? { q: query } : {}) } })
       : Promise.resolve({ data: [] });
@@ -135,6 +138,25 @@ export default function Employees() {
             />
             <button type="submit" className="btn btn-outline btn-sm">Search</button>
           </form>
+          {!showRemoved && (
+            <select
+              aria-label="Filter employees by company"
+              value={companyFilter}
+              onChange={(event) => {
+                setCompanyFilter(event.target.value);
+                const params = event.target.value ? { company_name: event.target.value, ...(q ? { q } : {}) } : (q ? { q } : {});
+                setLoading(true);
+                client.get("/employees", { params })
+                  .then(({ data }) => setEmployees(data))
+                  .catch((err) => setError(err?.response?.data?.message || "Could not filter employees."))
+                  .finally(() => setLoading(false));
+              }}
+              style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" }}
+            >
+              <option value="">All companies</option>
+              {PAYROLL_COMPANIES.map((company) => <option key={company}>{company}</option>)}
+            </select>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
             <ExportButton filename={showRemoved ? "Removed_Employees" : "Employees"} title="Employees" />
             {canOnboard && (
@@ -161,12 +183,12 @@ export default function Employees() {
                 {showRemoved ? (
                   <tr><th>Code</th><th>Name</th><th>Role</th><th>Removed on</th><th>Removed by</th><th>Reason</th><th></th></tr>
                 ) : (
-                  <tr><th>Code</th><th>Name</th><th>Role</th><th>Department</th><th>Designation</th><th>Manager</th><th>Status</th></tr>
+                  <tr><th>Code</th><th>Name</th><th>Role</th><th>Department</th><th>Company</th><th>Designation</th><th>Manager</th><th>Status</th></tr>
                 )}
               </thead>
               <tbody>
                 {employees.length === 0 && (
-                  <tr className="empty-row"><td colSpan={7}>{showRemoved ? "No removed employees." : "No employees found."}</td></tr>
+                  <tr className="empty-row"><td colSpan={showRemoved ? 7 : 8}>{showRemoved ? "No removed employees." : "No employees found."}</td></tr>
                 )}
                 {employees.map((emp) => (
                   <tr key={emp.id} onClick={() => setSelectedEmployeeId(emp.id)} style={{ cursor: "pointer" }}>
@@ -183,6 +205,7 @@ export default function Employees() {
                     ) : (
                       <>
                         <td>{emp.department || "—"}</td>
+                        <td><span className="company-badge">{emp.company_name || "Acknowledger First Pvt Ltd"}</span></td>
                         <td>{emp.designation || "—"}</td>
                         <td>{emp.manager_name || "—"}</td>
                         <td><Badge status={emp.is_active ? "present" : "absent"} /></td>
@@ -274,6 +297,12 @@ export default function Employees() {
                     {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>
                 </div>
+              </div>
+              <div className="form-field">
+                <label>Company</label>
+                <select value={form.company_name} onChange={(e) => setForm({ ...form, company_name: e.target.value })}>
+                  {PAYROLL_COMPANIES.map((company) => <option key={company}>{company}</option>)}
+                </select>
               </div>
               <div className="form-grid">
                 <div className="form-field">

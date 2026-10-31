@@ -55,7 +55,7 @@ with app.app_context():
        g.status_code == 200 and {p['user_id'] for p in g.get_json()} == {rec.id, mgr.id}, g.get_json())
     b = c.get('/api/payroll/coverage?month=6&year=2026', headers=F).get_json()
     by = {p['full_name']: p for p in b['people']}
-    ok("coverage reflects processed payslips", by["Sneha Recruiter"]['payroll_state']=="processed" and b['summary']['payslips_processed']==2, b['summary'])
+    ok("generated payslips remain drafts until Finance publishes", by["Sneha Recruiter"]['payroll_state']=="draft" and b['summary']['payslips_draft']==2, b['summary'])
     r = c.post(f"/api/payroll/payslips/{by['Sneha Recruiter']['payslip_id']}/mark-paid", headers=F)
     b = c.get('/api/payroll/coverage?month=6&year=2026', headers=F).get_json()
     ok("marking the recruiter's payslip paid shows as paid", {p['full_name']:p for p in b['people']}["Sneha Recruiter"]['payroll_state']=="paid" and b['summary']['payslips_paid']==1, b['summary'])

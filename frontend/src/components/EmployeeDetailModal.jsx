@@ -12,6 +12,7 @@ import { useAuth } from "../context/AuthContext";
 import { ROLES, ROLE_LABELS } from "../config/roles";
 import { DESIGNATION_OPTIONS } from "../config/employeeOptions";
 import ManagerSelector from "./ManagerSelector";
+import { PAYROLL_COMPANIES } from "../config/companies";
 
 export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) {
   const { user } = useAuth();
@@ -73,6 +74,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
       phone: snapRes.data.employee.phone || "",
       designation: snapRes.data.employee.designation || "",
       role: snapRes.data.employee.role,
+      company_name: snapRes.data.employee.company_name || PAYROLL_COMPANIES[1],
       manager_id: snapRes.data.employee.manager_id ? String(snapRes.data.employee.manager_id) : "",
       ...ctcFormValue,
     });
@@ -379,6 +381,7 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
               <div><span className="muted">Email</span><div>{emp.email}</div></div>
               <div><span className="muted">Phone</span><div>{emp.phone || "—"}</div></div>
               <div><span className="muted">Designation</span><div>{emp.designation || "—"}</div></div>
+              <div><span className="muted">Company</span><div>{emp.company_name || PAYROLL_COMPANIES[1]}</div></div>
               <div><span className="muted">Manager</span><div>{emp.manager_name || "—"}</div></div>
               {canManageCtc && ctcLoaded && (
                 <div><span className="muted">Annual CTC</span><div>{form.annual_ctc === "" ? "—" : `₹${Number(form.annual_ctc).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</div></div>
@@ -417,6 +420,18 @@ export default function EmployeeDetailModal({ employeeId, onClose, onChanged }) 
                   </select>
                 </div>
               </div>
+              {canManage && (
+                <div className="form-field">
+                  <label htmlFor={`edit-employee-company-${employeeId}`}>Company</label>
+                  <select
+                    id={`edit-employee-company-${employeeId}`}
+                    value={form.company_name}
+                    onChange={(e) => setForm({ ...form, company_name: e.target.value })}
+                  >
+                    {PAYROLL_COMPANIES.map((company) => <option key={company}>{company}</option>)}
+                  </select>
+                </div>
+              )}
               {canManageCtc && ctcLoaded && (
                 <div className="form-field">
                   <label htmlFor="edit-employee-annual-ctc">Annual CTC (₹)</label>

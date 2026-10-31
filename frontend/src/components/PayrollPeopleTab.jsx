@@ -9,7 +9,10 @@ const inputStyle = { border: "1px solid var(--color-border)", borderRadius: 6, p
 const STATE = {
   missing: { label: "Not set up", cls: "orange" },
   set: { label: "Ready", cls: "blue" },
+  draft: { label: "Draft", cls: "orange" },
   processed: { label: "Payslip processed", cls: "blue" },
+  published: { label: "Published", cls: "green" },
+  updated: { label: "Updated", cls: "blue" },
   paid: { label: "Paid", cls: "green" },
 };
 
@@ -75,7 +78,7 @@ export default function PayrollPeopleTab({ month, year, version, onSetStructure,
           <tbody>
             {data.people.length === 0 && <tr className="empty-row"><td colSpan={8}>No one matches these filters.</td></tr>}
             {data.people.map((p) => {
-              const st = STATE[p.payroll_state];
+              const st = STATE[p.payroll_state] || STATE.missing;
               return (
                 <tr key={p.id}>
                   <td><strong>{p.full_name}</strong><div className="muted" style={{ fontSize: 11 }}>{p.employee_code}{p.designation ? ` · ${p.designation}` : ""}</div></td>

@@ -53,6 +53,10 @@ class Config:
         os.path.join(basedir, "app", "private_uploads", "insurance_documents"),
     )
     MAX_INSURANCE_DOCUMENT_BYTES = 10 * 1024 * 1024
+    PAYSLIP_FOLDER = os.environ.get(
+        "PAYSLIP_FOLDER", os.path.join(basedir, "app", "private_uploads", "payslips"),
+    )
+    MAX_PAYSLIP_BYTES = 10 * 1024 * 1024
 
     COMPANY_NAME = os.environ.get("COMPANY_NAME", "AnametaIOT HRMS")
     POWERED_BY = os.environ.get("POWERED_BY", "+veGroww")

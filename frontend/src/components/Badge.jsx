@@ -3,6 +3,8 @@ const MAP = {
   approved: "badge-success",
   active: "badge-success",
   paid: "badge-success",
+  published: "badge-success",
+  updated: "badge-warning",
   hired: "badge-success",
   selected: "badge-success",
   open: "badge-success",

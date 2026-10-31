@@ -1933,3 +1933,33 @@ table.data-table {
   .dashboard-metric-grid, .dashboard-metric-grid.employee, .dashboard-detail-metrics { grid-template-columns: 1fr; }
   .dashboard-selected-day { align-items: flex-start; flex-direction: column; }
 }
+
+.payslip-editor { max-width: 1120px; margin-inline: auto; }
+.payslip-editor > .card-title-row { align-items: flex-start; margin-bottom: 22px; }
+.payslip-editor h2 { margin: 0 0 5px; }
+.payslip-editor h3 { margin: 0 0 14px; }
+.payslip-editor-section { border: 1px solid var(--color-border); border-radius: 10px; padding: 18px; margin: 16px 0; }
+.payslip-employee-summary { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 12px 14px; margin-bottom: 16px; border-radius: 8px; background: #f5f7fb; }
+.payslip-components-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.payslip-component-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, 150px) auto; gap: 8px; margin: 10px 0; }
+.payslip-component-row input { min-width: 0; width: 100%; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 6px; }
+.payslip-net-summary { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; padding: 15px 18px; border-radius: 8px; background: #173a63; color: white; }
+.payslip-editor-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.payslip-employee-results { max-height: 220px; overflow-y: auto; border: 1px solid var(--color-border); border-radius: 8px; }
+.payslip-employee-results button { display: flex; justify-content: space-between; gap: 12px; width: 100%; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--color-border); background: white; text-align: left; cursor: pointer; }
+.payslip-employee-results button:last-child { border-bottom: 0; }
+.payslip-employee-results button:hover { background: #f5f8fc; }
+.company-badge { display: inline-block; max-width: 220px; padding: 4px 8px; border: 1px solid #d6dfeb; border-radius: 999px; background: #f5f8fc; color: var(--color-navy-800); font-size: 11.5px; line-height: 1.35; white-space: normal; }
+.payslip-uploaded-file { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 8px; background: #f8fafc; }
+
+@media (max-width: 720px) {
+  .payslip-components-grid { grid-template-columns: 1fr; }
+  .payslip-editor-section { padding: 14px; }
+  .payslip-editor > .card-title-row { flex-direction: column; }
+  .payslip-editor-actions { justify-content: flex-start; }
+}
+
+@media (max-width: 460px) {
+  .payslip-component-row { grid-template-columns: minmax(0, 1fr) 100px; }
+  .payslip-component-row button { grid-column: 1 / -1; justify-self: start; }
+}
