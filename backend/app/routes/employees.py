@@ -6,6 +6,7 @@ from app.extensions import db
 from app.models import User, Department, DeviceToken, LeaveRequest, SalaryStructure
 from app.models.leave import ensure_leave_balances
 from app.utils.compensation import normalize_annual_ctc
+from app.utils.companies import PAYROLL_COMPANIES
 from app.utils.security import roles_required
 from app.roles import ADMIN_ROLES, ALL_ROLES, HR_OPERATIONS, HR_RECRUITER, MANAGER, SUPER_ADMIN
 from sqlalchemy.exc import SQLAlchemyError
@@ -85,6 +86,9 @@ def list_employees():
     department_id = request.args.get("department_id", type=int)
     role = request.args.get("role")
     status = request.args.get("status")
+    company_name = request.args.get("company_name")
+    if company_name and company_name not in PAYROLL_COMPANIES:
+        return jsonify({"message": "Select one of the supported companies."}), 400
 
     if status == "removed":
         # Removed people: HR Operations sees everyone's, a Manager only their own reports'.
@@ -116,6 +120,8 @@ def list_employees():
         query = query.filter_by(department_id=department_id)
     if role:
         query = query.filter_by(role=role)
+    if company_name:
+        query = query.filter_by(company_name=company_name)
 
     if status == "removed":
         rows = query.order_by(User.removed_at.desc(), User.full_name.asc()).all()
@@ -193,6 +199,9 @@ def create_employee():
         return jsonify({"message": "Invalid role."}), 400
     if payload["role"] == SUPER_ADMIN and claims.get("role") != SUPER_ADMIN:
         return jsonify({"message": "Only a Super Admin can create another Super Admin."}), 403
+    company_name = payload.get("company_name")
+    if company_name is not None and company_name not in PAYROLL_COMPANIES:
+        return jsonify({"message": "Select one of the supported companies."}), 400
 
     if User.query.filter_by(email=payload["email"].lower()).first():
         return jsonify({"message": "Email already in use."}), 409
@@ -206,6 +215,7 @@ def create_employee():
         email=payload["email"].lower(),
         phone=payload.get("phone"),
         role=payload["role"],
+        company_name=company_name or "Acknowledger First Pvt Ltd",
         designation=payload.get("designation"),
         department_id=payload.get("department_id"),
         manager_id=manager_id,
@@ -261,9 +271,12 @@ def update_employee(emp_id):
     if is_manager:
         if user.manager_id != actor_id:
             return jsonify({"message": "You can only edit your own direct reports."}), 403
-        editable_fields = ["full_name", "phone", "designation", "role"]
+        editable_fields = ["full_name", "phone", "designation", "role", "company_name"]
     else:
-        editable_fields = ["full_name", "phone", "designation", "department_id", "manager_id", "role"]
+        editable_fields = ["full_name", "phone", "designation", "department_id", "manager_id", "role", "company_name"]
+
+    if "company_name" in payload and payload["company_name"] not in PAYROLL_COMPANIES:
+        return jsonify({"message": "Select one of the supported companies."}), 400
 
     manager_id = None
     if not is_manager and "manager_id" in payload:

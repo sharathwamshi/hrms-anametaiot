@@ -120,7 +120,7 @@ with app.app_context():
     matching = [p for p in r.get_json() if p['user_id'] == emp.id]
     ok("employee's payslip generated with a PDF", len(matching) == 1 and matching[0]['pdf_path'] is not None, matching)
     import os
-    pdf_path = matching[0]['pdf_path'].replace('/static/uploads/', 'app/static/uploads/')
+    pdf_path = os.path.join(app.config["PAYSLIP_FOLDER"], matching[0]['pdf_path'])
     ok("payslip PDF actually exists on disk", os.path.exists(pdf_path), pdf_path)
 
 print("\nALL PERMISSIONS / PAYROLL TEMPLATE / VENDOR-CREATE SMOKE TESTS PASSED")

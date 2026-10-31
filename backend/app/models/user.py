@@ -34,6 +34,11 @@ class User(db.Model):
     uan = db.Column(db.String(12), nullable=True)
 
     role = db.Column(db.String(30), nullable=False)  # see app/roles.py
+    company_name = db.Column(
+        db.String(150), nullable=False,
+        default="Acknowledger First Pvt Ltd",
+        server_default="Acknowledger First Pvt Ltd",
+    )
     designation = db.Column(db.String(120))
     department_id = db.Column(db.Integer, db.ForeignKey("departments.id"))
     department = db.relationship("Department", back_populates="employees")
@@ -91,6 +96,7 @@ class User(db.Model):
             "email": self.email,
             "phone": self.phone,
             "role": self.role,
+            "company_name": self.company_name,
             "designation": self.designation,
             "department": self.department.name if self.department else None,
             "department_id": self.department_id,

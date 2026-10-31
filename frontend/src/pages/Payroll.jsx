@@ -8,8 +8,9 @@ import PayslipDetailModal from "../components/PayslipDetailModal";
 import PayrollPeopleTab from "../components/PayrollPeopleTab";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, ROLE_LABELS } from "../config/roles";
+import { PAYROLL_COMPANIES } from "../config/companies";
 
-const PAYROLL_ADMIN_ROLES = [ROLES.FINANCE_ACCOUNTS, ROLES.HR_OPERATIONS];
+const PAYROLL_ADMIN_ROLES = [ROLES.FINANCE_ACCOUNTS];
 const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 const EMPTY_TEMPLATE = {
@@ -26,8 +27,8 @@ export default function Payroll() {
   const [allPayslips, setAllPayslips] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [month, setMonth] = useState(new Date().getMonth() + 1);
-  const [year, setYear] = useState(new Date().getFullYear());
+  const [month, setMonth] = useState(user.role === ROLES.FINANCE_ACCOUNTS ? new Date().getMonth() + 1 : "");
+  const [year, setYear] = useState(user.role === ROLES.FINANCE_ACCOUNTS ? new Date().getFullYear() : "");
   const [structureModal, setStructureModal] = useState(false);
   const [empQuery, setEmpQuery] = useState("");
   const [empResults, setEmpResults] = useState([]);
@@ -40,14 +41,20 @@ export default function Payroll() {
   const [selectedPayslip, setSelectedPayslip] = useState(null);
   const [coverage, setCoverage] = useState(null);
   const [coverageVersion, setCoverageVersion] = useState(0);
+  const [companyFilter, setCompanyFilter] = useState("");
 
   const load = async () => {
     setLoading(true);
-    if (isAdmin) {
-      const { data } = await client.get("/payroll/payslips");
+    const params = {
+      ...(month ? { month } : {}),
+      ...(year ? { year } : {}),
+      ...(companyFilter ? { company_name: companyFilter } : {}),
+    };
+    if (user.role !== ROLES.EMPLOYEE) {
+      const { data } = await client.get("/payroll/payslips", { params });
       setAllPayslips(data);
     } else {
-      const { data } = await client.get(`/payroll/payslips/${user.id}`);
+      const { data } = await client.get(`/payroll/payslips/${user.id}`, { params });
       setMyPayslips(data);
     }
     setLoading(false);
@@ -56,7 +63,7 @@ export default function Payroll() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isAdmin, user.id, user.role, month, year, companyFilter]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -72,11 +79,6 @@ export default function Payroll() {
     } finally {
       setGenerating(false);
     }
-  };
-
-  const markPaid = async (id) => {
-    await client.post(`/payroll/payslips/${id}/mark-paid`);
-    load();
   };
 
   const searchEmployees = async (q) => {
@@ -123,7 +125,7 @@ export default function Payroll() {
   };
 
   return (
-    <AppLayout title="Payroll" subtitle={isAdmin ? "Salary templates, payslip generation and disbursement." : "Your payslip history."}>
+    <AppLayout title="Payroll" subtitle={isAdmin ? "Company payslips, salary templates and payroll." : user.role === ROLES.EMPLOYEE ? "Your published payslip history." : "Published payslips · View only"}>
       {isAdmin && (
         <div className="tag-list section-gap">
           <button className={`btn btn-sm ${tab === "payslips" ? "btn-primary" : "btn-outline"}`} onClick={() => setTab("payslips")}>Payslips</button>
@@ -172,9 +174,53 @@ export default function Payroll() {
             </div>
           )}
 
-          <div className="card">
-            <div className="card-title-row"><h3>{isAdmin ? "All Payslips" : "My Payslips"}</h3><ExportButton filename={isAdmin ? "All_Payslips" : "My_Payslips"} /></div>
+          {isAdmin && (
+            <div className="card section-gap">
+              <div className="card-title-row">
+                <h3>Published Payslips</h3>
+                <span className="muted">View-only · manage drafts in Payslip Management</span>
+              </div>
+              {loading ? <Loader /> : (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead><tr><th>Employee</th><th>Month</th><th>Present</th><th>LOP Days</th><th>Gross</th><th>Deductions</th><th>Net Pay</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {allPayslips.filter((payslip) => ["published", "updated", "paid"].includes(payslip.status)).length === 0 && (
+                        <tr className="empty-row"><td colSpan={8}>No published payslips found.</td></tr>
+                      )}
+                      {allPayslips.filter((payslip) => ["published", "updated", "paid"].includes(payslip.status)).map((payslip) => (
+                        <tr key={payslip.id} onClick={() => setSelectedPayslip(payslip)} style={{ cursor: "pointer" }}>
+                          <td>{payslip.employee_name}</td>
+                          <td>{MONTH_NAMES[payslip.month - 1]} {payslip.year}</td>
+                          <td>{payslip.days_present}</td>
+                          <td>{payslip.lop_days}</td>
+                          <td>₹{Number(payslip.gross_earnings || 0).toLocaleString("en-IN")}</td>
+                          <td>₹{Number(payslip.total_deductions || 0).toLocaleString("en-IN")}</td>
+                          <td><strong>₹{Number(payslip.net_pay || 0).toLocaleString("en-IN")}</strong></td>
+                          <td><Badge status={payslip.status} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isAdmin && <div className="card">
+            <div className="card-title-row"><h3>{user.role === ROLES.EMPLOYEE ? "My Payslips" : "Published Payslips"}</h3><ExportButton filename={user.role === ROLES.EMPLOYEE ? "My_Payslips" : "Published_Payslips"} /></div>
             <p className="muted" style={{ fontSize: 11.5, marginTop: -8, marginBottom: 12 }}>Click a row to view, print, or download a full payslip.</p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} style={inputStyle}>
+                <option value="">All companies</option>
+                {PAYROLL_COMPANIES.map((name) => <option key={name}>{name}</option>)}
+              </select>
+              <select value={month} onChange={(e) => setMonth(e.target.value ? Number(e.target.value) : "")} style={inputStyle}>
+                <option value="">All months</option>
+                {MONTH_NAMES.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}
+              </select>
+              <input type="number" value={year} onChange={(e) => setYear(e.target.value ? Number(e.target.value) : "")} placeholder="All years" style={{ ...inputStyle, width: 120 }} />
+            </div>
             {loading ? (
               <Loader />
             ) : (
@@ -182,42 +228,31 @@ export default function Payroll() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      {isAdmin && <th>Employee</th>}
+                      {user.role !== ROLES.EMPLOYEE && <th>Employee</th>}
                       <th>Month</th><th>Present</th><th>LOP Days</th><th>Gross</th><th>Deductions</th><th>Net Pay</th><th>Status</th>
-                      {isAdmin && <th>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {(isAdmin ? allPayslips : myPayslips).length === 0 && (
-                      <tr className="empty-row"><td colSpan={isAdmin ? 9 : 7}>No payslips found.</td></tr>
+                    {(user.role === ROLES.EMPLOYEE ? myPayslips : allPayslips).length === 0 && (
+                      <tr className="empty-row"><td colSpan={user.role === ROLES.EMPLOYEE ? 7 : 8}>No published payslips found.</td></tr>
                     )}
-                    {(isAdmin ? allPayslips : myPayslips).map((p) => (
+                    {(user.role === ROLES.EMPLOYEE ? myPayslips : allPayslips).map((p) => (
                       <tr key={p.id} onClick={() => setSelectedPayslip(p)} style={{ cursor: "pointer" }}>
-                        {isAdmin && <td>{p.employee_name}</td>}
+                        {user.role !== ROLES.EMPLOYEE && <td>{p.employee_name}</td>}
                         <td>{MONTH_NAMES[p.month - 1]} {p.year}</td>
                         <td>{p.days_present}</td>
                         <td>{p.lop_days}</td>
-                        <td>₹{p.gross_earnings.toLocaleString("en-IN")}</td>
-                        <td>₹{p.total_deductions.toLocaleString("en-IN")}</td>
-                        <td><strong>₹{p.net_pay.toLocaleString("en-IN")}</strong></td>
+                        <td>₹{Number(p.gross_earnings || 0).toLocaleString("en-IN")}</td>
+                        <td>₹{Number(p.total_deductions || 0).toLocaleString("en-IN")}</td>
+                        <td><strong>₹{Number(p.net_pay || 0).toLocaleString("en-IN")}</strong></td>
                         <td><Badge status={p.status} /></td>
-                        {isAdmin && (
-                          <td onClick={(e) => e.stopPropagation()}>
-                            <div style={{ display: "flex", gap: 6 }}>
-                              {p.pdf_path && <a className="btn btn-sm btn-outline" href={p.pdf_path} target="_blank" rel="noreferrer">PDF</a>}
-                              {p.status === "processed" && (
-                                <button className="btn btn-sm btn-success" onClick={() => markPaid(p.id)}>Mark Paid</button>
-                              )}
-                            </div>
-                          </td>
-                        )}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
-          </div>
+          </div>}
         </>
       )}
 

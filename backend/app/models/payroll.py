@@ -1,5 +1,6 @@
 from datetime import datetime
 from app.extensions import db
+from sqlalchemy import JSON
 
 
 class SalaryStructure(db.Model):
@@ -84,10 +85,24 @@ class Payslip(db.Model):
     pdf_path = db.Column(db.String(255), nullable=True)
     generated_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     generated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    company_name = db.Column(db.String(150), nullable=True)
+    employee_info = db.Column(JSON, nullable=True)
+    earnings = db.Column(JSON, nullable=True)
+    deductions = db.Column(JSON, nullable=True)
+    total_working_days = db.Column(db.Float, nullable=True)
+    total_paid_days = db.Column(db.Float, nullable=True)
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    updated_at = db.Column(db.DateTime, nullable=True)
+    published_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    published_at = db.Column(db.DateTime, nullable=True)
+    pdf_is_uploaded = db.Column(db.Boolean, nullable=False, default=False, server_default="0")
+    pdf_filename = db.Column(db.String(255), nullable=True)
 
     user = db.relationship("User", foreign_keys=[user_id], backref="payslips")
 
     def to_dict(self):
+        from app.utils.number_to_words import number_to_words_inr
+
         return {
             "id": self.id,
             "user_id": self.user_id,
@@ -100,6 +115,21 @@ class Payslip(db.Model):
             "gross_earnings": self.gross_earnings,
             "total_deductions": self.total_deductions,
             "net_pay": self.net_pay,
+            "amount_in_words": number_to_words_inr(self.net_pay or 0),
             "status": self.status,
             "pdf_path": self.pdf_path,
+            "company_name": self.company_name or (self.user.company_name if self.user else None),
+            "employee_info": self.employee_info or {},
+            "earnings": self.earnings or [],
+            "deductions": self.deductions or [],
+            "total_working_days": self.total_working_days or 0,
+            "total_paid_days": self.total_paid_days or 0,
+            "created_by": self.generated_by,
+            "updated_by": self.updated_by,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "published_by": self.published_by,
+            "published_at": self.published_at.isoformat() if self.published_at else None,
+            "pdf_is_uploaded": bool(self.pdf_is_uploaded),
+            "pdf_filename": self.pdf_filename,
+            "pdf_url": f"/api/payroll/payslips/{self.id}/pdf" if self.pdf_path else None,
         }

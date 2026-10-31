@@ -48,18 +48,18 @@ export const NAV_BY_ROLE = {
     "assets", "insurance", "profile",
   ],
   [ROLES.MANAGER]: [
-    "dashboard", "employees", "attendance", "leave", "reports", "recruitment",
+    "dashboard", "employees", "attendance", "leave", "reports", "payroll", "recruitment",
     "allCandidates", "recruiters", "vendors", "allPlacements", "insurance", "profile",
   ],
   [ROLES.FINANCE_ACCOUNTS]: [
-    "dashboard", "attendance", "leave", "payroll", "allCandidates", "recruiters",
+    "dashboard", "attendance", "leave", "payroll", "payslipManagement", "allCandidates", "recruiters",
     "vendors", "allPlacements", "insurance", "profile",
   ],
   [ROLES.OPERATIONS]: [
-    "dashboard", "attendance", "assets", "employees", "vendors", "profile",
+    "dashboard", "attendance", "assets", "employees", "vendors", "payroll", "profile",
   ],
   [ROLES.HR_RECRUITER]: [
-    "dashboard", "attendance", "leave", "recruitment", "allCandidates", "profile",
+    "dashboard", "attendance", "leave", "payroll", "recruitment", "allCandidates", "profile",
   ],
   [ROLES.EMPLOYEE]: [
     "home", "myAttendance", "leave", "payslips", "insurance", "profile",
@@ -79,6 +79,7 @@ export const NAV_ITEMS = {
   reports: { path: "/attendance?tab=reports", label: "Reports", icon: "\u25A4" },
   leave: { path: "/leave", label: "Leave", icon: "\u2708" },
   payroll: { path: "/payroll", label: "Payroll", icon: "\u20B9" },
+  payslipManagement: { path: "/payroll/manage", label: "Payslip Management", icon: "\u20B9" },
   payslips: { path: "/payroll", label: "Payslips", icon: "\u20B9" },
   insurance: { path: "/insurance", label: "Insurance", icon: "\u2665" },
   recruitment: { path: "/recruitment", label: "Recruitment", icon: "\u2605" },
