@@ -138,6 +138,34 @@ with app.app_context():
     check("employee cannot fetch a draft directly", client.get(f"/api/payroll/payslip/{payslip_id}", headers=employee_headers).status_code == 403)
     check("employee cannot download a draft", client.get(f"/api/payroll/payslips/{payslip_id}/pdf", headers=employee_headers).status_code == 403)
     check("employee cannot list another employee's payslips", client.get(f"/api/payroll/payslips/{other_employee.id}", headers=employee_headers).status_code == 403)
+    check("employee cannot access management company selection", client.get(
+        "/api/payroll/companies", headers=employee_headers,
+    ).status_code == 403)
+    for endpoint in ("/api/payroll/people", "/api/payroll/coverage", "/api/payroll/templates"):
+        check(f"employee cannot access management API {endpoint}", client.get(
+            endpoint, headers=employee_headers,
+        ).status_code == 403)
+    for role_user, headers in zip(readonly_users, readonly_headers):
+        list_response = client.get("/api/payroll/payslips", headers=headers)
+        check(f"{role_user.role} cannot see drafts in list", list_response.status_code == 200 and list_response.get_json() == [])
+        check(f"{role_user.role} cannot fetch a draft directly", client.get(
+            f"/api/payroll/payslip/{payslip_id}", headers=headers,
+        ).status_code == 403)
+        check(f"{role_user.role} cannot download a draft", client.get(
+            f"/api/payroll/payslips/{payslip_id}/pdf", headers=headers,
+        ).status_code == 403)
+        for endpoint in (
+            "/api/payroll/companies",
+            "/api/payroll/people",
+            "/api/payroll/coverage",
+            "/api/payroll/templates",
+        ):
+            check(f"{role_user.role} cannot access management API {endpoint}", client.get(
+                endpoint, headers=headers,
+            ).status_code == 403)
+    check("Finance can access management company selection", client.get(
+        "/api/payroll/companies", headers=finance_headers,
+    ).status_code == 200)
 
     edit_payload = {
         **initial,
@@ -172,6 +200,9 @@ with app.app_context():
     check("Finance publishes payslip", response.status_code == 200 and response.get_json()["status"] == "published")
     response = client.get(f"/api/payroll/payslips/{employee.id}", headers=employee_headers)
     check("employee sees only their published payslip", response.status_code == 200 and [row["id"] for row in response.get_json()] == [payslip_id])
+    check("employee's all-payslips endpoint is restricted to their own records", client.get(
+        "/api/payroll/payslips", headers=employee_headers,
+    ).get_json() == [response.get_json()[0]])
     response = client.get(f"/api/payroll/payslips/{payslip_id}/pdf", headers=employee_headers)
     check("employee downloads their published PDF", response.status_code == 200 and response.data == uploaded_bytes)
     check("public uploads route does not expose payslips", client.get(f"/static/uploads/{uploaded['pdf_path']}").status_code == 404)
@@ -199,6 +230,12 @@ with app.app_context():
     ).status_code == 200)
     check("employee cannot edit their published payslip", client.put(
         f"/api/payroll/payslips/{payslip_id}", headers=employee_headers, json=edit_payload,
+    ).status_code == 403)
+    check("employee cannot create payslips", client.post(
+        "/api/payroll/payslips", headers=employee_headers, json=initial,
+    ).status_code == 403)
+    check("employee cannot publish payslips", client.post(
+        f"/api/payroll/payslips/{payslip_id}/publish", headers=employee_headers,
     ).status_code == 403)
     check("employee cannot upload a payslip", client.post(
         f"/api/payroll/payslips/{payslip_id}/upload",
@@ -249,8 +286,20 @@ with app.app_context():
     for role_user, headers in zip(readonly_users, readonly_headers):
         response = client.get("/api/payroll/payslips", headers=headers)
         check(f"{role_user.role} can view published payslips", response.status_code == 200 and len(response.get_json()) == 1)
+        check(f"{role_user.role} can view a published payslip directly", client.get(
+            f"/api/payroll/payslip/{payslip_id}", headers=headers,
+        ).status_code == 200)
+        check(f"{role_user.role} can download a published payslip", client.get(
+            f"/api/payroll/payslips/{payslip_id}/pdf", headers=headers,
+        ).status_code == 200)
+        check(f"{role_user.role} cannot create payslips", client.post(
+            "/api/payroll/payslips", headers=headers, json=initial,
+        ).status_code == 403)
         check(f"{role_user.role} cannot edit through the API", client.put(
             f"/api/payroll/payslips/{payslip_id}", headers=headers, json=edit_payload,
+        ).status_code == 403)
+        check(f"{role_user.role} cannot publish through the API", client.post(
+            f"/api/payroll/payslips/{payslip_id}/publish", headers=headers,
         ).status_code == 403)
         check(f"{role_user.role} cannot upload through the API", client.post(
             f"/api/payroll/payslips/{payslip_id}/upload",
@@ -260,6 +309,9 @@ with app.app_context():
         ).status_code == 403)
         check(f"{role_user.role} cannot delete through the API", client.delete(
             f"/api/payroll/payslips/{payslip_id}", headers=headers,
+        ).status_code == 403)
+        check(f"{role_user.role} cannot mark payslips paid through the API", client.post(
+            f"/api/payroll/payslips/{payslip_id}/mark-paid", headers=headers,
         ).status_code == 403)
 
     for company_name, month in (
@@ -285,6 +337,22 @@ with app.app_context():
         check(f"{company_name} PDF exists", os.path.isfile(generated))
         with pdfplumber.open(generated) as document:
             check(f"{company_name} PDF uses the assigned company header", company_name in document.pages[0].extract_text())
+        if month == 7:
+            foreign_payslip_id = response.get_json()["id"]
+            check("Finance publishes another employee's payslip", client.post(
+                f"/api/payroll/payslips/{foreign_payslip_id}/publish",
+                headers=finance_headers,
+            ).status_code == 200)
+            employee_rows = client.get("/api/payroll/payslips", headers=employee_headers).get_json()
+            check("employee's all-payslips endpoint excludes other employees", all(
+                row["user_id"] == employee.id for row in employee_rows
+            ))
+            check("employee cannot fetch another employee's published payslip", client.get(
+                f"/api/payroll/payslip/{foreign_payslip_id}", headers=employee_headers,
+            ).status_code == 403)
+            check("employee cannot download another employee's published PDF", client.get(
+                f"/api/payroll/payslips/{foreign_payslip_id}/pdf", headers=employee_headers,
+            ).status_code == 403)
 
     delete_draft_payload = {
         **initial,
