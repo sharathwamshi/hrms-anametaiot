@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import ExportButton from "../components/ExportButton";
 import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
@@ -8,10 +7,10 @@ import PayslipDetailModal from "../components/PayslipDetailModal";
 import PayrollPeopleTab from "../components/PayrollPeopleTab";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, ROLE_LABELS } from "../config/roles";
-import { PAYROLL_COMPANIES } from "../config/companies";
 
 const PAYROLL_ADMIN_ROLES = [ROLES.FINANCE_ACCOUNTS];
 const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const inputStyle = { border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" };
 
 const EMPTY_TEMPLATE = {
   name: "", description: "",
@@ -41,14 +40,34 @@ export default function Payroll() {
   const [selectedPayslip, setSelectedPayslip] = useState(null);
   const [coverage, setCoverage] = useState(null);
   const [coverageVersion, setCoverageVersion] = useState(0);
-  const [companyFilter, setCompanyFilter] = useState("");
+  const [downloadingPayslipId, setDownloadingPayslipId] = useState(null);
+  const [payslipError, setPayslipError] = useState("");
+
+  const downloadPayslip = async (payslip) => {
+    setPayslipError("");
+    setDownloadingPayslipId(payslip.id);
+    try {
+      const { data } = await client.get(`/payroll/payslips/${payslip.id}/pdf`, {
+        responseType: "blob",
+      });
+      const url = URL.createObjectURL(data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${payslip.employee_info?.employee_code || payslip.user_id}_${payslip.year}_${String(payslip.month).padStart(2, "0")}.pdf`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      setPayslipError(error?.response?.data?.message || "Could not download the payslip PDF.");
+    } finally {
+      setDownloadingPayslipId(null);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
     const params = {
       ...(month ? { month } : {}),
       ...(year ? { year } : {}),
-      ...(companyFilter ? { company_name: companyFilter } : {}),
     };
     if (user.role !== ROLES.EMPLOYEE) {
       const { data } = await client.get("/payroll/payslips", { params });
@@ -63,7 +82,7 @@ export default function Payroll() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, user.id, user.role, month, year, companyFilter]);
+  }, [isAdmin, user.id, user.role, month, year]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -125,7 +144,7 @@ export default function Payroll() {
   };
 
   return (
-    <AppLayout title="Payroll" subtitle={isAdmin ? "Company payslips, salary templates and payroll." : user.role === ROLES.EMPLOYEE ? "Your published payslip history." : "Published payslips · View only"}>
+    <AppLayout title={isAdmin ? "Payroll" : "Payslips"} subtitle={isAdmin ? "Company payslips, salary templates and payroll." : user.role === ROLES.EMPLOYEE ? "Your published payslip history." : "Published payslips · View only"}>
       {isAdmin && (
         <div className="tag-list section-gap">
           <button className={`btn btn-sm ${tab === "payslips" ? "btn-primary" : "btn-outline"}`} onClick={() => setTab("payslips")}>Payslips</button>
@@ -180,13 +199,14 @@ export default function Payroll() {
                 <h3>Published Payslips</h3>
                 <span className="muted">View-only · manage drafts in Payslip Management</span>
               </div>
+              {payslipError && <div className="login-error" role="alert" style={{ marginBottom: 12 }}>{payslipError}</div>}
               {loading ? <Loader /> : (
                 <div className="table-wrap">
                   <table className="data-table">
-                    <thead><tr><th>Employee</th><th>Month</th><th>Present</th><th>LOP Days</th><th>Gross</th><th>Deductions</th><th>Net Pay</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Employee</th><th>Month</th><th>Present</th><th>LOP Days</th><th>Gross</th><th>Deductions</th><th>Net Pay</th><th>Status</th><th>Actions</th></tr></thead>
                     <tbody>
                       {allPayslips.filter((payslip) => ["published", "updated", "paid"].includes(payslip.status)).length === 0 && (
-                        <tr className="empty-row"><td colSpan={8}>No published payslips found.</td></tr>
+                        <tr className="empty-row"><td colSpan={9}>No published payslips found.</td></tr>
                       )}
                       {allPayslips.filter((payslip) => ["published", "updated", "paid"].includes(payslip.status)).map((payslip) => (
                         <tr key={payslip.id} onClick={() => setSelectedPayslip(payslip)} style={{ cursor: "pointer" }}>
@@ -198,6 +218,18 @@ export default function Payroll() {
                           <td>₹{Number(payslip.total_deductions || 0).toLocaleString("en-IN")}</td>
                           <td><strong>₹{Number(payslip.net_pay || 0).toLocaleString("en-IN")}</strong></td>
                           <td><Badge status={payslip.status} /></td>
+                          <td>
+                            <button
+                              className="btn btn-sm btn-outline"
+                              disabled={downloadingPayslipId === payslip.id}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                downloadPayslip(payslip);
+                              }}
+                            >
+                              {downloadingPayslipId === payslip.id ? "Downloading..." : "Download PDF"}
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -208,13 +240,10 @@ export default function Payroll() {
           )}
 
           {!isAdmin && <div className="card">
-            <div className="card-title-row"><h3>{user.role === ROLES.EMPLOYEE ? "My Payslips" : "Published Payslips"}</h3><ExportButton filename={user.role === ROLES.EMPLOYEE ? "My_Payslips" : "Published_Payslips"} /></div>
+            <div className="card-title-row"><h3>{user.role === ROLES.EMPLOYEE ? "My Payslips" : "Published Payslips"}</h3></div>
             <p className="muted" style={{ fontSize: 11.5, marginTop: -8, marginBottom: 12 }}>Click a row to view, print, or download a full payslip.</p>
+            {payslipError && <div className="login-error" role="alert" style={{ marginBottom: 12 }}>{payslipError}</div>}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-              <select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} style={inputStyle}>
-                <option value="">All companies</option>
-                {PAYROLL_COMPANIES.map((name) => <option key={name}>{name}</option>)}
-              </select>
               <select value={month} onChange={(e) => setMonth(e.target.value ? Number(e.target.value) : "")} style={inputStyle}>
                 <option value="">All months</option>
                 {MONTH_NAMES.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}
@@ -229,16 +258,17 @@ export default function Payroll() {
                   <thead>
                     <tr>
                       {user.role !== ROLES.EMPLOYEE && <th>Employee</th>}
-                      <th>Month</th><th>Present</th><th>LOP Days</th><th>Gross</th><th>Deductions</th><th>Net Pay</th><th>Status</th>
+                      <th>Company</th><th>Month</th><th>Present</th><th>LOP Days</th><th>Gross</th><th>Deductions</th><th>Net Pay</th><th>Status</th><th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(user.role === ROLES.EMPLOYEE ? myPayslips : allPayslips).length === 0 && (
-                      <tr className="empty-row"><td colSpan={user.role === ROLES.EMPLOYEE ? 7 : 8}>No published payslips found.</td></tr>
+                      <tr className="empty-row"><td colSpan={user.role === ROLES.EMPLOYEE ? 9 : 10}>No published payslips found.</td></tr>
                     )}
                     {(user.role === ROLES.EMPLOYEE ? myPayslips : allPayslips).map((p) => (
                       <tr key={p.id} onClick={() => setSelectedPayslip(p)} style={{ cursor: "pointer" }}>
                         {user.role !== ROLES.EMPLOYEE && <td>{p.employee_name}</td>}
+                        <td>{p.company_name || "—"}</td>
                         <td>{MONTH_NAMES[p.month - 1]} {p.year}</td>
                         <td>{p.days_present}</td>
                         <td>{p.lop_days}</td>
@@ -246,6 +276,18 @@ export default function Payroll() {
                         <td>₹{Number(p.total_deductions || 0).toLocaleString("en-IN")}</td>
                         <td><strong>₹{Number(p.net_pay || 0).toLocaleString("en-IN")}</strong></td>
                         <td><Badge status={p.status} /></td>
+                        <td>
+                          <button
+                            className="btn btn-sm btn-outline"
+                            disabled={downloadingPayslipId === p.id}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              downloadPayslip(p);
+                            }}
+                          >
+                            {downloadingPayslipId === p.id ? "Downloading..." : "Download PDF"}
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

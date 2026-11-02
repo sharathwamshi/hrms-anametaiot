@@ -458,7 +458,7 @@ def payroll_coverage():
 
 
 @bp.get("/companies")
-@roles_required(*PAYROLL_VIEW_ROLES, EMPLOYEE)
+@roles_required(*PAYROLL_EDIT_ROLES)
 def list_payroll_companies():
     return jsonify(list(COMPANIES))
 
