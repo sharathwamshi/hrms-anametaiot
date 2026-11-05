@@ -32,10 +32,9 @@ export function formatCompanyTime(instant, seconds = false) {
     minute: "2-digit",
     ...(seconds ? { second: "2-digit" } : {}),
     hour12: true,
-    timeZoneName: "short",
   }).formatToParts(date);
   const value = (type) => parts.find((part) => part.type === type)?.value;
-  return `${value("hour")}:${value("minute")}${seconds ? `:${value("second")}` : ""} ${value("dayPeriod").toUpperCase()} ${value("timeZoneName")}`;
+  return `${value("hour")}:${value("minute")}${seconds ? `:${value("second")}` : ""} ${value("dayPeriod").toUpperCase()}`;
 }
 
 export const fmtTime = (iso) => formatCompanyTime(iso);
@@ -68,7 +67,6 @@ export function formatCompanyDateTime(instant, options) {
   return new Intl.DateTimeFormat("en-IN", {
     ...options,
     timeZone: companyTimezone,
-    timeZoneName: "short",
   }).format(parseUtc(instant));
 }
 
