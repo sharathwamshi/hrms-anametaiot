@@ -21,6 +21,8 @@ test("attendance timestamps and datetime inputs use the company timezone, not br
       const instant = "2026-10-22T04:00:00Z";
       observed.push({
         time: fmtTime(instant),
+        checkIn: fmtTime("2026-11-02T02:41:00"),
+        automaticCheckout: fmtTime("2026-11-02T18:30:00"),
         input: toLocalInput(instant),
         utc: fromLocalInput("2026-10-22T09:30"),
         today: localDateStr(new Date("2026-10-21T20:00:00Z")),
@@ -35,10 +37,26 @@ test("attendance timestamps and datetime inputs use the company timezone, not br
 
   assert.deepEqual(observed[0], observed[1]);
   assert.deepEqual(observed[0], observed[2]);
-  assert.match(observed[0].time, /09:30.*IST/);
+  assert.equal(observed[0].time, "09:30 AM");
+  assert.equal(observed[0].checkIn, "08:11 AM");
+  assert.equal(observed[0].automaticCheckout, "12:00 AM");
   assert.equal(observed[0].input, "2026-10-22T09:30");
   assert.equal(observed[0].utc, "2026-10-22T04:00:00.000Z");
   assert.equal(observed[0].today, "2026-10-22");
   assert.match(observed[0].dateLabel, /Thursday/);
-  assert.match(observed[0].editedAt, /IST/);
+  assert.match(observed[0].editedAt, /22 Oct/);
+  assert.doesNotMatch(observed[0].time, /IST|GMT|UTC/);
+});
+
+test("automatic midnight checkout keeps its attendance work date and formats next-day IST midnight", () => {
+  setCompanyTimezone("Asia/Kolkata");
+  const automaticCheckoutUtc = "2026-11-02T18:30:00";
+
+  assert.equal(fmtTime(automaticCheckoutUtc), "12:00 AM");
+  assert.equal(localDateStr(new Date(`${automaticCheckoutUtc}Z`)), "2026-11-03");
+  assert.equal(formatCompanyDateLabel("2026-11-02", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }), "2 Nov 2026");
 });

@@ -6,9 +6,10 @@ import {
   dateKeys,
   dateRange,
   dateRangeError,
+  dayRecordFor,
 } from "../src/utils/attendanceDashboard.js";
 import { ATTENDANCE_SUMMARY_HEADERS, buildAttendanceSummaryCsv } from "../src/utils/attendanceSummaryCsv.js";
-import { setCompanyTimezone } from "../src/utils/attendanceTime.js";
+import { fmtTime, setCompanyTimezone } from "../src/utils/attendanceTime.js";
 
 setCompanyTimezone("Asia/Kolkata");
 
@@ -55,6 +56,20 @@ test("percentages exclude holidays and approved leave, and missing attendance is
   assert.equal(metrics.onTimeCheckOutPct, 33);
   assert.equal(metrics.averageCheckIn, 9 * 60 + 37.5);
   assert.equal(metrics.averageCheckOut, 18 * 60 + 25);
+});
+
+test("employee dashboard uses the persisted automatic checkout timestamp from its attendance record", () => {
+  const persistedRecord = {
+    work_date: "2026-11-02",
+    status: "half_day",
+    clock_in: "2026-11-02T02:41:00",
+    clock_out: "2026-11-02T18:30:00",
+    total_hours: 15.82,
+  };
+  const record = dayRecordFor({ records: [persistedRecord] }, "2026-11-02");
+
+  assert.equal(record.clock_out, "2026-11-02T18:30:00");
+  assert.equal(fmtTime(record.clock_out), "12:00 AM");
 });
 
 test("summary CSV uses attendance metrics and safely quotes employee details", () => {
