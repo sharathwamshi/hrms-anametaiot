@@ -31,20 +31,31 @@ export default function Employees() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
+  const [resignationFilters, setResignationFilters] = useState({
+    q: "",
+    department_id: "",
+    designation: "",
+  });
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
   const [showRemoved, setShowRemoved] = useState(false);
 
-  const load = async (query = "", removed = showRemoved) => {
+  const load = async (query = "", removed = showRemoved, requestFilters = resignationFilters) => {
     setLoading(true);
     const params = {};
     if (query) params.q = query;
     if (removed) params.status = "removed";
     if (!removed && companyFilter) params.company_name = companyFilter;
+    const resignationParams = {
+      status: "resignation_pending",
+      ...(requestFilters.q ? { q: requestFilters.q } : {}),
+      ...(requestFilters.department_id ? { department_id: requestFilters.department_id } : {}),
+      ...(requestFilters.designation ? { designation: requestFilters.designation } : {}),
+    };
     const requestsPromise = !removed && (isHrOps || isManager)
-      ? client.get("/employees", { params: { status: "resignation_pending", ...(query ? { q: query } : {}) } })
+      ? client.get("/employees", { params: resignationParams })
       : Promise.resolve({ data: [] });
     const [empRes, deptRes, requestsRes] = await Promise.all([
       client.get("/employees", { params }),
@@ -55,6 +66,12 @@ export default function Employees() {
     setDepartments(deptRes.data);
     setResignationRequests(requestsRes.data);
     setLoading(false);
+  };
+
+  const updateResignationFilter = (name, value) => {
+    const nextFilters = { ...resignationFilters, [name]: value };
+    setResignationFilters(nextFilters);
+    load(q, showRemoved, nextFilters);
   };
 
   useEffect(() => {
@@ -240,8 +257,41 @@ export default function Employees() {
           <p className="muted" style={{ fontSize: 12, marginTop: -4 }}>
             Review requests from your direct reports{isHrOps ? " and employees across the organization" : ""}.
           </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            <input
+              value={resignationFilters.q}
+              onChange={(event) => updateResignationFilter("q", event.target.value)}
+              placeholder="Search employee name or code..."
+              aria-label="Search resignation requests by employee name or code"
+              style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px", flex: "1 1 220px", minWidth: 180 }}
+            />
+            <select
+              value={resignationFilters.department_id}
+              onChange={(event) => updateResignationFilter("department_id", event.target.value)}
+              aria-label="Filter resignation requests by department"
+              style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px", flex: "1 1 150px", minWidth: 140 }}
+            >
+              <option value="">All departments</option>
+              {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
+            </select>
+            <select
+              value={resignationFilters.designation}
+              onChange={(event) => updateResignationFilter("designation", event.target.value)}
+              aria-label="Filter resignation requests by designation"
+              style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px", flex: "1 1 170px", minWidth: 150 }}
+            >
+              <option value="">All designations</option>
+              {[...new Set([...DESIGNATION_OPTIONS, ...resignationRequests.map((employee) => employee.designation).filter(Boolean)])]
+                .sort((a, b) => a.localeCompare(b))
+                .map((designation) => <option key={designation} value={designation}>{designation}</option>)}
+            </select>
+          </div>
           {loading ? <Loader /> : resignationRequests.length === 0 ? (
-            <p className="muted" style={{ fontSize: 13 }}>There are no pending resignation requests.</p>
+            <p className="muted" style={{ fontSize: 13 }}>
+              {Object.values(resignationFilters).some(Boolean)
+                ? "No pending resignation requests match these filters."
+                : "There are no pending resignation requests."}
+            </p>
           ) : (
             <div className="table-wrap">
               <table className="data-table">

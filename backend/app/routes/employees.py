@@ -85,6 +85,7 @@ def list_employees():
     q = request.args.get("q", "").strip()
     department_id = request.args.get("department_id", type=int)
     role = request.args.get("role")
+    designation = request.args.get("designation", "").strip()
     status = request.args.get("status")
     company_name = request.args.get("company_name")
     if company_name and company_name not in PAYROLL_COMPANIES:
@@ -120,6 +121,8 @@ def list_employees():
         query = query.filter_by(department_id=department_id)
     if role:
         query = query.filter_by(role=role)
+    if designation:
+        query = query.filter_by(designation=designation)
     if company_name:
         query = query.filter_by(company_name=company_name)
 
