@@ -34,7 +34,6 @@ export default function ClockWidget({
   const [selfie, setSelfie] = useState(null);
   const [reentering, setReentering] = useState(false);
   const [reason, setReason] = useState("");
-  const [locating, setLocating] = useState(false);
   const [workLocations, setWorkLocations] = useState([]);
   const [workLocationsLoading, setWorkLocationsLoading] = useState(false);
   const [workLocationsError, setWorkLocationsError] = useState("");
@@ -43,9 +42,14 @@ export default function ClockWidget({
   const [clockInLocationStatus, setClockInLocationStatus] = useState("idle");
   const [clockInLocation, setClockInLocation] = useState(null);
   const [clockInLocationError, setClockInLocationError] = useState("");
+  const [clockOutOpen, setClockOutOpen] = useState(false);
+  const [clockOutLocationStatus, setClockOutLocationStatus] = useState("idle");
+  const [clockOutLocation, setClockOutLocation] = useState(null);
+  const [clockOutLocationError, setClockOutLocationError] = useState("");
   const [showLocationInstructions, setShowLocationInstructions] = useState(false);
   const fileRef = useRef(null);
   const clockInDialogRef = useRef(null);
+  const clockOutDialogRef = useRef(null);
   const punchInFlight = useRef(false);
   const isFloating = presentation === "floating";
 
@@ -79,18 +83,20 @@ export default function ClockWidget({
   }, [hasClockInOut]);
 
   useEffect(() => {
-    if (!clockInOpen) return undefined;
+    const dialogOpen = clockInOpen || clockOutOpen;
+    const dialogRef = clockInOpen ? clockInDialogRef : clockOutDialogRef;
+    if (!dialogOpen) return undefined;
     const previousOverflow = document.body.style.overflow;
     const previousFocus = document.activeElement;
     document.body.style.overflow = "hidden";
-    clockInDialogRef.current?.focus();
+    dialogRef.current?.focus();
     const keepFocusInDialog = (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
         return;
       }
       if (event.key !== "Tab") return;
-      const focusable = clockInDialogRef.current?.querySelectorAll(
+      const focusable = dialogRef.current?.querySelectorAll(
         'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])'
       );
       if (!focusable?.length) {
@@ -113,7 +119,7 @@ export default function ClockWidget({
       document.removeEventListener("keydown", keepFocusInDialog);
       previousFocus?.focus?.();
     };
-  }, [clockInOpen]);
+  }, [clockInOpen, clockOutOpen]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -198,6 +204,34 @@ export default function ClockWidget({
     }
   };
 
+  const checkClockOutLocation = async () => {
+    setClockOutLocationStatus("loading");
+    setClockOutLocation(null);
+    setClockOutLocationError("");
+    setShowLocationInstructions(false);
+    const location = await getBrowserLocation();
+    if (location.error) {
+      setClockOutLocation(location);
+      setClockOutLocationStatus("error");
+      setClockOutLocationError(location.error);
+      setShowLocationInstructions(true);
+      return;
+    }
+    try {
+      const { data } = await client.post("/attendance/location-check", {
+        latitude: location.latitude,
+        longitude: location.longitude,
+      });
+      setClockOutLocation({ ...location, ...data });
+      setClockOutLocationStatus("ready");
+    } catch (err) {
+      setClockOutLocationStatus("error");
+      const message = err?.response?.data?.message || "Could not verify your location. Please try again.";
+      setClockOutLocation({ error: message });
+      setClockOutLocationError(message);
+    }
+  };
+
   const openClockIn = () => {
     setError("");
     setNotice(null);
@@ -212,6 +246,17 @@ export default function ClockWidget({
         : String(workLocations.find((location) => location.is_default)?.id || workLocations[0]?.id || "")
     ));
     checkClockInLocation();
+  };
+
+  const openClockOut = () => {
+    setError("");
+    setNotice(null);
+    setClockOutLocationStatus("loading");
+    setClockOutLocation(null);
+    setClockOutLocationError("");
+    setShowLocationInstructions(false);
+    setClockOutOpen(true);
+    checkClockOutLocation();
   };
 
   const handleClock = async (action) => {
@@ -229,16 +274,18 @@ export default function ClockWidget({
       setError("Fetch and verify your location before clocking in.");
       return;
     }
+    if (action === "clock-out" && !clockOutLocation) {
+      setError("Fetch and verify your location before clocking out.");
+      return;
+    }
     punchInFlight.current = true;
     setBusy(true);
     setError("");
     setNotice(null);
     try {
-      if (action === "clock-out") setLocating(true);
       const loc = action === "clock-in"
         ? clockInLocation
-        : await getBrowserLocation();
-      setLocating(false);
+        : clockOutLocation;
       const coords = loc.error ? {} : { latitude: loc.latitude, longitude: loc.longitude };
       let data;
       if (selfie) {
@@ -256,6 +303,7 @@ export default function ClockWidget({
         }));
       }
       if (action === "clock-in") setClockInOpen(false);
+      if (action === "clock-out") setClockOutOpen(false);
       if (data.geofence_warning) {
         setNotice({ kind: "warn", text: "You weren't within the office radius. Your attendance is recorded as usual, and it has been flagged for your manager." });
       } else if (loc.error) {
@@ -273,7 +321,6 @@ export default function ClockWidget({
       setError(err?.response?.data?.message || "Something went wrong.");
       if (err?.response?.data?.selfie_required) setSelfieRequired(true);
     } finally {
-      setLocating(false);
       setBusy(false);
       punchInFlight.current = false;
     }
@@ -344,11 +391,10 @@ export default function ClockWidget({
                 </div>
               )}
               {error && <div style={{ color: "var(--color-danger)", fontSize: 12.5, marginTop: 6 }}>{error}</div>}
-              {locating && <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>📍 Getting your location…</div>}
               {notice && (
                 <div style={{ ...noticeStyle[notice.kind], fontSize: 12.5, borderRadius: 6, padding: "7px 10px", marginTop: 8, maxWidth: 520 }}>{notice.text}</div>
               )}
-              {selfieRequired && clockedIn && (
+              {selfieRequired && clockedIn && !clockOutOpen && (
                 <div style={{ marginTop: 8, fontSize: 12.5 }}>
                   <label className="muted">Photo required by your company: </label>
                   <input
@@ -389,7 +435,7 @@ export default function ClockWidget({
           </button>
         )}
               {(!isFloating || (!attendanceLoading && !attendanceLoadError)) && clockedIn && (
-          <button className="btn btn-danger" disabled={busy || (isFloating && attendanceLoading)} onClick={() => handleClock("clock-out")}>
+          <button className="btn btn-danger" disabled={busy || (isFloating && attendanceLoading)} onClick={openClockOut}>
             {busy ? "Please wait…" : "Clock Out"}
           </button>
         )}
@@ -521,6 +567,68 @@ export default function ClockWidget({
                   onClick={() => handleClock("clock-in")}
                 >
                   {busy ? "Clocking in…" : "Choose location and Clock In"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+      {clockOutOpen && createPortal(
+        <div className="modal-overlay clock-in-location-overlay" role="presentation">
+          <div ref={clockOutDialogRef} className="modal-box" role="dialog" aria-modal="true" aria-labelledby="clock-out-location-title" tabIndex={-1}>
+            <h3 id="clock-out-location-title" style={{ marginBottom: 6 }}>Clock out</h3>
+            <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>We’ll check your location before clocking you out.</p>
+            {error && <div className="login-error" style={{ marginBottom: 10 }}>{error}</div>}
+            {clockOutLocationStatus === "loading" && (
+              <div className="muted" role="status" style={{ marginBottom: 14 }}>Getting and verifying your location…</div>
+            )}
+            {clockOutLocationStatus === "error" && (
+              <div style={{ marginBottom: 14 }}>
+                <div className="login-error" role="alert" style={{ marginBottom: 8 }}>{clockOutLocationError}</div>
+                {showLocationInstructions && (
+                  <p className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
+                    Allow Location in this site’s browser permissions, then retry.
+                  </p>
+                )}
+                <button type="button" className="btn btn-sm btn-outline" onClick={checkClockOutLocation}>Retry location check</button>
+              </div>
+            )}
+            {clockOutLocationStatus === "ready" && (
+              <div
+                role="status"
+                style={{
+                  background: clockOutLocation.office_configured && clockOutLocation.within_office
+                    ? "var(--color-success-100)"
+                    : "var(--color-warning-100)",
+                  color: clockOutLocation.office_configured && clockOutLocation.within_office ? "#067647" : "#b54708",
+                  fontSize: 13, borderRadius: 6, padding: "9px 12px", marginBottom: 14,
+                }}
+              >
+                <div>
+                  {clockOutLocation.office_configured
+                    ? clockOutLocation.within_office ? "Your location was fetched. You are in the office." : "Your location was fetched. You are out of the office."
+                    : "Your location was fetched, but no office geofence is configured."}
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  Your location is: {clockOutLocation.latitude.toFixed(5)}, {clockOutLocation.longitude.toFixed(5)}
+                  {Number.isFinite(clockOutLocation.accuracy) && ` (accuracy ±${Math.round(clockOutLocation.accuracy)} m)`}
+                  {" · "}
+                  <a href={mapsUrl(clockOutLocation.latitude, clockOutLocation.longitude)} target="_blank" rel="noreferrer">View on map</a>
+                </div>
+              </div>
+            )}
+            {(clockOutLocationStatus === "ready" || clockOutLocationStatus === "error") && selfieRequired && (
+              <div className="form-field">
+                <label>Photo required by your company</label>
+                <input ref={fileRef} type="file" accept="image/*" capture="user" onChange={(event) => setSelfie(event.target.files?.[0] || null)} />
+              </div>
+            )}
+            <div className="form-actions">
+              <button type="button" className="btn btn-outline" disabled={busy} onClick={() => setClockOutOpen(false)}>Cancel</button>
+              {(clockOutLocationStatus === "ready" || clockOutLocationStatus === "error") && (
+                <button type="button" className="btn btn-danger" disabled={busy || (selfieRequired && !selfie)} onClick={() => handleClock("clock-out")}>
+                  {busy ? "Clocking out…" : clockOutLocationStatus === "error" ? "Clock Out without location" : "Clock Out"}
                 </button>
               )}
             </div>
