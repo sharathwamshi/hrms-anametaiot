@@ -399,11 +399,17 @@ function TeamSummaryTable({ employees, dates, holidays, policy }) {
   return (
     <div className="card">
       <div className="card-title-row"><h3>Team-Wise Attendance</h3></div>
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead><tr><th>Team</th><th>Employees</th><th>Avg. Check-In</th><th>Avg. Check-Out</th><th>On-Time Attendance</th></tr></thead>
+      <div className="table-wrap dashboard-team-summary-wrap">
+        <table className="data-table dashboard-team-summary-table">
+          <colgroup>
+            <col className="dashboard-team-summary-name" />
+            <col className="dashboard-team-summary-count" />
+            <col className="dashboard-team-summary-time" />
+            <col className="dashboard-team-summary-time" />
+          </colgroup>
+          <thead><tr><th>Team</th><th>Employees</th><th>Avg. Check-In</th><th>Avg. Check-Out</th></tr></thead>
           <tbody>
-            {teams.length === 0 && <tr className="empty-row"><td colSpan={5}>No team attendance is available.</td></tr>}
+            {teams.length === 0 && <tr className="empty-row"><td colSpan={4}>No team attendance is available.</td></tr>}
             {teams.map((team) => {
               const members = employees.filter((employee) => (employee.department || "Unassigned") === team);
               const metrics = attendanceMetrics(members, dates, holidays, policy);
@@ -411,7 +417,6 @@ function TeamSummaryTable({ employees, dates, holidays, policy }) {
                 <tr key={team}>
                   <td><strong>{team}</strong></td><td>{members.length}</td>
                   <td>{formatMinutes(metrics.averageCheckIn)}</td><td>{formatMinutes(metrics.averageCheckOut)}</td>
-                  <td>{formatPercent(metrics.onTimeCheckInPct)}</td>
                 </tr>
               );
             })}
@@ -429,6 +434,10 @@ function ManagerDashboard({ user, summary, summaryLoading, summaryError, pending
   const [rangeError, setRangeError] = useState("");
   const [selectedDate, setSelectedDate] = useState(todayKey());
   const [teamFilter, setTeamFilter] = useState("");
+  const [overviewScope, setOverviewScope] = useState("team");
+  const [personalOverview, setPersonalOverview] = useState(null);
+  const [personalOverviewLoading, setPersonalOverviewLoading] = useState(false);
+  const [personalOverviewError, setPersonalOverviewError] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [selectedEmployee, setSelectedEmployee] = useState(null);
@@ -457,6 +466,33 @@ function ManagerDashboard({ user, summary, summaryLoading, summaryError, pending
     return () => { active = false; };
   }, [range.from, range.to]);
 
+  useEffect(() => {
+    if (overviewScope !== "mine") return undefined;
+    let active = true;
+    setPersonalOverviewLoading(true);
+    setPersonalOverviewError("");
+    fetchMyCalendarRange(user, range)
+      .then((calendar) => {
+        if (!active) return;
+        const employee = normalizeEmployee({
+          ...user,
+          ...(calendar.user || {}),
+          records: (calendar.records || []).filter(
+            (record) => record.work_date >= range.from && record.work_date <= range.to
+          ),
+          approved_leave_dates: employeeLeaves(calendar),
+        });
+        setPersonalOverview({ employee, holidays: calendar.holidays || [] });
+      })
+      .catch((err) => {
+        if (active) {
+          setPersonalOverviewError(err?.response?.data?.message || "Could not load your attendance overview.");
+        }
+      })
+      .finally(() => { if (active) setPersonalOverviewLoading(false); });
+    return () => { active = false; };
+  }, [user, range.from, range.to, overviewScope]);
+
   const applyRange = () => {
     const validationError = dateRangeError(draftRange.from, draftRange.to);
     setRangeError(validationError);
@@ -473,6 +509,10 @@ function ManagerDashboard({ user, summary, summaryLoading, summaryError, pending
   const allEmployees = response?.employees || [];
   const teams = [...new Set(allEmployees.map((employee) => employee.department || "Unassigned"))].sort();
   const employees = allEmployees.filter((employee) => !teamFilter || (employee.department || "Unassigned") === teamFilter);
+  const changeTeamFilter = (value) => {
+    setTeamFilter(value);
+    setOverviewScope("team");
+  };
   const dates = dateKeys(range.from, range.to);
   const holidays = response?.holidays || [];
   const metrics = attendanceMetrics(employees, dates, holidays, policy);
@@ -481,6 +521,15 @@ function ManagerDashboard({ user, summary, summaryLoading, summaryError, pending
   const absentSelectedDate = selectedDate > todayKey()
     ? 0
     : employees.filter((employee) => statusFor(employee, selectedDate, holidays, todayKey()) === "Absent").length;
+  const overviewEmployees = overviewScope === "mine"
+    ? (personalOverview?.employee ? [personalOverview.employee] : [])
+    : employees;
+  const overviewHolidays = overviewScope === "mine" ? personalOverview?.holidays || [] : holidays;
+  const overviewMetrics = attendanceMetrics(overviewEmployees, dates, overviewHolidays, policy);
+  const overviewTrend = buildAttendanceTrend(overviewEmployees, dates, overviewHolidays, policy);
+  const overviewAttendanceLabel = overviewScope === "mine" && (personalOverviewLoading || personalOverviewError)
+    ? "—"
+    : formatPercent(overviewMetrics.attendancePct);
 
   return (
     <div className="attendance-dashboard">
@@ -500,14 +549,6 @@ function ManagerDashboard({ user, summary, summaryLoading, summaryError, pending
       <DashboardTopWidgets summary={summary} loading={summaryLoading} error={summaryError} />
       {pendingRequests}
 
-      <DateRangeFilter
-        draft={draftRange}
-        onChange={setDraftRange}
-        onApply={applyRange}
-        onReset={resetRange}
-        error={rangeError}
-      />
-
       <div className="dashboard-toolbar">
         <label className="dashboard-field"><span>Search team</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Employee name, ID or team" style={inputStyle} /></label>
         <label className="dashboard-field"><span>Selected date</span><input type="date" value={selectedDate} max={todayKey()} onChange={(event) => event.target.value && setSelectedDate(event.target.value)} style={inputStyle} /></label>
@@ -517,23 +558,48 @@ function ManagerDashboard({ user, summary, summaryLoading, summaryError, pending
       {loading ? <Loader /> : response && (
         <>
           <SummaryCards manager totalEmployees={employees.length} metrics={metrics} absentToday={absentSelectedDate} />
+          <DateRangeFilter
+            draft={draftRange}
+            onChange={setDraftRange}
+            onApply={applyRange}
+            onReset={resetRange}
+            error={rangeError}
+          />
           <div className="card dashboard-analytics-card">
             <div className="card-title-row dashboard-analytics-header">
-              <div><h3>Team Attendance Overview</h3><div className="muted" style={{ fontSize: 12, marginTop: 3 }}>{formatDate(range.from, { day: "numeric", month: "short" })} – {formatDate(range.to, { day: "numeric", month: "short", year: "numeric" })} · Attendance {formatPercent(metrics.attendancePct)}</div></div>
+              <div><h3>{overviewScope === "mine" ? "My Attendance Overview" : "Team Attendance Overview"}</h3><div className="muted" style={{ fontSize: 12, marginTop: 3 }}>{formatDate(range.from, { day: "numeric", month: "short" })} – {formatDate(range.to, { day: "numeric", month: "short", year: "numeric" })} · Attendance {overviewAttendanceLabel}</div></div>
               <div className="dashboard-controls">
-                <select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)} aria-label="Filter team" style={inputStyle}>
+                <select
+                  value={overviewScope === "mine" ? "__my_attendance__" : teamFilter}
+                  onChange={(event) => {
+                    if (event.target.value === "__my_attendance__") {
+                      setOverviewScope("mine");
+                    } else {
+                      changeTeamFilter(event.target.value);
+                    }
+                  }}
+                  aria-label="Attendance overview"
+                  style={inputStyle}
+                >
                   <option value="">All teams</option>
                   {teams.map((team) => <option key={team} value={team}>{team}</option>)}
+                  <option value="__my_attendance__">My attendance</option>
                 </select>
               </div>
             </div>
-            <AttendanceChart trend={trend} />
+            {overviewScope === "mine" && personalOverviewLoading ? (
+              <Loader label="Loading your attendance overview..." />
+            ) : overviewScope === "mine" && personalOverviewError ? (
+              <div className="login-error" role="alert">{personalOverviewError}</div>
+            ) : (
+              <AttendanceChart
+                trend={overviewTrend}
+                emptyMessage={overviewScope === "mine" ? "No personal attendance data is available for this period." : undefined}
+              />
+            )}
           </div>
           <div className="dashboard-quick-actions">
-            <Link to="/employees" className="btn btn-sm btn-outline">Manage Teams</Link>
-            <Link to="/attendance?tab=team" className="btn btn-sm btn-outline">View Reports</Link>
             <button type="button" className="btn btn-sm btn-outline" onClick={() => downloadAttendanceSummary(exportEmployees, dates, holidays, policy, range)}>Export CSV</button>
-            <Link to="/attendance?tab=policy" className="btn btn-sm btn-outline">Manage Timings</Link>
           </div>
           <div className="two-col dashboard-table-row">
             <TeamSummaryTable employees={allEmployees} dates={dates} holidays={holidays} policy={policy} />
@@ -548,7 +614,7 @@ function ManagerDashboard({ user, summary, summaryLoading, summaryError, pending
             </div>
           </div>
           <div className="dashboard-filter-row">
-            <label className="dashboard-field"><span>Team</span><select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)} style={inputStyle}><option value="">All teams</option>{teams.map((team) => <option key={team} value={team}>{team}</option>)}</select></label>
+            <label className="dashboard-field"><span>Team</span><select value={teamFilter} onChange={(event) => changeTeamFilter(event.target.value)} style={inputStyle}><option value="">All teams</option>{teams.map((team) => <option key={team} value={team}>{team}</option>)}</select></label>
             <label className="dashboard-field"><span>Status on selected date</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} style={inputStyle}><option value="">All statuses</option>{["Present", "Absent", "On leave", "Holiday", "Non-working day", "Scheduled", "Not clocked in"].map((status) => <option key={status} value={status}>{status}</option>)}</select></label>
           </div>
           <TeamAttendanceTable
@@ -655,14 +721,6 @@ function EmployeeDashboard({ user, summary, summaryLoading, summaryError }) {
 
       <DashboardTopWidgets summary={summary} loading={summaryLoading} error={summaryError} />
 
-      <DateRangeFilter
-        draft={draftRange}
-        onChange={setDraftRange}
-        onApply={applyRange}
-        onReset={resetRange}
-        error={rangeError}
-      />
-
       {error && <div className="login-error" role="alert">{error}</div>}
       {loading ? <Loader /> : employee && (
         <>
@@ -692,6 +750,13 @@ function EmployeeDashboard({ user, summary, summaryLoading, summaryError }) {
           </div>
 
           <div className="dashboard-employee-analytics">
+            <DateRangeFilter
+              draft={draftRange}
+              onChange={setDraftRange}
+              onApply={applyRange}
+              onReset={resetRange}
+              error={rangeError}
+            />
             <div className="card">
               <div className="card-title-row">
                 <div><h3>Attendance Trend</h3><div className="muted" style={{ fontSize: 12, marginTop: 3 }}>{formatDate(range.from)} – {formatDate(range.to)}</div></div>

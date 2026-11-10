@@ -7,7 +7,6 @@ import Loader from "../components/Loader";
 import DashboardTopWidgets from "../components/DashboardTopWidgets";
 import Badge from "../components/Badge";
 import CandidateDetailModal from "../components/CandidateDetailModal";
-import LeaveBalanceSummary from "../components/LeaveBalanceSummary";
 import AttendanceDashboard from "../components/AttendanceDashboard";
 import DashboardPendingRequests from "../components/DashboardPendingRequests";
 import { useAuth } from "../context/AuthContext";
@@ -35,9 +34,6 @@ export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [summaryError, setSummaryError] = useState("");
-  const [leaveBalances, setLeaveBalances] = useState([]);
-  const [leaveBalancesLoading, setLeaveBalancesLoading] = useState(user.role !== ROLES.CONTRACT_EMPLOYEE);
-  const [leaveBalancesError, setLeaveBalancesError] = useState("");
   const attendanceDashboardRole = user.role === ROLES.MANAGER || user.role === ROLES.EMPLOYEE;
 
   useEffect(() => {
@@ -54,19 +50,6 @@ export default function Dashboard() {
         if (active) setLoading(false);
       });
 
-    if (user.role !== ROLES.CONTRACT_EMPLOYEE) {
-      client
-        .get("/leave/balances")
-        .then(({ data }) => {
-          if (active) setLeaveBalances(data);
-        })
-        .catch((err) => {
-          if (active) setLeaveBalancesError(err?.response?.data?.message || "Could not load your leave balance.");
-        })
-        .finally(() => {
-          if (active) setLeaveBalancesLoading(false);
-        });
-    }
     return () => {
       active = false;
     };
@@ -84,13 +67,6 @@ export default function Dashboard() {
             summaryError={summaryError}
             pendingRequests={user.role === ROLES.MANAGER && <DashboardPendingRequests />}
           />
-          {user.role !== ROLES.CONTRACT_EMPLOYEE && (
-            <LeaveBalanceSummary
-              balances={leaveBalances}
-              loading={leaveBalancesLoading}
-              error={leaveBalancesError}
-            />
-          )}
         </>
       ) : (
         <>
@@ -115,14 +91,6 @@ export default function Dashboard() {
                     />
                   ))}
               </div>
-
-              {user.role !== ROLES.CONTRACT_EMPLOYEE && (
-                <LeaveBalanceSummary
-                  balances={leaveBalances}
-                  loading={leaveBalancesLoading}
-                  error={leaveBalancesError}
-                />
-              )}
 
               {user.role === ROLES.HR_RECRUITER && <RecruiterPanel summary={summary} />}
             </>

@@ -73,37 +73,44 @@ export default function DashboardPendingRequests() {
           <h3>Pending Requests</h3>
           <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Leave and attendance correction approvals</div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Link className="btn btn-sm btn-outline" to="/leave">All leave requests</Link>
-          <Link className="btn btn-sm btn-outline" to="/attendance?tab=approvals">Attendance corrections</Link>
-        </div>
       </div>
       {error && <div className="login-error" role="alert" style={{ marginBottom: 12 }}>{error}</div>}
       {loading ? <Loader /> : requests.length === 0 ? (
         <div className="muted" style={{ fontSize: 13 }}>There are no pending requests in your approval scope.</div>
       ) : (
-        <div className="table-wrap">
-          <table className="data-table">
+        <div className="table-wrap dashboard-pending-table-wrap">
+          <table className="data-table dashboard-pending-table">
+            <colgroup>
+              <col className="dashboard-pending-col-employee" />
+              <col className="dashboard-pending-col-request" />
+              <col className="dashboard-pending-col-details" />
+              <col className="dashboard-pending-col-dates" />
+              <col className="dashboard-pending-col-action" />
+            </colgroup>
             <thead><tr><th>Employee</th><th>Request</th><th>Details</th><th>Dates</th><th>Action</th></tr></thead>
             <tbody>
-              {requests.map((request) => (
-                <tr key={request.key}>
-                  <td><strong>{request.employee_name || "Employee"}</strong><div className="muted" style={{ fontSize: 11 }}>{request.employee_code || ""}</div></td>
-                  <td>{request.requestType}</td>
-                  <td>{request.requestType === "Leave"
-                    ? `${request.leave_type || "Leave"} · ${request.days || 0} day(s)`
-                    : `${request.regularization_reason_label || "Punch correction"}${request.regularization_note ? ` · ${request.regularization_note}` : ""}`}</td>
-                  <td>{request.requestType === "Leave"
-                    ? `${request.start_date} – ${request.end_date}`
-                    : request.work_date}</td>
-                  <td>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn-sm btn-success" disabled={busy === request.key} onClick={() => decide(request, "approve")}>Approve</button>
-                      <button className="btn btn-sm btn-danger" disabled={busy === request.key} onClick={() => decide(request, "reject")}>Reject</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {requests.map((request) => {
+                const details = request.requestType === "Leave"
+                  ? `${request.leave_type || "Leave"} · ${request.days || 0} day(s)`
+                  : `${request.regularization_reason_label || "Punch correction"}${request.regularization_note ? ` · ${request.regularization_note}` : ""}`;
+                const dates = request.requestType === "Leave"
+                  ? `${request.start_date} – ${request.end_date}`
+                  : request.work_date;
+                return (
+                  <tr key={request.key}>
+                    <td data-label="Employee"><strong>{request.employee_name || "Employee"}</strong><div className="muted" style={{ fontSize: 11 }}>{request.employee_code || ""}</div></td>
+                    <td data-label="Request">{request.requestType}</td>
+                    <td data-label="Details" className="dashboard-pending-details" title={details}>{details}</td>
+                    <td data-label="Dates" className="dashboard-pending-dates">{dates}</td>
+                    <td data-label="Action" className="dashboard-pending-action">
+                      <div className="dashboard-pending-actions">
+                        <button className="btn btn-sm btn-success" disabled={busy === request.key} onClick={() => decide(request, "approve")}>Approve</button>
+                        <button className="btn btn-sm btn-danger" disabled={busy === request.key} onClick={() => decide(request, "reject")}>Reject</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

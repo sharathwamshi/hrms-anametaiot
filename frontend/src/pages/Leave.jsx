@@ -102,21 +102,6 @@ export default function Leave() {
     }
   };
 
-  const cancelRequest = async (request) => {
-    if (!window.confirm("Cancel this leave request?")) return;
-    setError("");
-    setSuccess("");
-    setBusyRequestId(request.id);
-    try {
-      await client.post(`/leave/${request.id}/cancel`);
-      if (await loadAll()) setSuccess("Leave request cancelled and the balance updated.");
-    } catch (err) {
-      setError(err?.response?.data?.message || "Could not cancel this leave request.");
-    } finally {
-      setBusyRequestId(null);
-    }
-  };
-
   if (loading) return <AppLayout title="Leave"><Loader /></AppLayout>;
 
   return (
@@ -134,11 +119,11 @@ export default function Leave() {
         <div className="table-wrap">
           <table className="data-table">
             <thead>
-              <tr><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Reviewer</th><th>Action</th></tr>
+              <tr><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Reviewer</th></tr>
             </thead>
             <tbody>
               {myRequests.length === 0 && (
-                <tr className="empty-row"><td colSpan={7}>No leave requests yet.</td></tr>
+                <tr className="empty-row"><td colSpan={6}>No leave requests yet.</td></tr>
               )}
               {myRequests.map((r) => (
                 <tr key={r.id}>
@@ -148,17 +133,6 @@ export default function Leave() {
                   <td>{r.days}</td>
                   <td><Badge status={r.status} /></td>
                   <td>{r.reviewer_name || "—"}</td>
-                  <td>
-                    {(r.status === "pending" || (r.status === "approved" && r.start_date >= localDateStr())) && (
-                      <button
-                        className="btn btn-sm btn-outline"
-                        disabled={busyRequestId === r.id}
-                        onClick={() => cancelRequest(r)}
-                      >
-                        {busyRequestId === r.id ? "Cancelling..." : "Cancel"}
-                      </button>
-                    )}
-                  </td>
                 </tr>
               ))}
             </tbody>

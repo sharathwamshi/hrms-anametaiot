@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import client from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import Loader from "./Loader";
@@ -12,9 +13,19 @@ import { fmtTime, fmtHours, arrivalLabel, placeLabel, formatCompanyTime, setComp
  *   • several check-ins a day: after clocking out you can check in again with a reason;
  *   • if the company has switched the selfie policy on, a photo file can still be attached.
  */
-export default function ClockWidget({ onPunch, onTimezoneChange }) {
+export default function ClockWidget({
+  onPunch,
+  onTimezoneChange,
+  presentation = "card",
+  minimized = false,
+  onToggleMinimized,
+  onMinimizedClick,
+  dragHandlers,
+}) {
   const { hasClockInOut } = useAuth();
   const [record, setRecord] = useState(null);
+  const [attendanceLoading, setAttendanceLoading] = useState(true);
+  const [attendanceLoadError, setAttendanceLoadError] = useState("");
   const [now, setNow] = useState(new Date());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -39,6 +50,8 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
   const fileRef = useRef(null);
   const clockInDialogRef = useRef(null);
   const clockOutDialogRef = useRef(null);
+  const punchInFlight = useRef(false);
+  const isFloating = presentation === "floating";
 
   const loadWorkLocations = async () => {
     setWorkLocationsLoading(true);
@@ -114,13 +127,38 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
   }, []);
 
   const fetchToday = async () => {
-    const { data } = await client.get("/attendance/today");
-    setRecord(data.record);
+    setAttendanceLoading(true);
+    setAttendanceLoadError("");
+    try {
+      const { data } = await client.get("/attendance/today");
+      setRecord(data.record);
+      return data.record;
+    } catch (err) {
+      setAttendanceLoadError(err?.response?.data?.message || "Could not load your attendance status.");
+      throw err;
+    } finally {
+      setAttendanceLoading(false);
+    }
   };
 
   useEffect(() => {
-    if (hasClockInOut) fetchToday();
+    if (hasClockInOut) fetchToday().catch(() => {});
   }, [hasClockInOut]);
+
+  useEffect(() => {
+    if (!hasClockInOut || !isFloating) return undefined;
+    const refreshStatus = () => {
+      if (document.visibilityState === "visible" && !punchInFlight.current) {
+        fetchToday().catch(() => {});
+      }
+    };
+    const interval = window.setInterval(refreshStatus, 60_000);
+    window.addEventListener("focus", refreshStatus);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshStatus);
+    };
+  }, [hasClockInOut, isFloating]);
 
   if (!hasClockInOut) {
     return (
@@ -188,7 +226,9 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
       setClockOutLocationStatus("ready");
     } catch (err) {
       setClockOutLocationStatus("error");
-      setClockOutLocationError(err?.response?.data?.message || "Could not verify your location. Please try again.");
+      const message = err?.response?.data?.message || "Could not verify your location. Please try again.";
+      setClockOutLocation({ error: message });
+      setClockOutLocationError(message);
     }
   };
 
@@ -220,6 +260,7 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
   };
 
   const handleClock = async (action) => {
+    if (punchInFlight.current) return;
     const isReentry = action === "clock-in" && canCheckInAgain;
     if (isReentry && reason.trim().length < 3) {
       setError("Please give a reason for checking in again — your manager will see it.");
@@ -237,6 +278,7 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
       setError("Fetch and verify your location before clocking out.");
       return;
     }
+    punchInFlight.current = true;
     setBusy(true);
     setError("");
     setNotice(null);
@@ -273,13 +315,14 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
       setReason("");
       setReentering(false);
       if (fileRef.current) fileRef.current.value = "";
-      await fetchToday();
+      await fetchToday().catch(() => {});
       onPunch?.();
     } catch (err) {
       setError(err?.response?.data?.message || "Something went wrong.");
       if (err?.response?.data?.selfie_required) setSelfieRequired(true);
     } finally {
       setBusy(false);
+      punchInFlight.current = false;
     }
   };
 
@@ -290,26 +333,77 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
   };
 
   return (
-    <div className="card clock-widget">
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div className="label" style={{ marginBottom: 4 }}>Today's Attendance</div>
-        <div className="time">
-          {formatCompanyTime(now, true)}
-        </div>
-        {error && <div style={{ color: "var(--color-danger)", fontSize: 12.5, marginTop: 6 }}>{error}</div>}
-        {notice && (
-          <div style={{ ...noticeStyle[notice.kind], fontSize: 12.5, borderRadius: 6, padding: "7px 10px", marginTop: 8, maxWidth: 520 }}>{notice.text}</div>
-        )}
-        {selfieRequired && clockedIn && !clockOutOpen && (
-          <div style={{ marginTop: 8, fontSize: 12.5 }}>
-            <label className="muted">Photo required by your company: </label>
-            <input
-              ref={fileRef} type="file" accept="image/*" capture="user"
-              onChange={(e) => setSelfie(e.target.files?.[0] || null)}
-            />
-          </div>
-        )}
-        {sessions.length > 0 && (
+    <div className={isFloating ? "quick-attendance" : "card clock-widget"}>
+      {isFloating && minimized ? (
+        <button
+          type="button"
+          className="quick-attendance-minimized"
+          aria-label="Expand Quick Attendance"
+          title="Expand Quick Attendance"
+          onClick={onMinimizedClick}
+          {...dragHandlers}
+        >
+          <span aria-hidden="true">◷</span>
+        </button>
+      ) : (
+        <>
+          {isFloating && (
+            <div className="quick-attendance-header" {...dragHandlers}>
+              <span className="quick-attendance-grip" aria-hidden="true">⠿</span>
+              <strong>Quick Attendance</strong>
+              <button
+                type="button"
+                className="quick-attendance-toggle"
+                data-no-drag
+                aria-label="Minimize Quick Attendance"
+                title="Minimize"
+                onClick={onToggleMinimized}
+              >
+                −
+              </button>
+            </div>
+          )}
+          <div className={isFloating ? "quick-attendance-body" : ""}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              {!isFloating && <div className="label" style={{ marginBottom: 4 }}>Today's Attendance</div>}
+              {isFloating && (
+                <div className="quick-attendance-status" role="status">
+                  {attendanceLoading
+                    ? "Checking attendance status…"
+                    : attendanceLoadError
+                      ? "Attendance status unavailable"
+                      : clockedIn
+                        ? `Clocked in${lastSession?.clock_in ? ` since ${fmtTime(lastSession.clock_in)}` : ""}`
+                        : canCheckInAgain && lastSession?.clock_out
+                          ? `Clocked out at ${fmtTime(lastSession.clock_out)}`
+                          : "Not clocked in"}
+                </div>
+              )}
+              <div className={isFloating ? "time quick-attendance-time" : "time"}>
+                {formatCompanyTime(now, true)}
+              </div>
+              {attendanceLoadError && isFloating && (
+                <div className="quick-attendance-error" role="alert">
+                  {attendanceLoadError}
+                  <button type="button" className="btn btn-sm btn-outline" onClick={() => fetchToday().catch(() => {})}>
+                    Retry
+                  </button>
+                </div>
+              )}
+              {error && <div style={{ color: "var(--color-danger)", fontSize: 12.5, marginTop: 6 }}>{error}</div>}
+              {notice && (
+                <div style={{ ...noticeStyle[notice.kind], fontSize: 12.5, borderRadius: 6, padding: "7px 10px", marginTop: 8, maxWidth: 520 }}>{notice.text}</div>
+              )}
+              {selfieRequired && clockedIn && !clockOutOpen && (
+                <div style={{ marginTop: 8, fontSize: 12.5 }}>
+                  <label className="muted">Photo required by your company: </label>
+                  <input
+                    ref={fileRef} type="file" accept="image/*" capture="user"
+                    onChange={(e) => setSelfie(e.target.files?.[0] || null)}
+                  />
+                </div>
+              )}
+              {!isFloating && sessions.length > 0 && (
           <div style={{ fontSize: 12.5, marginTop: 8 }}>
             {sessions.map((x) => {
               const place = placeLabel(x.clock_out ? x.clock_out_within_geofence : x.clock_in_within_geofence);
@@ -328,34 +422,37 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
             {record.total_hours > 0 && <div className="muted">Worked so far: <strong>{fmtHours(record.total_hours)}</strong>{record.away_minutes > 0 ? ` · away ${record.away_minutes} min` : ""}</div>}
           </div>
         )}
-        {canCheckInAgain && !reentering && (
-          <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
-            Clocked out{lastSession?.clock_out ? ` at ${fmtTime(lastSession.clock_out)}` : ""}. Clocked out by mistake, or coming back? You can check in again — with a reason your manager can see.
-          </div>
-        )}
-      </div>
-      <div>
-        {!record?.clock_in && (
+              {!isFloating && canCheckInAgain && !reentering && (
+                <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+                  Clocked out{lastSession?.clock_out ? ` at ${fmtTime(lastSession.clock_out)}` : ""}. Clocked out by mistake, or coming back? You can check in again — with a reason your manager can see.
+                </div>
+              )}
+            </div>
+            <div className={isFloating ? "quick-attendance-actions" : ""}>
+              {(!isFloating || (!attendanceLoading && !attendanceLoadError)) && !record?.clock_in && (
           <button className="btn btn-success" disabled={busy} onClick={openClockIn}>
             {busy ? "Please wait…" : "Clock In"}
           </button>
         )}
-        {clockedIn && (
-          <button className="btn btn-danger" disabled={busy} onClick={openClockOut}>
+              {(!isFloating || (!attendanceLoading && !attendanceLoadError)) && clockedIn && (
+          <button className="btn btn-danger" disabled={busy || (isFloating && attendanceLoading)} onClick={openClockOut}>
             {busy ? "Please wait…" : "Clock Out"}
           </button>
         )}
-        {canCheckInAgain && !reentering && (
-          <button className="btn btn-outline" onClick={() => setReentering(true)}>Check in again</button>
+              {(!isFloating || (!attendanceLoading && !attendanceLoadError)) && canCheckInAgain && !reentering && (
+          <button className={isFloating ? "btn btn-success" : "btn btn-outline"} onClick={() => setReentering(true)}>Check in again</button>
         )}
-        {canCheckInAgain && reentering && (
+              {(!isFloating || (!attendanceLoading && !attendanceLoadError)) && canCheckInAgain && reentering && (
           <>
             <button className="btn btn-success" disabled={busy} onClick={openClockIn}>{busy ? "Please wait…" : "Check In"}</button>
             <button className="btn btn-outline" style={{ marginLeft: 6 }} onClick={() => { setReentering(false); setReason(""); setError(""); }}>Cancel</button>
           </>
         )}
-      </div>
-      {clockInOpen && (
+            </div>
+          </div>
+        </>
+      )}
+      {clockInOpen && createPortal(
         <div className="modal-overlay clock-in-location-overlay" role="presentation">
           <div ref={clockInDialogRef} className="modal-box" role="dialog" aria-modal="true" aria-labelledby="clock-in-location-title" tabIndex={-1}>
             <h3 id="clock-in-location-title" style={{ marginBottom: 6 }}>{canCheckInAgain ? "Check in again" : "Clock in"}</h3>
@@ -474,9 +571,10 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
-      {clockOutOpen && (
+      {clockOutOpen && createPortal(
         <div className="modal-overlay clock-in-location-overlay" role="presentation">
           <div ref={clockOutDialogRef} className="modal-box" role="dialog" aria-modal="true" aria-labelledby="clock-out-location-title" tabIndex={-1}>
             <h3 id="clock-out-location-title" style={{ marginBottom: 6 }}>Clock out</h3>
@@ -535,7 +633,8 @@ export default function ClockWidget({ onPunch, onTimezoneChange }) {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

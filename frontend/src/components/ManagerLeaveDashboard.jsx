@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import client from "../api/client";
 import Badge from "./Badge";
 import Loader from "./Loader";
@@ -31,6 +31,8 @@ export default function ManagerLeaveDashboard() {
     annual_entitlement: "",
   });
   const [savingEntitlement, setSavingEntitlement] = useState(false);
+  const [selectedRequestStatus, setSelectedRequestStatus] = useState(null);
+  const requestsSectionRef = useRef(null);
 
   const loadData = useCallback(async (activeFilters = EMPTY_FILTERS) => {
     setError("");
@@ -74,13 +76,24 @@ export default function ManagerLeaveDashboard() {
   const applyFilters = (event) => {
     event.preventDefault();
     setSuccess("");
+    setSelectedRequestStatus(null);
     loadData(filters);
   };
 
   const clearFilters = () => {
     setFilters(EMPTY_FILTERS);
+    setSelectedRequestStatus(null);
     setSuccess("");
     loadData(EMPTY_FILTERS);
+  };
+
+  const showRequestsForStatus = (status) => {
+    const nextFilters = { ...EMPTY_FILTERS, status };
+    setFilters(nextFilters);
+    setSelectedRequestStatus(status);
+    setSuccess("");
+    loadData(nextFilters);
+    requestsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const openEmployeeEditor = (employee, leaveTypeId, entitlement) => {
@@ -219,6 +232,7 @@ export default function ManagerLeaveDashboard() {
   };
 
   const counts = summary?.counts || {};
+  const hasPendingRequests = requests.some((request) => request.status === "pending");
 
   return (
     <section className="section-gap" aria-labelledby="manager-leave-heading">
@@ -245,10 +259,18 @@ export default function ManagerLeaveDashboard() {
             </button>
           </div>
           <div className="stat-grid section-gap">
-            <StatCard label="Total Leave Requests" value={counts.total || 0} icon="✈" color="blue" />
-            <StatCard label="Pending Requests" value={counts.pending || 0} icon="!" color="amber" />
-            <StatCard label="Approved Requests" value={counts.approved || 0} icon="✓" color="green" />
-            <StatCard label="Rejected Requests" value={counts.rejected || 0} icon="×" color="orange" />
+            <a href="#team-leave-requests" className={`manager-leave-stat-button${selectedRequestStatus === "all" ? " selected" : ""}`} onClick={(event) => { event.preventDefault(); showRequestsForStatus("all"); }} aria-current={selectedRequestStatus === "all" ? "true" : undefined}>
+              <StatCard label="Total Leave Requests" value={counts.total || 0} icon="✈" color="blue" />
+            </a>
+            <a href="#team-leave-requests" className={`manager-leave-stat-button${selectedRequestStatus === "pending" ? " selected" : ""}`} onClick={(event) => { event.preventDefault(); showRequestsForStatus("pending"); }} aria-current={selectedRequestStatus === "pending" ? "true" : undefined}>
+              <StatCard label="Pending Requests" value={counts.pending || 0} icon="!" color="amber" />
+            </a>
+            <a href="#team-leave-requests" className={`manager-leave-stat-button${selectedRequestStatus === "approved" ? " selected" : ""}`} onClick={(event) => { event.preventDefault(); showRequestsForStatus("approved"); }} aria-current={selectedRequestStatus === "approved" ? "true" : undefined}>
+              <StatCard label="Approved Requests" value={counts.approved || 0} icon="✓" color="green" />
+            </a>
+            <a href="#team-leave-requests" className={`manager-leave-stat-button${selectedRequestStatus === "rejected" ? " selected" : ""}`} onClick={(event) => { event.preventDefault(); showRequestsForStatus("rejected"); }} aria-current={selectedRequestStatus === "rejected" ? "true" : undefined}>
+              <StatCard label="Rejected Requests" value={counts.rejected || 0} icon="×" color="orange" />
+            </a>
           </div>
 
           <div className="card section-gap">
@@ -287,8 +309,15 @@ export default function ManagerLeaveDashboard() {
             )}
           </div>
 
-          <div className="card">
-            <div className="card-title-row"><h3>Team Leave History &amp; Approvals</h3></div>
+          <div id="team-leave-requests" className="card manager-leave-requests" ref={requestsSectionRef}>
+            <div className="card-title-row">
+              <h3>Team Leave History &amp; Approvals</h3>
+              {selectedRequestStatus && (
+                <span className="manager-leave-filter-label">
+                  Showing {selectedRequestStatus === "all" ? "all" : selectedRequestStatus} requests ({requests.length})
+                </span>
+              )}
+            </div>
             <form className="form-grid section-gap" onSubmit={applyFilters}>
               <div className="form-field">
                 <label htmlFor="team-leave-employee">Employee</label>
@@ -331,13 +360,26 @@ export default function ManagerLeaveDashboard() {
                 <button className="btn btn-sm btn-outline" type="button" onClick={clearFilters} disabled={loading}>Clear</button>
               </div>
             </form>
-            <div className="table-wrap">
-              <table className="data-table">
+            <div className="table-wrap manager-leave-table-wrap">
+              <table className={`data-table manager-leave-table${hasPendingRequests ? " has-actions" : " no-actions"}`}>
+                <colgroup>
+                  <col className="manager-leave-col-employee" />
+                  <col className="manager-leave-col-id" />
+                  <col className="manager-leave-col-type" />
+                  <col className="manager-leave-col-date" />
+                  <col className="manager-leave-col-date" />
+                  <col className="manager-leave-col-days" />
+                  <col className="manager-leave-col-reason" />
+                  <col className="manager-leave-col-remaining" />
+                  <col className="manager-leave-col-status" />
+                  <col className="manager-leave-col-comment" />
+                  {hasPendingRequests && <col className="manager-leave-col-action" />}
+                </colgroup>
                 <thead>
-                  <tr><th>Employee</th><th>Employee ID</th><th>Leave Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Remaining</th><th>Status</th><th>Review Comment</th><th>Action</th></tr>
+                  <tr><th>Employee</th><th>Employee ID</th><th>Leave Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Remaining</th><th>Status</th><th>Review Comment</th>{hasPendingRequests && <th>Action</th>}</tr>
                 </thead>
                 <tbody>
-                  {!requests.length && <tr className="empty-row"><td colSpan={11}>No team leave requests match these filters.</td></tr>}
+                  {!requests.length && <tr className="empty-row"><td colSpan={hasPendingRequests ? 11 : 10}>No team leave requests match these filters.</td></tr>}
                   {requests.map((request) => (
                     <tr key={request.id}>
                       <td>{request.employee_name}</td>
@@ -350,16 +392,18 @@ export default function ManagerLeaveDashboard() {
                       <td>{request.remaining_leave == null ? "—" : `${request.remaining_leave} days`}</td>
                       <td><Badge status={request.status} /></td>
                       <td>{request.review_comment || "—"}</td>
-                      <td>
-                        {request.status === "pending" ? (
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button className="btn btn-sm btn-success" disabled={busyRequestId !== null} onClick={() => decide(request, "approved")}>
-                              {busyRequestId === request.id ? "Saving..." : "Approve"}
-                            </button>
-                            <button className="btn btn-sm btn-danger" disabled={busyRequestId !== null} onClick={() => decide(request, "rejected")}>Reject</button>
-                          </div>
-                        ) : "—"}
-                      </td>
+                      {hasPendingRequests && (
+                        <td>
+                          {request.status === "pending" ? (
+                            <div className="manager-leave-actions">
+                              <button className="btn btn-sm btn-success" disabled={busyRequestId !== null} onClick={() => decide(request, "approved")}>
+                                {busyRequestId === request.id ? "Saving..." : "Approve"}
+                              </button>
+                              <button className="btn btn-sm btn-danger" disabled={busyRequestId !== null} onClick={() => decide(request, "rejected")}>Reject</button>
+                            </div>
+                          ) : "—"}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
