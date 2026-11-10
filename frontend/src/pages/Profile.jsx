@@ -2,12 +2,9 @@ import { useEffect, useState } from "react";
 import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import { useAuth } from "../context/AuthContext";
-import { ROLE_LABELS, ROLES } from "../config/roles";
-import LeaveApprovalsPanel from "../components/LeaveApprovalsPanel";
+import { ROLE_LABELS } from "../config/roles";
 import EmployeeFamilyPanel from "../components/EmployeeFamilyPanel";
 import EmployeeDocumentsPanel from "../components/EmployeeDocumentsPanel";
-
-const APPROVER_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.SUPER_ADMIN];
 
 export default function Profile() {
   const { user, roleLabel, setUser } = useAuth();
@@ -322,7 +319,6 @@ export default function Profile() {
         <EmployeeFamilyPanel />
         <EmployeeDocumentsPanel />
       </div>
-      {APPROVER_ROLES.includes(user.role) && <LeaveApprovalsPanel />}
       {resignationDialogOpen && (
         <div className="modal-overlay" role="presentation">
           <div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="resignation-confirm-title">
