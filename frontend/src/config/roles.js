@@ -48,7 +48,7 @@ export const NAV_BY_ROLE = {
     "assets", "insurance", "profile",
   ],
   [ROLES.MANAGER]: [
-    "dashboard", "employees", "attendance", "leave", "reports", "payslips", "recruitment",
+    "dashboard", "employees", "attendance", "leave", "payslips", "recruitment",
     "allCandidates", "recruiters", "vendors", "allPlacements", "insurance", "profile",
   ],
   [ROLES.FINANCE_ACCOUNTS]: [

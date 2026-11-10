@@ -16,6 +16,7 @@ from app import create_app
 from app.extensions import db
 from app.models import Attendance, CompanySettings, Department, User
 from app.roles import EMPLOYEE, MANAGER
+from app.utils.company_time import company_today
 
 
 class AttendanceDashboardApiTest(unittest.TestCase):
@@ -94,6 +95,107 @@ class AttendanceDashboardApiTest(unittest.TestCase):
         self.assertEqual(payload["employees"][0]["records"][0]["clock_in"], "2026-10-23T04:05:00")
         self.assertNotIn("clock_in_lat", payload["employees"][0]["records"][0])
         self.assertNotIn("clock_in_selfie", payload["employees"][0]["records"][0])
+
+    def test_team_overview_present_people_match_summary_and_manager_scope(self):
+        half_day_employee = User(
+            employee_code="EMP-3",
+            email="half-day@test.invalid",
+            full_name="Half Day Employee",
+            role=EMPLOYEE,
+            manager_id=self.manager.id,
+            department_id=self.employee.department_id,
+        )
+        half_day_employee.set_password("test-password")
+        db.session.add(half_day_employee)
+        db.session.flush()
+        db.session.add(Attendance(
+            user_id=half_day_employee.id,
+            work_date=date(2026, 10, 23),
+            clock_in=datetime(2026, 10, 23, 4, 10),
+            status="half_day",
+        ))
+        db.session.commit()
+
+        response = self.client.get(
+            "/api/attendance/team/overview?date=2026-10-23",
+            headers=self.headers("manager@test.invalid"),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        present_people = payload["present_people"]
+        self.assertEqual(payload["summary"]["present"], len(present_people))
+        self.assertEqual(
+            {person["user"]["employee_code"] for person in present_people},
+            {"EMP-1", "EMP-3"},
+        )
+        self.assertEqual(
+            {person["status"] for person in present_people},
+            {"present", "half_day"},
+        )
+
+    def test_team_overview_category_ids_match_counts_and_manager_scope(self):
+        today = company_today()
+
+        def make_report(code, email, name):
+            user = User(
+                employee_code=code,
+                email=email,
+                full_name=name,
+                role=EMPLOYEE,
+                manager_id=self.manager.id,
+                department_id=self.employee.department_id,
+            )
+            user.set_password("test-password")
+            db.session.add(user)
+            db.session.flush()
+            return user
+
+        clocked_in = make_report("EMP-3", "clocked-in@test.invalid", "Clocked In")
+        absent = make_report("EMP-4", "absent@test.invalid", "Absent")
+        clock_in = datetime.combine(today, datetime.min.time()).replace(hour=9, minute=30)
+        db.session.add(Attendance(
+            user_id=clocked_in.id,
+            work_date=today,
+            clock_in=clock_in,
+            status="present",
+            clock_in_within_geofence=False,
+        ))
+        db.session.add(Attendance(
+            user_id=absent.id,
+            work_date=today,
+            status="absent",
+        ))
+        db.session.commit()
+
+        response = self.client.get(
+            f"/api/attendance/team/overview?date={today.isoformat()}",
+            headers=self.headers("manager@test.invalid"),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        category_ids = payload["category_person_ids"]
+        self.assertEqual(
+            len(category_ids["clocked_in_now"]),
+            payload["summary"]["clocked_in_now"],
+        )
+        self.assertEqual(
+            len(category_ids["not_clocked_in"]),
+            payload["summary"]["not_clocked_in"],
+        )
+        self.assertEqual(len(category_ids["absent"]), payload["summary"]["absent"])
+        self.assertEqual(
+            len(category_ids["outside_office"]),
+            payload["summary"]["outside_office"],
+        )
+        self.assertEqual(category_ids["clocked_in_now"], [clocked_in.id])
+        self.assertEqual(category_ids["absent"], [absent.id])
+        self.assertEqual(category_ids["outside_office"], [clocked_in.id])
+        self.assertEqual(category_ids["not_clocked_in"], [self.employee.id])
+        self.assertNotIn(self.other_employee.id, {
+            user_id for ids in category_ids.values() for user_id in ids
+        })
 
     def test_employee_cannot_access_team_analytics(self):
         response = self.client.get(

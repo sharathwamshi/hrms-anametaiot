@@ -66,7 +66,7 @@ export default function ManagerRegularizeModal({ person, day, onClose, onDone })
               )}
             </>
           )}
-          {reasons.length === 0 && <p className="muted" style={{ fontSize: 12 }}>No reasons are set up yet — add some under “Regularization Rules”.</p>}
+          {reasons.length === 0 && <p className="muted" style={{ fontSize: 12 }}>No reasons are set up yet — ask an authorized manager or HR Operations user to add one.</p>}
           {error && <div className="login-error" style={{ marginBottom: 10 }}>{error}</div>}
           <div className="form-actions">
             <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>

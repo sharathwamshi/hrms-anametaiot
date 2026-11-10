@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Loader from "./components/Loader";
+import FloatingAttendanceWidget from "./components/FloatingAttendanceWidget";
 
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -48,8 +49,9 @@ export default function App() {
   if (loading) return <Loader label="Loading AnametaIOT HRMS..." />;
 
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
+    <>
+      <Routes>
+        <Route path="/login" element={<Login />} />
 
       <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
 
@@ -191,7 +193,9 @@ export default function App() {
 
       <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
       <Route path="/insurance" element={<ProtectedRoute><Insurance /></ProtectedRoute>} />
-      <Route path="/documents" element={<ProtectedRoute><Navigate to="/profile#documents" replace /></ProtectedRoute>} />
-    </Routes>
+        <Route path="/documents" element={<ProtectedRoute><Navigate to="/profile#documents" replace /></ProtectedRoute>} />
+      </Routes>
+      <FloatingAttendanceWidget />
+    </>
   );
 }

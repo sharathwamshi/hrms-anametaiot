@@ -1331,8 +1331,15 @@ def _build_overview(claims, viewer_id, target_date):
     holiday = Holiday.query.filter_by(holiday_date=target_date).first()
     is_today = target_date == company_today()
 
-    rows, counts = [], {"present": 0, "not_clocked_in": 0, "absent": 0, "on_leave": 0, "outside_office": 0,
-                        "clocked_in_now": 0, "reentries": 0}
+    rows, present_people = [], []
+    category_person_ids = {
+        "clocked_in_now": [],
+        "not_clocked_in": [],
+        "absent": [],
+        "outside_office": [],
+    }
+    counts = {"present": 0, "not_clocked_in": 0, "absent": 0, "on_leave": 0, "outside_office": 0,
+              "clocked_in_now": 0, "reentries": 0}
     for u in users:
         rec = records.get(u.id)
         if rec and rec.clock_in:
@@ -1367,7 +1374,8 @@ def _build_overview(claims, viewer_id, target_date):
         reentries = [sess for sess in sessions if (sess.session_no or 1) > 1]
         latest_reentry = reentries[-1] if reentries else None
 
-        if status in ("present", "regularized", "half_day"):
+        is_present = status in ("present", "regularized", "half_day")
+        if is_present:
             counts["present"] += 1
         elif status in counts:
             counts[status] += 1
@@ -1376,16 +1384,40 @@ def _build_overview(claims, viewer_id, target_date):
         counts["reentries"] += len(reentries)
 
         rec_dict = rec.to_dict() if rec else None
-        rows.append({
+        person = {
             "user": {"id": u.id, "full_name": u.full_name, "employee_code": u.employee_code, "role": u.role, "designation": u.designation,
                      "restrict_to_office": bool(u.restrict_to_office)},
             "status": status, "record": (rec_dict if sensitive_ok or not rec_dict else _redact(rec_dict)),
             "clocked_in_now": clocked_in_now, "last_known_location": location, "outside_office": outside,
             "session_count": len(sessions), "reentry_count": len(reentries),
             "latest_reentry": ({"at": latest_reentry.clock_in.isoformat() + "Z", "reason": latest_reentry.reentry_reason} if latest_reentry else None),
-        })
+        }
+        rows.append(person)
+        if is_present:
+            present_people.append({
+                "user": {
+                    "id": u.id,
+                    "full_name": u.full_name,
+                    "employee_code": u.employee_code,
+                    "designation": u.designation,
+                },
+                "status": status,
+                "record": {
+                    "clock_in": rec_dict.get("clock_in"),
+                    "clock_out": rec_dict.get("clock_out"),
+                } if rec_dict else None,
+            })
+        if clocked_in_now:
+            category_person_ids["clocked_in_now"].append(u.id)
+        if status == "not_clocked_in":
+            category_person_ids["not_clocked_in"].append(u.id)
+        if status == "absent":
+            category_person_ids["absent"].append(u.id)
+        if outside:
+            category_person_ids["outside_office"].append(u.id)
     return {"date": target_date.isoformat(), "is_holiday": bool(holiday), "holiday_name": holiday.name if holiday else None,
-            "summary": counts, "people": rows}
+            "summary": counts, "people": rows, "present_people": present_people,
+            "category_person_ids": category_person_ids}
 
 
 @bp.get("/team/overview")

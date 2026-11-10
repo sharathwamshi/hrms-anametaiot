@@ -1,15 +1,12 @@
 import { useEffect, useState } from "react";
 import client from "../api/client";
 import AppLayout from "../components/AppLayout";
-import ClockWidget from "../components/ClockWidget";
 import Badge from "../components/Badge";
 import Loader from "../components/Loader";
 import RegularizeRequestModal from "../components/RegularizeRequestModal";
 import RegularizationReviewModal from "../components/RegularizationReviewModal";
 import AttendanceCalendar from "../components/AttendanceCalendar";
 import TeamOverviewPanel from "../components/TeamOverviewPanel";
-import ReentriesPanel from "../components/ReentriesPanel";
-import OfficeLocationsPanel from "../components/OfficeLocationsPanel";
 import WorkLocationOptionsPanel from "../components/WorkLocationOptionsPanel";
 import OfficeRestrictionToggle from "../components/OfficeRestrictionToggle";
 import ExportButton from "../components/ExportButton";
@@ -113,68 +110,116 @@ function HolidaysPanel({ canManage }) {
   );
 }
 
-function RulesPanel() {
+function RegularizationReasonsModal({ onClose }) {
   const [reasons, setReasons] = useState(null);
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [updatingId, setUpdatingId] = useState(null);
 
-  const load = () => client.get("/attendance/regularization-reasons", { params: { active_only: "false" } }).then(({ data }) => setReasons(data));
+  const load = async () => {
+    setLoadError("");
+    try {
+      const { data } = await client.get("/attendance/regularization-reasons", { params: { active_only: "false" } });
+      setReasons(data);
+    } catch (err) {
+      setLoadError(err?.response?.data?.message || "Could not load regularization reasons.");
+    }
+  };
   useEffect(() => { load(); }, []);
 
   const add = async (e) => {
     e.preventDefault();
     setError("");
+    setSuccess("");
+    setSaving(true);
     try {
       await client.post("/attendance/regularization-reasons", { label, description });
       setLabel(""); setDescription("");
-      load();
+      setSuccess("Regularization reason added.");
+      await load();
     } catch (err) {
-      setError(err?.response?.data?.message || "Could not add this rule.");
+      setError(err?.response?.data?.message || "Could not add this reason.");
+    } finally {
+      setSaving(false);
     }
   };
   const toggle = async (r) => {
-    await client.put(`/attendance/regularization-reasons/${r.id}`, { is_active: !r.is_active });
-    load();
+    setError("");
+    setSuccess("");
+    setUpdatingId(r.id);
+    try {
+      await client.put(`/attendance/regularization-reasons/${r.id}`, { is_active: !r.is_active });
+      setSuccess(`Regularization reason ${r.is_active ? "retired" : "reactivated"}.`);
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not update this reason.");
+    } finally {
+      setUpdatingId(null);
+    }
   };
 
   return (
-    <div className="card">
-      <div className="card-title-row"><h3>Regularization Reasons</h3><ExportButton url="/attendance/export/regularization-reasons" filename="Regularization_Reasons" /></div>
-      <p className="muted" style={{ fontSize: 12.5, marginTop: -8, marginBottom: 14 }}>
-        The reasons your team can pick from when they request a missed punch to be excused.
-      </p>
-      <form onSubmit={add} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16, alignItems: "flex-end" }}>
-        <div className="form-field" style={{ marginBottom: 0, flex: 1, minWidth: 160 }}>
-          <label>Reason</label>
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Forgot to clock in" required />
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal-box"
+        style={{ width: "min(760px, 94vw)" }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="regularization-reasons-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="card-title-row" style={{ flexWrap: "wrap", gap: 10 }}>
+          <h3 id="regularization-reasons-title">Regularization Reasons</h3>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <ExportButton url="/attendance/export/regularization-reasons" filename="Regularization_Reasons" />
+            <button type="button" className="btn btn-sm btn-outline" onClick={onClose}>Close</button>
+          </div>
         </div>
-        <div className="form-field" style={{ marginBottom: 0, flex: 1, minWidth: 200 }}>
-          <label>Description (optional)</label>
-          <input value={description} onChange={(e) => setDescription(e.target.value)} />
-        </div>
-        <button className="btn btn-primary btn-sm">Add Rule</button>
-      </form>
-      {error && <div className="login-error" style={{ marginBottom: 10 }}>{error}</div>}
+        <p className="muted" style={{ fontSize: 12.5, marginTop: -8, marginBottom: 14 }}>
+          The reasons your team can pick from when they request a missed punch to be excused.
+        </p>
+        <form onSubmit={add} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16, alignItems: "flex-end" }}>
+          <div className="form-field" style={{ marginBottom: 0, flex: 1, minWidth: 160 }}>
+            <label>Reason</label>
+            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Forgot to clock in" required />
+          </div>
+          <div className="form-field" style={{ marginBottom: 0, flex: 1, minWidth: 200 }}>
+            <label>Description (optional)</label>
+            <input value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+          <button className="btn btn-primary btn-sm" disabled={saving || !label.trim()}>{saving ? "Adding…" : "Add Reason"}</button>
+        </form>
+        {error && <div className="login-error" style={{ marginBottom: 10 }}>{error}</div>}
+        {success && <div className="att-chip green" role="status" style={{ marginBottom: 10 }}>{success}</div>}
 
-      {reasons === null ? <Loader /> : (
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead><tr><th>Reason</th><th>Description</th><th>Status</th><th></th></tr></thead>
-            <tbody>
-              {reasons.length === 0 && <tr className="empty-row"><td colSpan={4}>No reasons defined yet — add one above.</td></tr>}
-              {reasons.map((r) => (
-                <tr key={r.id}>
-                  <td><strong>{r.label}</strong></td>
-                  <td className="muted">{r.description || "—"}</td>
-                  <td><span className={`chip ${r.is_active ? "green" : ""}`}>{r.is_active ? "Active" : "Retired"}</span></td>
-                  <td><button className={`btn btn-sm ${r.is_active ? "btn-outline" : "btn-success"}`} onClick={() => toggle(r)}>{r.is_active ? "Retire" : "Reactivate"}</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+        {loadError && (
+          <div className="login-error" style={{ marginBottom: 10 }}>
+            {loadError} <button type="button" className="btn btn-sm btn-outline" onClick={load}>Retry</button>
+          </div>
+        )}
+        {reasons === null ? (loadError ? null : <Loader />) : (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead><tr><th>Reason</th><th>Description</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                {reasons.length === 0 && <tr className="empty-row"><td colSpan={4}>No reasons defined yet — add one above.</td></tr>}
+                {reasons.map((r) => (
+                  <tr key={r.id}>
+                    <td><strong>{r.label}</strong></td>
+                    <td className="muted">{r.description || "—"}</td>
+                    <td><span className={`chip ${r.is_active ? "green" : ""}`}>{r.is_active ? "Active" : "Retired"}</span></td>
+                    <td><button className={`btn btn-sm ${r.is_active ? "btn-outline" : "btn-success"}`} disabled={updatingId !== null} onClick={() => toggle(r)}>{updatingId === r.id ? "Updating…" : r.is_active ? "Retire" : "Reactivate"}</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -246,14 +291,17 @@ export default function Attendance() {
     const requested = new URLSearchParams(window.location.search).get("tab");
     if (requested === "team" && TEAM_VIEW_ROLES.includes(user.role)) return "team";
     if (requested === "reports" && TEAM_VIEW_ROLES.includes(user.role)) return "team";
+    if (requested === "reentries" && TEAM_VIEW_ROLES.includes(user.role)) return "team";
     if (requested === "approvals" && APPROVER_ROLES.includes(user.role)) return "approvals";
     if (requested === "policy" && APPROVER_ROLES.includes(user.role)) return "policy";
+    if (requested === "offices") return "work-locations";
     if (requested === "mine") return "mine";
     return "calendar";
   });
   const [history, setHistory] = useState([]);
   const [histMonth, setHistMonth] = useState(localDateStr().slice(0, 7));
   const [regularizationRequests, setRegularizationRequests] = useState([]);
+  const [expandedRegularizationNoteId, setExpandedRegularizationNoteId] = useState(null);
   const [regularizationStatus, setRegularizationStatus] = useState("all");
   const [regularizationSearch, setRegularizationSearch] = useState("");
   const [requestDateFrom, setRequestDateFrom] = useState("");
@@ -263,6 +311,7 @@ export default function Attendance() {
   const [loading, setLoading] = useState(false);
   const [requestFor, setRequestFor] = useState(null);
   const [reviewing, setReviewing] = useState(null);
+  const [manageReasonsOpen, setManageReasonsOpen] = useState(false);
   const [person, setPerson] = useState(null);       // team member whose calendar is open
   const [tick, setTick] = useState(0);              // bumps after a punch / correction so views refetch
   const [timezoneVersion, setTimezoneVersion] = useState(0);
@@ -313,6 +362,17 @@ export default function Attendance() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, tick]);
   useEffect(() => {
+    let cancelled = false;
+    client.get("/attendance/policy")
+      .then(({ data }) => {
+        if (!cancelled && setCompanyTimezone(data.company_timezone)) {
+          setTimezoneVersion((version) => version + 1);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
     setHistMonth(localDateStr().slice(0, 7));
   }, [timezoneVersion]);
   const tabBtn = (key, label) => (
@@ -320,22 +380,15 @@ export default function Attendance() {
   );
 
   return (
-    <AppLayout title="Attendance" subtitle="Clock in/out with your location, see your calendar, request regularization and export your history.">
-      <div className="section-gap">
-        <ClockWidget onPunch={refresh} onTimezoneChange={() => setTimezoneVersion((v) => v + 1)} />
-      </div>
-
+    <AppLayout title="Attendance" subtitle="View attendance, request regularization and export your history.">
       <div className="tag-list section-gap">
         {tabBtn("calendar", "My Calendar")}
         {tabBtn("mine", "My History")}
         {canSeeTeam && tabBtn("team", "Team Attendance")}
         {canApprove && tabBtn("approvals", `Regularization Requests${regularizationRequests.filter((record) => record.regularization_status === "pending").length > 0 ? ` (${regularizationRequests.filter((record) => record.regularization_status === "pending").length})` : ""}`)}
-        {canSeeTeam && tabBtn("reentries", "Re-entries")}
         {tabBtn("holidays", "Holidays")}
-        {canManageCalendar && tabBtn("rules", "Regularization Rules")}
         {canApprove && tabBtn("policy", "Attendance Policy")}
-        {tabBtn("offices", "Office Locations")}
-        {canApprove && tabBtn("work-locations", "Work Location Options")}
+        {tabBtn("work-locations", "Work Location Options")}
       </div>
 
       {tab === "calendar" && (
@@ -423,9 +476,10 @@ export default function Attendance() {
         <div className="card">
           <div className="card-title-row" style={{ flexWrap: "wrap", gap: 10 }}>
             <h3>Regularization Requests</h3>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
               <ExportButton url="/attendance/export/regularization-requests" params={{ status: "pending" }} filename="Regularization_Pending" label="Export pending" />
               <ExportButton url="/attendance/export/regularization-requests" params={{ status: "all" }} filename="Regularization_All" label="Export all history" />
+              {canManageCalendar && <button type="button" className="btn btn-primary btn-sm" onClick={() => setManageReasonsOpen(true)}>+ Add Regularization Reasons</button>}
             </div>
           </div>
           <p className="muted" style={{ fontSize: 12.5, marginTop: -8, marginBottom: 12 }}>
@@ -474,9 +528,19 @@ export default function Attendance() {
             </div>
           </div>
           {loading ? <Loader /> : (
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead><tr><th>Employee</th><th>Employee ID</th><th>Request Date</th><th>Attendance Date</th><th>Reason</th><th>Note</th><th></th></tr></thead>
+            <div className="table-wrap regularization-requests-table-wrap">
+              <table className="data-table regularization-requests-table">
+                <colgroup>
+                  <col className="regularization-col-employee" />
+                  <col className="regularization-col-id" />
+                  <col className="regularization-col-date" />
+                  <col className="regularization-col-date" />
+                  <col className="regularization-col-status" />
+                  <col className="regularization-col-reason" />
+                  <col className="regularization-col-note" />
+                  <col className="regularization-col-action" />
+                </colgroup>
+                <thead><tr><th>Employee</th><th>Employee ID</th><th>Request Date</th><th>Attendance Date</th><th>Status</th><th>Reason</th><th>Note</th><th>Action</th></tr></thead>
                 <tbody>
                   {filteredRequests.length === 0 && <tr className="empty-row"><td colSpan={8}>{regularizationRequests.length ? "No requests match these filters." : "No regularization requests."}</td></tr>}
                   {filteredRequests.map((r) => (
@@ -487,7 +551,17 @@ export default function Attendance() {
                       <td>{formatDateDDMMYYYY(r.work_date)}</td>
                       <td>{regStatusChip(r.regularization_status)}</td>
                       <td>{r.regularization_reason_label}</td>
-                      <td className="muted" style={{ maxWidth: 260 }}>{r.regularization_note || "—"}</td>
+                      <td className="muted">
+                        <button
+                          type="button"
+                          className={`regularization-note-text${expandedRegularizationNoteId === r.id ? " expanded" : ""}`}
+                          aria-expanded={expandedRegularizationNoteId === r.id}
+                          onClick={() => setExpandedRegularizationNoteId((current) => current === r.id ? null : r.id)}
+                          title={expandedRegularizationNoteId === r.id ? "Click to collapse note" : "Click to expand note"}
+                        >
+                          {r.regularization_note || "—"}
+                        </button>
+                      </td>
                       <td>
                         {r.regularization_status === "pending" ? (
                           <button className="btn btn-sm btn-primary" onClick={() => setReviewing(r)}>Review</button>
@@ -506,12 +580,14 @@ export default function Attendance() {
         </div>
       )}
 
-      {tab === "reentries" && canSeeTeam && <ReentriesPanel />}
       {tab === "holidays" && <HolidaysPanel canManage={canManageCalendar} />}
-      {tab === "rules" && canManageCalendar && <RulesPanel />}
       {tab === "policy" && canApprove && <AttendancePolicyPanel />}
-      {tab === "offices" && <OfficeLocationsPanel canManage={OFFICE_ADMIN_ROLES.includes(user.role)} />}
-      {tab === "work-locations" && canApprove && <WorkLocationOptionsPanel />}
+      {tab === "work-locations" && (
+        <WorkLocationOptionsPanel
+          canManage={canApprove}
+          canManageOffices={OFFICE_ADMIN_ROLES.includes(user.role)}
+        />
+      )}
 
       {requestFor && (
         <RegularizeRequestModal
@@ -527,6 +603,7 @@ export default function Attendance() {
           onDone={() => { setReviewing(null); refresh(); }}
         />
       )}
+      {manageReasonsOpen && canManageCalendar && <RegularizationReasonsModal onClose={() => setManageReasonsOpen(false)} />}
     </AppLayout>
   );
 }

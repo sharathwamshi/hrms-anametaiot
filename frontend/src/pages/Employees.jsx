@@ -129,14 +129,14 @@ export default function Employees() {
       <div className="card">
         <p className="muted" style={{ fontSize: 11.5, marginTop: -4, marginBottom: 6 }}>Click an employee to view their performance, edit details, or manage permissions.</p>
         <div className="card-title-row">
-          <form onSubmit={handleSearch} style={{ display: "flex", gap: 8 }}>
+          <form onSubmit={handleSearch} style={{ display: "flex", flex: "1 1 260px", minWidth: 0 }}>
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search by name or employee code..."
-              style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 12px", width: 260 }}
+              aria-label="Search by name or employee code"
+              style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 12px", width: "100%" }}
             />
-            <button type="submit" className="btn btn-outline btn-sm">Search</button>
           </form>
           {!showRemoved && (
             <select
@@ -177,8 +177,20 @@ export default function Employees() {
         {loading ? (
           <Loader />
         ) : (
-          <div className="table-wrap">
-            <table className="data-table">
+          <div className={`table-wrap${showRemoved ? "" : " employees-directory-table-wrap"}`}>
+            <table className={`data-table${showRemoved ? "" : " employees-directory-table"}`}>
+              {!showRemoved && (
+                <colgroup>
+                  <col className="employees-col-code" />
+                  <col className="employees-col-name" />
+                  <col className="employees-col-role" />
+                  <col className="employees-col-department" />
+                  <col className="employees-col-company" />
+                  <col className="employees-col-designation" />
+                  <col className="employees-col-manager" />
+                  <col className="employees-col-status" />
+                </colgroup>
+              )}
               <thead>
                 {showRemoved ? (
                   <tr><th>Code</th><th>Name</th><th>Role</th><th>Removed on</th><th>Removed by</th><th>Reason</th><th></th></tr>
