@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 from app.extensions import db
+from sqlalchemy.exc import SQLAlchemyError
 from app.models import (Attendance, AttendanceSession, AttendanceRegularizationReason,
                         AttendanceRegularizationRequest, User, Holiday, OfficeLocation,
                         CompanySettings, LeaveRequest, WorkLocation)
@@ -416,6 +417,7 @@ def update_policy():
 
 MAX_SESSIONS_PER_DAY = 10
 MAX_REASON_LENGTH = 255
+AUTO_CLOCK_OUT_BATCH_SIZE = 100
 
 
 def _ensure_sessions(record):
@@ -1085,29 +1087,82 @@ def run_auto_midnight_clockouts():
     if not secret or secret != current_app.config.get("INTERNAL_TASK_SECRET"):
         return jsonify({"message": "Not authorized."}), 403
 
-    closing_date = company_today() - timedelta(days=1)
-    local_midnight = datetime.combine(
-        closing_date + timedelta(days=1), time.min, tzinfo=company_timezone()
-    )
-    midnight_utc = local_midnight.astimezone(timezone.utc).replace(tzinfo=None)
-    records = Attendance.query.filter_by(work_date=closing_date).all()
+    today = company_today()
     closed_sessions = 0
+    last_work_date = None
+    last_record_id = None
 
-    for record in records:
-        _ensure_sessions(record)
-        closed_for_record = 0
-        for session in list(record.sessions):
-            if session.clock_out is not None or session.clock_in >= midnight_utc:
-                continue
-            if _claim_session_clock_out(session.id, midnight_utc, AUTO_CLOCK_OUT_NOTE):
-                db.session.refresh(session)
-                closed_for_record += 1
-        if closed_for_record:
-            record.recompute_from_sessions()
-            closed_sessions += closed_for_record
+    try:
+        while True:
+            has_open_session = Attendance.sessions.any(AttendanceSession.clock_out.is_(None))
+            has_open_legacy_record = db.and_(
+                Attendance.clock_in.isnot(None),
+                Attendance.clock_out.is_(None),
+            )
+            query = Attendance.query.filter(
+                Attendance.work_date < today,
+                db.or_(has_open_session, has_open_legacy_record),
+            )
+            if last_work_date is not None:
+                query = query.filter(
+                    db.or_(
+                        Attendance.work_date > last_work_date,
+                        db.and_(
+                            Attendance.work_date == last_work_date,
+                            Attendance.id > last_record_id,
+                        ),
+                    )
+                )
 
-    db.session.commit()
-    return jsonify({"work_date": closing_date.isoformat(), "closed_sessions": closed_sessions})
+            records = (
+                query.order_by(Attendance.work_date.asc(), Attendance.id.asc())
+                .limit(AUTO_CLOCK_OUT_BATCH_SIZE)
+                .all()
+            )
+            if not records:
+                break
+
+            last_work_date = records[-1].work_date
+            last_record_id = records[-1].id
+            batch_closed_sessions = 0
+            for record in records:
+                local_midnight = datetime.combine(
+                    record.work_date + timedelta(days=1),
+                    time.min,
+                    tzinfo=company_timezone(),
+                )
+                midnight_utc = local_midnight.astimezone(timezone.utc).replace(tzinfo=None)
+                _ensure_sessions(record)
+                closed_for_record = 0
+                for session in list(record.sessions):
+                    if session.clock_out is not None or session.clock_in >= midnight_utc:
+                        continue
+                    if _claim_session_clock_out(session.id, midnight_utc, AUTO_CLOCK_OUT_NOTE):
+                        db.session.refresh(session)
+                        closed_for_record += 1
+                if closed_for_record:
+                    record.recompute_from_sessions()
+                    batch_closed_sessions += closed_for_record
+
+            db.session.commit()
+            closed_sessions += batch_closed_sessions
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Automatic midnight clock-out failed while processing work dates before %s; "
+            "%s sessions were committed in earlier batches.",
+            today.isoformat(),
+            closed_sessions,
+        )
+        return jsonify({
+            "message": "Automatic midnight clock-out failed. Check the server logs.",
+            "closed_sessions": closed_sessions,
+        }), 500
+
+    return jsonify({
+        "work_date": (today - timedelta(days=1)).isoformat(),
+        "closed_sessions": closed_sessions,
+    })
 
 
 # ============================================================================
@@ -1164,25 +1219,21 @@ def _calendar_payload(target, month, year, redact=False):
     automatic_clockout_bell_dates = set()
 
     def add_automatic_bell_date(record):
-        following_day = record.work_date + timedelta(days=1)
+        if not first <= record.work_date <= last:
+            return
         for session in record.effective_sessions():
             if not session.is_automatic_clock_out:
                 continue
             local_clock_out = to_company_local(session.clock_out)
+            following_day = record.work_date + timedelta(days=1)
             if (
                 local_clock_out.date() == following_day
                 and local_clock_out.time().replace(tzinfo=None) == time.min
-                and first <= following_day <= last
             ):
-                automatic_clockout_bell_dates.add(following_day.isoformat())
+                automatic_clockout_bell_dates.add(record.work_date.isoformat())
 
     for record in records:
         add_automatic_bell_date(record)
-    previous_record = Attendance.query.filter_by(
-        user_id=target.id, work_date=first - timedelta(days=1)
-    ).first()
-    if previous_record:
-        add_automatic_bell_date(previous_record)
 
     holidays = Holiday.query.filter(Holiday.holiday_date >= first, Holiday.holiday_date <= last).order_by(Holiday.holiday_date.asc()).all()
     leaves = LeaveRequest.query.filter(

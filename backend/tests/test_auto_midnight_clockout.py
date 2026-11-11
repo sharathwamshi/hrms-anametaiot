@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 from config import Config
+from sqlalchemy.exc import SQLAlchemyError
 from app import create_app
 from app.extensions import db
 from app.models import Attendance, AttendanceSession, CompanySettings, Department, User
@@ -110,6 +111,7 @@ class AutoMidnightClockoutTests(unittest.TestCase):
             "closed_sessions": 1,
         })
         db.session.refresh(record)
+        self.assertEqual(record.work_date, self.closing_day)
         self.assertEqual(record.sessions[0].clock_out, manual_checkout)
         self.assertEqual(record.sessions[0].clock_out_note, "Manual checkout")
         self.assertEqual(record.sessions[1].clock_out, midnight_utc)
@@ -117,6 +119,8 @@ class AutoMidnightClockoutTests(unittest.TestCase):
         self.assertTrue(record.sessions[1].is_automatic_clock_out)
         self.assertEqual(record.total_hours, 13.5)
         self.assertEqual(record.status, "half_day")
+        self.assertEqual(record.to_dict()["clock_out"], midnight_utc.isoformat())
+        self.assertEqual(record.to_dict()["work_date"], self.closing_day.isoformat())
         record.recompute_from_sessions()
         self.assertEqual(record.status, "half_day")
 
@@ -126,17 +130,17 @@ class AutoMidnightClockoutTests(unittest.TestCase):
             query_string={"month": 10, "year": 2026},
         ).get_json()
         self.assertEqual(october["summary"]["half_day"], 1)
-        self.assertEqual(october["automatic_clockout_bell_dates"], [])
+        self.assertEqual(october["automatic_clockout_bell_dates"], ["2026-10-31"])
 
         november = self.client.get(
             "/api/attendance/my-calendar",
             headers=self.headers,
             query_string={"month": 11, "year": 2026},
         ).get_json()
-        self.assertEqual(november["automatic_clockout_bell_dates"], ["2026-11-01"])
+        self.assertEqual(november["automatic_clockout_bell_dates"], [])
         self.assertEqual(november["records"], [])
 
-    def test_task_is_idempotent_and_does_not_backfill_older_records(self):
+    def test_task_is_idempotent_and_recovers_older_records(self):
         old_record = self.add_record(
             self.other_user,
             self.closing_day - timedelta(days=1),
@@ -151,10 +155,112 @@ class AutoMidnightClockoutTests(unittest.TestCase):
         first = self.run_task()
         second = self.run_task()
 
-        self.assertEqual(first.get_json()["closed_sessions"], 1)
+        self.assertEqual(first.get_json()["closed_sessions"], 2)
         self.assertEqual(second.get_json()["closed_sessions"], 0)
         self.assertEqual(record.sessions[0].clock_out, datetime(2026, 10, 31, 18, 30))
-        self.assertIsNone(old_record.sessions[0].clock_out)
+        self.assertEqual(old_record.sessions[0].clock_out, datetime(2026, 10, 30, 18, 30))
+        self.assertEqual(old_record.status, "half_day")
+        self.assertEqual(old_record.total_hours, 8.5)
+
+    def test_recovers_multiple_dates_in_batches_and_excludes_current_date(self):
+        dates = [date(2026, 10, 31), date(2026, 11, 1), date(2026, 11, 2)]
+        records = [
+            self.add_record(
+                self.user,
+                work_date,
+                [(datetime.combine(work_date, datetime.min.time()) + timedelta(hours=4), None, None)],
+            )
+            for work_date in dates
+        ]
+        current_record = self.add_record(
+            self.user,
+            date(2026, 11, 3),
+            [(datetime(2026, 11, 3, 3, 0), None, None)],
+        )
+
+        with patch("app.routes.attendance.AUTO_CLOCK_OUT_BATCH_SIZE", 1):
+            response = self.run_task(today=date(2026, 11, 3))
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["closed_sessions"], 3)
+        expected_midnights = [
+            datetime(2026, 10, 31, 18, 30),
+            datetime(2026, 11, 1, 18, 30),
+            datetime(2026, 11, 2, 18, 30),
+        ]
+        for record, expected_midnight in zip(records, expected_midnights):
+            db.session.refresh(record)
+            self.assertEqual(record.sessions[0].clock_out, expected_midnight)
+            self.assertEqual(record.status, "half_day")
+            self.assertEqual(record.total_hours, 14.5)
+
+        self.assertIsNone(current_record.sessions[0].clock_out)
+
+    def test_recovers_legacy_record_without_creating_duplicate_sessions(self):
+        work_date = self.closing_day - timedelta(days=1)
+        legacy_record = Attendance(
+            user_id=self.other_user.id,
+            work_date=work_date,
+            clock_in=datetime(2026, 10, 30, 10, 0),
+            status="present",
+        )
+        db.session.add(legacy_record)
+        db.session.commit()
+
+        response = self.run_task()
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["closed_sessions"], 1)
+        db.session.refresh(legacy_record)
+        self.assertEqual(len(legacy_record.sessions), 1)
+        self.assertEqual(legacy_record.sessions[0].clock_out, datetime(2026, 10, 30, 18, 30))
+        self.assertEqual(legacy_record.status, "half_day")
+        self.run_task()
+        db.session.refresh(legacy_record)
+        self.assertEqual(len(legacy_record.sessions), 1)
+
+    def test_automatic_clockout_preserves_regularized_status(self):
+        record = Attendance(
+            user_id=self.user.id,
+            work_date=self.closing_day,
+            status="regularized",
+            is_regularized=True,
+        )
+        record.sessions.append(AttendanceSession(
+            session_no=1,
+            clock_in=datetime(2026, 10, 31, 10, 0),
+        ))
+        db.session.add(record)
+        db.session.commit()
+
+        response = self.run_task()
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        db.session.refresh(record)
+        self.assertEqual(record.sessions[0].clock_out, datetime(2026, 10, 31, 18, 30))
+        self.assertEqual(record.sessions[0].clock_out_note, AUTO_CLOCK_OUT_NOTE)
+        self.assertEqual(record.total_hours, 8.5)
+        self.assertEqual(record.status, "regularized")
+        self.assertTrue(record.is_regularized)
+
+    def test_database_error_rolls_back_current_batch_and_reports_failure(self):
+        record = self.add_record(
+            self.user,
+            self.closing_day,
+            [(datetime(2026, 10, 31, 10, 0), None, None)],
+        )
+
+        with patch(
+            "app.routes.attendance.db.session.commit",
+            side_effect=SQLAlchemyError("database unavailable"),
+        ):
+            response = self.run_task()
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json()["closed_sessions"], 0)
+        db.session.refresh(record.sessions[0])
+        self.assertIsNone(record.sessions[0].clock_out)
+        self.assertEqual(record.status, "present")
 
     def test_does_not_close_session_that_started_at_midnight_or_manual_checkout(self):
         manual_time = datetime(2026, 10, 31, 18, 0)
@@ -185,6 +291,13 @@ class AutoMidnightClockoutTests(unittest.TestCase):
         self.assertEqual(response.get_json()["closed_sessions"], 0)
         self.assertEqual(self.user.attendance_records[0].sessions[0].clock_out, manual_time)
         self.assertIsNone(midnight_record.sessions[0].clock_out)
+        current_record = self.add_record(
+            self.other_user,
+            self.next_day,
+            [(datetime(2026, 11, 1, 12, 0), None, None)],
+        )
+        self.assertEqual(self.run_task().get_json()["closed_sessions"], 0)
+        self.assertIsNone(current_record.sessions[0].clock_out)
 
     def test_january_calendar_includes_december_closure_and_is_user_scoped(self):
         december_day = date(2026, 12, 31)
@@ -202,12 +315,19 @@ class AutoMidnightClockoutTests(unittest.TestCase):
         response = self.run_task(today=date(2027, 1, 1))
 
         self.assertEqual(response.get_json()["closed_sessions"], 1)
+        december = self.client.get(
+            "/api/attendance/my-calendar",
+            headers=self.headers,
+            query_string={"month": 12, "year": 2026},
+        ).get_json()
+        self.assertEqual(december["automatic_clockout_bell_dates"], ["2026-12-31"])
+        self.assertEqual(len(december["records"]), 1)
         january = self.client.get(
             "/api/attendance/my-calendar",
             headers=self.headers,
             query_string={"month": 1, "year": 2027},
         ).get_json()
-        self.assertEqual(january["automatic_clockout_bell_dates"], ["2027-01-01"])
+        self.assertEqual(january["automatic_clockout_bell_dates"], [])
         self.assertEqual(january["records"], [])
 
     def test_endpoint_auth_and_manual_notes_cannot_impersonate_marker(self):
