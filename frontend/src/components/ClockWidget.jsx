@@ -38,6 +38,11 @@ export default function ClockWidget({
   const [workLocationsLoading, setWorkLocationsLoading] = useState(false);
   const [workLocationsError, setWorkLocationsError] = useState("");
   const [selectedWorkLocationId, setSelectedWorkLocationId] = useState("");
+  const [wfhReasonSettings, setWfhReasonSettings] = useState({ enabled: false, reasons: [] });
+  const [wfhReasonsError, setWfhReasonsError] = useState("");
+  const [wfhReasonsLoading, setWfhReasonsLoading] = useState(true);
+  const [selectedWfhReason, setSelectedWfhReason] = useState("");
+  const [wfhReasonExplanation, setWfhReasonExplanation] = useState("");
   const [clockInOpen, setClockInOpen] = useState(false);
   const [clockInLocationStatus, setClockInLocationStatus] = useState("idle");
   const [clockInLocation, setClockInLocation] = useState(null);
@@ -76,6 +81,13 @@ export default function ClockWidget({
       if (setCompanyTimezone(data.company_timezone)) onTimezoneChange?.();
       setSelfieRequired(!!data.selfie_required);
     }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    client.get("/attendance/wfh-reasons")
+      .then(({ data }) => setWfhReasonSettings(data))
+      .catch((err) => setWfhReasonsError(err?.response?.data?.message || "Could not load WFH reasons."))
+      .finally(() => setWfhReasonsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -178,6 +190,9 @@ export default function ClockWidget({
   // Clocked out earlier today (e.g. by mistake) -> they may check in again, with a reason.
   const canCheckInAgain = !!record?.clock_in && !clockedIn;
   const lastSession = sessions[sessions.length - 1];
+  const selectedWorkLocation = workLocations.find((location) => String(location.id) === selectedWorkLocationId);
+  const isWfhLocation = !!selectedWorkLocation?.is_wfh;
+  const wfhReasonRequired = isWfhLocation && wfhReasonSettings.enabled;
 
   const checkClockInLocation = async () => {
     setClockInLocationStatus("loading");
@@ -266,6 +281,22 @@ export default function ClockWidget({
       setError("Please give a reason for checking in again — your manager will see it.");
       return;
     }
+    if (action === "clock-in" && isWfhLocation && (wfhReasonsLoading || wfhReasonsError)) {
+      if (wfhReasonsLoading) {
+        setError("Loading WFH reasons. Please wait.");
+        return;
+      }
+      setError(wfhReasonsError);
+      return;
+    }
+    if (action === "clock-in" && wfhReasonRequired && !selectedWfhReason) {
+      setError("Choose a reason for working from home.");
+      return;
+    }
+    if (action === "clock-in" && wfhReasonRequired && selectedWfhReason === "other" && wfhReasonExplanation.trim().length < 3) {
+      setError("Please explain your WFH reason (at least 3 characters).");
+      return;
+    }
     if (selfieRequired && !selfie) {
       setError("A photo is required by your company — attach one first.");
       return;
@@ -294,12 +325,20 @@ export default function ClockWidget({
         Object.entries(coords).forEach(([k, v]) => form.append(k, v));
         if (isReentry) form.append("reason", reason.trim());
         if (action === "clock-in") form.append("work_location_id", selectedWorkLocationId);
+        if (action === "clock-in" && wfhReasonRequired) {
+          form.append("wfh_reason_id", selectedWfhReason);
+          if (selectedWfhReason === "other") form.append("wfh_reason_explanation", wfhReasonExplanation.trim());
+        }
         ({ data } = await client.post(`/attendance/${action}`, form));
       } else {
         ({ data } = await client.post(`/attendance/${action}`, {
           ...coords,
           ...(isReentry ? { reason: reason.trim() } : {}),
           ...(action === "clock-in" ? { work_location_id: selectedWorkLocationId } : {}),
+          ...(action === "clock-in" && wfhReasonRequired ? {
+            wfh_reason_id: selectedWfhReason,
+            ...(selectedWfhReason === "other" ? { wfh_reason_explanation: wfhReasonExplanation.trim() } : {}),
+          } : {}),
         }));
       }
       if (action === "clock-in") setClockInOpen(false);
@@ -313,6 +352,8 @@ export default function ClockWidget({
       }
       setSelfie(null);
       setReason("");
+      setSelectedWfhReason("");
+      setWfhReasonExplanation("");
       setReentering(false);
       if (fileRef.current) fileRef.current.value = "";
       await fetchToday().catch(() => {});
@@ -412,6 +453,7 @@ export default function ClockWidget({
                   <strong style={{ color: "var(--color-text)" }}>{sessions.length > 1 ? `Session ${x.session_no}: ` : "In: "}</strong>
                   {fmtTime(x.clock_in)}{x.clock_out ? <> &ndash; {fmtTime(x.clock_out)}</> : " (now)"}
                   {x.work_location_name && <span className="att-chip" style={{ marginLeft: 8 }}>{x.work_location_name}</span>}
+                  {x.wfh_reason && <span className="att-chip" style={{ marginLeft: 8 }}>WFH reason: {x.wfh_reason}{x.wfh_reason_explanation ? ` — ${x.wfh_reason_explanation}` : ""}</span>}
                   {place.cls && <span className={`att-chip ${place.cls}`} style={{ marginLeft: 8 }}>{place.text}</span>}
                   {x.clock_in_lat != null && <a href={mapsUrl(x.clock_in_lat, x.clock_in_lng)} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>map</a>}
                   {x.reentry_reason ? <> &middot; <em>{x.reentry_reason}</em></> : null}
@@ -454,7 +496,17 @@ export default function ClockWidget({
       )}
       {clockInOpen && createPortal(
         <div className="modal-overlay clock-in-location-overlay" role="presentation">
-          <div ref={clockInDialogRef} className="modal-box" role="dialog" aria-modal="true" aria-labelledby="clock-in-location-title" tabIndex={-1}>
+          <div ref={clockInDialogRef} className="modal-box clock-in-location-dialog" role="dialog" aria-modal="true" aria-labelledby="clock-in-location-title" tabIndex={-1}>
+            <button
+              type="button"
+              className="clock-in-location-close"
+              aria-label="Close location verification"
+              title="Close"
+              disabled={busy}
+              onClick={() => setClockInOpen(false)}
+            >
+              <span aria-hidden="true">×</span>
+            </button>
             <h3 id="clock-in-location-title" style={{ marginBottom: 6 }}>{canCheckInAgain ? "Check in again" : "Clock in"}</h3>
             <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
               We’ll check your location before showing the clock-in options.
@@ -511,6 +563,12 @@ export default function ClockWidget({
                 <button type="button" className="btn btn-sm btn-outline" onClick={loadWorkLocations}>Retry</button>
               </div>
             )}
+            {clockInLocationStatus === "ready" && isWfhLocation && wfhReasonsLoading && (
+              <div className="muted" role="status" style={{ marginBottom: 10 }}>Loading WFH reason settings…</div>
+            )}
+            {clockInLocationStatus === "ready" && isWfhLocation && wfhReasonsError && !wfhReasonSettings.enabled && (
+              <div className="login-error" role="alert" style={{ marginBottom: 10 }}>{wfhReasonsError}</div>
+            )}
             {clockInLocationStatus === "ready" && (workLocationsLoading ? <Loader /> : workLocations.length > 0 ? (
               <div className="form-field">
                 <label>Work location</label>
@@ -533,6 +591,44 @@ export default function ClockWidget({
             ) : !workLocationsError ? (
               <p className="login-error">No active work locations are available. Ask your manager to add one.</p>
             ) : null)}
+            {clockInLocationStatus === "ready" && isWfhLocation && wfhReasonSettings.enabled && (
+              <div className="form-field">
+                <label>Reason for working from home</label>
+                {wfhReasonsLoading ? <Loader /> : wfhReasonsError ? (
+                  <div className="login-error" role="alert">{wfhReasonsError}</div>
+                ) : (
+                  <div className="clock-in-location-options">
+                    {wfhReasonSettings.reasons.map((wfhReason) => (
+                      <label key={wfhReason.id} className={`clock-in-location-option${String(wfhReason.id) === selectedWfhReason ? " selected" : ""}`}>
+                        <input
+                          type="radio"
+                          name="wfh-reason"
+                          value={wfhReason.id}
+                          checked={String(wfhReason.id) === selectedWfhReason}
+                          onChange={() => { setSelectedWfhReason(String(wfhReason.id)); setWfhReasonExplanation(""); }}
+                        />
+                        <span>{wfhReason.label}</span>
+                      </label>
+                    ))}
+                    <label className={`clock-in-location-option${selectedWfhReason === "other" ? " selected" : ""}`}>
+                      <input type="radio" name="wfh-reason" value="other" checked={selectedWfhReason === "other"} onChange={() => setSelectedWfhReason("other")} />
+                      <span>Other</span>
+                    </label>
+                  </div>
+                )}
+                {selectedWfhReason === "other" && (
+                  <textarea
+                    aria-label="Explain other WFH reason"
+                    rows={2}
+                    maxLength={255}
+                    required
+                    value={wfhReasonExplanation}
+                    onChange={(event) => setWfhReasonExplanation(event.target.value)}
+                    placeholder="Please explain"
+                  />
+                )}
+              </div>
+            )}
             {clockInLocationStatus === "ready" && canCheckInAgain && (
               <div className="form-field">
                 <label htmlFor="reentry-reason">Reason for checking in again</label>
@@ -558,12 +654,11 @@ export default function ClockWidget({
               </div>
             )}
             <div className="form-actions">
-              <button type="button" className="btn btn-outline" disabled={busy} onClick={() => setClockInOpen(false)}>Cancel</button>
               {clockInLocationStatus === "ready" && (
                 <button
                   type="button"
                   className="btn btn-success"
-                  disabled={busy || workLocationsLoading || !selectedWorkLocationId || workLocations.length === 0 || !!workLocationsError || (selfieRequired && !selfie) || (canCheckInAgain && reason.trim().length < 3)}
+                  disabled={busy || workLocationsLoading || !selectedWorkLocationId || workLocations.length === 0 || !!workLocationsError || (selfieRequired && !selfie) || (canCheckInAgain && reason.trim().length < 3) || (isWfhLocation && (wfhReasonsLoading || !!wfhReasonsError)) || (wfhReasonRequired && (!selectedWfhReason || (selectedWfhReason === "other" && wfhReasonExplanation.trim().length < 3)))}
                   onClick={() => handleClock("clock-in")}
                 >
                   {busy ? "Clocking in…" : "Choose location and Clock In"}

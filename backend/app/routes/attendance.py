@@ -5,7 +5,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from app.extensions import db
 from app.models import (Attendance, AttendanceSession, AttendanceRegularizationReason,
                         AttendanceRegularizationRequest, User, Holiday, OfficeLocation,
-                        CompanySettings, LeaveRequest, WorkLocation)
+                        AttendanceWfhReason, CompanySettings, LeaveRequest, WorkLocation)
 from app.models.attendance import AUTO_CLOCK_OUT_NOTE
 from app.utils.push import send_push
 from app.utils.company_time import company_today, company_timezone, utc_now_naive, to_company_local
@@ -22,6 +22,7 @@ APPROVER_ROLES = (MANAGER, HR_OPERATIONS, SUPER_ADMIN)
 CALENDAR_MANAGER_ROLES = (MANAGER, HR_OPERATIONS, SUPER_ADMIN)
 OFFICE_ADMIN_ROLES = (SUPER_ADMIN,)
 WORK_LOCATION_ADMIN_ROLES = (MANAGER, HR_OPERATIONS, SUPER_ADMIN)
+WFH_REASON_ADMIN_ROLES = (MANAGER, SUPER_ADMIN)
 VIEWER_ROLES = (MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN)
 
 bp = Blueprint("attendance", __name__, url_prefix="/api/attendance")
@@ -78,15 +79,17 @@ def check_location():
 
 def _ensure_default_work_locations():
     locations = WorkLocation.query.order_by(WorkLocation.id.asc()).all()
-    all_names = {location.name.casefold() for location in locations}
     if not locations:
         office = OfficeLocation.query.filter_by(is_active=True).order_by(OfficeLocation.id.asc()).first()
         main_office_name = office.name.strip() if office and office.name.strip() else "Main Office"
         main_office = WorkLocation(name=main_office_name, is_active=True, is_default=True)
         db.session.add(main_office)
         locations.append(main_office)
-    if "work from home" not in all_names:
-        home = WorkLocation(name="Work From Home", is_active=True, is_default=False)
+    home_location = next((location for location in locations if location.name.casefold() == "work from home"), None)
+    if home_location:
+        home_location.is_wfh = True
+    else:
+        home = WorkLocation(name="Work From Home", is_active=True, is_default=False, is_wfh=True)
         db.session.add(home)
         locations.append(home)
     active = [location for location in locations if location.is_active]
@@ -225,6 +228,8 @@ def create_work_location():
         return jsonify({"message": "A work location name of 1 to 100 characters is required."}), 400
     if "is_default" in payload and not isinstance(payload["is_default"], bool):
         return jsonify({"message": "is_default must be a boolean."}), 400
+    if "is_wfh" in payload and not isinstance(payload["is_wfh"], bool):
+        return jsonify({"message": "is_wfh must be a boolean."}), 400
     locations = _ensure_default_work_locations()
     clean_name = name.strip()
     if WorkLocation.query.filter(db.func.lower(WorkLocation.name) == clean_name.lower()).first():
@@ -238,6 +243,7 @@ def create_work_location():
         name=clean_name,
         is_active=True,
         is_default=is_default,
+        is_wfh=payload.get("is_wfh", clean_name.casefold() in ("wfh", "work from home")),
         created_by=int(get_jwt_identity()),
     )
     db.session.add(location)
@@ -273,6 +279,10 @@ def update_work_location(location_id):
         if location.is_default and not payload["is_active"]:
             return jsonify({"message": "Choose another default location before deactivating this one."}), 400
         location.is_active = payload["is_active"]
+    if "is_wfh" in payload:
+        if not isinstance(payload["is_wfh"], bool):
+            return jsonify({"message": "is_wfh must be a boolean."}), 400
+        location.is_wfh = payload["is_wfh"]
     if "is_default" in payload:
         if not isinstance(payload["is_default"], bool):
             return jsonify({"message": "is_default must be a boolean."}), 400
@@ -414,6 +424,172 @@ def update_policy():
     })
 
 
+@bp.get("/wfh-reasons")
+@jwt_required()
+def list_wfh_reasons():
+    settings = _get_settings()
+    query = AttendanceWfhReason.query
+    if request.args.get("active_only", "true") != "false":
+        query = query.filter_by(is_active=True)
+    reasons = query.order_by(
+        AttendanceWfhReason.sort_order.asc(), AttendanceWfhReason.id.asc()
+    ).all()
+    return jsonify({"enabled": bool(settings.wfh_reasons_enabled), "reasons": [reason.to_dict() for reason in reasons]})
+
+
+@bp.put("/wfh-reasons/settings")
+@jwt_required()
+def update_wfh_reason_settings():
+    if get_jwt().get("role") not in WFH_REASON_ADMIN_ROLES:
+        return jsonify({"message": "Only a manager or Super Admin can change WFH reason settings."}), 403
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict) or not isinstance(payload.get("enabled"), bool):
+        return jsonify({"message": "enabled must be true or false."}), 400
+    settings = _get_settings()
+    settings.wfh_reasons_enabled = payload["enabled"]
+    settings.updated_by = int(get_jwt_identity())
+    db.session.commit()
+    return jsonify({"enabled": bool(settings.wfh_reasons_enabled)})
+
+
+@bp.post("/wfh-reasons")
+@jwt_required()
+def create_wfh_reason():
+    if get_jwt().get("role") not in WFH_REASON_ADMIN_ROLES:
+        return jsonify({"message": "Only a manager or Super Admin can define WFH reasons."}), 403
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"message": "WFH reason details must be provided as an object."}), 400
+    label = payload.get("label")
+    if not isinstance(label, str) or not label.strip() or len(label.strip()) > 100:
+        return jsonify({"message": "A WFH reason label of 1 to 100 characters is required."}), 400
+    label = label.strip()
+    if label.casefold() == "other":
+        return jsonify({"message": "'Other' is reserved for the explanation option."}), 400
+    if AttendanceWfhReason.query.filter_by(label=label).first():
+        return jsonify({"message": f"'{label}' already exists."}), 409
+    last_order = db.session.query(db.func.max(AttendanceWfhReason.sort_order)).scalar()
+    reason = AttendanceWfhReason(
+        label=label,
+        sort_order=(last_order if last_order is not None else -1) + 1,
+        created_by=int(get_jwt_identity()),
+    )
+    db.session.add(reason)
+    db.session.commit()
+    return jsonify(reason.to_dict()), 201
+
+
+@bp.put("/wfh-reasons/<int:reason_id>")
+@jwt_required()
+def update_wfh_reason(reason_id):
+    if get_jwt().get("role") not in WFH_REASON_ADMIN_ROLES:
+        return jsonify({"message": "Only a manager or Super Admin can edit WFH reasons."}), 403
+    reason = AttendanceWfhReason.query.get_or_404(reason_id)
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"message": "WFH reason details must be provided as an object."}), 400
+    if "label" in payload:
+        label = payload["label"]
+        if not isinstance(label, str) or not label.strip() or len(label.strip()) > 100:
+            return jsonify({"message": "A WFH reason label of 1 to 100 characters is required."}), 400
+        label = label.strip()
+        if label.casefold() == "other":
+            return jsonify({"message": "'Other' is reserved for the explanation option."}), 400
+        duplicate = AttendanceWfhReason.query.filter(
+            AttendanceWfhReason.label == label,
+            AttendanceWfhReason.id != reason.id,
+        ).first()
+        if duplicate:
+            return jsonify({"message": f"'{label}' already exists."}), 409
+        reason.label = label
+    if "is_active" in payload:
+        if not isinstance(payload["is_active"], bool):
+            return jsonify({"message": "is_active must be true or false."}), 400
+        reason.is_active = payload["is_active"]
+    db.session.commit()
+    return jsonify(reason.to_dict())
+
+
+@bp.put("/wfh-reasons/order")
+@jwt_required()
+def reorder_wfh_reasons():
+    if get_jwt().get("role") not in WFH_REASON_ADMIN_ROLES:
+        return jsonify({"message": "Only a manager or Super Admin can reorder WFH reasons."}), 403
+    payload = request.get_json(silent=True) or {}
+    reason_ids = payload.get("reason_ids") if isinstance(payload, dict) else None
+    if (
+        not isinstance(reason_ids, list)
+        or any(isinstance(reason_id, bool) or not isinstance(reason_id, int) for reason_id in reason_ids)
+        or len(reason_ids) != len(set(reason_ids))
+    ):
+        return jsonify({"message": "reason_ids must be a list of unique WFH reason IDs."}), 400
+    reasons = AttendanceWfhReason.query.order_by(
+        AttendanceWfhReason.sort_order.asc(), AttendanceWfhReason.id.asc()
+    ).with_for_update().all()
+    if set(reason_ids) != {reason.id for reason in reasons}:
+        return jsonify({"message": "The order must include every existing WFH reason exactly once."}), 400
+    reason_by_id = {reason.id: reason for reason in reasons}
+    for sort_order, reason_id in enumerate(reason_ids):
+        reason_by_id[reason_id].sort_order = sort_order
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.exception("WFH reason order could not be saved.")
+        return jsonify({"message": "Could not reorder WFH reasons. Please try again."}), 500
+    return jsonify({"reasons": [reason_by_id[reason_id].to_dict() for reason_id in reason_ids]})
+
+
+@bp.delete("/wfh-reasons/<int:reason_id>")
+@jwt_required()
+def delete_wfh_reason(reason_id):
+    if get_jwt().get("role") not in WFH_REASON_ADMIN_ROLES:
+        return jsonify({"message": "Only a manager or Super Admin can delete WFH reasons."}), 403
+    reason = AttendanceWfhReason.query.get_or_404(reason_id)
+    referenced = AttendanceSession.query.filter(
+        (AttendanceSession.wfh_reason_id == reason.id)
+        | (AttendanceSession.wfh_reason == reason.label)
+    ).first()
+    if referenced:
+        return jsonify({
+            "message": "This reason is recorded in historical attendance and cannot be deleted. Retire it instead."
+        }), 409
+    known_labels = {
+        row.label for row in AttendanceWfhReason.query.with_entities(AttendanceWfhReason.label).all()
+    }
+    unmatched_legacy_snapshot = AttendanceSession.query.filter(
+        AttendanceSession.wfh_reason_id.is_(None),
+        AttendanceSession.wfh_reason.isnot(None),
+        AttendanceSession.wfh_reason != "Other",
+    ).all()
+    if any(session.wfh_reason not in known_labels for session in unmatched_legacy_snapshot):
+        return jsonify({
+            "message": "A legacy attendance reason snapshot cannot be matched safely. Retire this reason instead."
+        }), 409
+    db.session.delete(reason)
+    reasons = AttendanceWfhReason.query.filter(
+        AttendanceWfhReason.id != reason.id
+    ).order_by(AttendanceWfhReason.sort_order.asc(), AttendanceWfhReason.id.asc()).all()
+    for sort_order, item in enumerate(reasons):
+        item.sort_order = sort_order
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.exception("WFH reason could not be deleted.")
+        return jsonify({"message": "Could not delete this WFH reason. Please try again."}), 500
+    return jsonify({"message": "WFH reason deleted."})
+
+
+def _read_wfh_reason():
+    data = (request.get_json(silent=True) or {}) if request.is_json else request.form
+    return data.get("wfh_reason_id"), (data.get("wfh_reason_explanation") or "").strip()
+
+
+def _is_wfh_location(location):
+    return bool(location.is_wfh)
+
+
 MAX_SESSIONS_PER_DAY = 10
 MAX_REASON_LENGTH = 255
 
@@ -468,6 +644,29 @@ def clock_in():
         work_location = WorkLocation.query.filter_by(id=work_location_id, is_active=True).first()
     if not work_location:
         return jsonify({"message": "Choose an active work location before clocking in."}), 400
+    wfh_reason_label = None
+    wfh_reason_id = None
+    wfh_reason_explanation = None
+    settings = _get_settings()
+    if _is_wfh_location(work_location) and settings.wfh_reasons_enabled:
+        raw_wfh_reason_id, wfh_reason_explanation = _read_wfh_reason()
+        if raw_wfh_reason_id == "other":
+            if len(wfh_reason_explanation) < 3:
+                return jsonify({"message": "Please explain your WFH reason (at least 3 characters).", "wfh_reason_required": True}), 400
+            if len(wfh_reason_explanation) > 255:
+                return jsonify({"message": "Please keep the WFH explanation under 255 characters.", "wfh_reason_required": True}), 400
+            wfh_reason_label = "Other"
+        else:
+            try:
+                wfh_reason_id = int(raw_wfh_reason_id)
+            except (TypeError, ValueError):
+                return jsonify({"message": "Choose a WFH reason before clocking in.", "wfh_reason_required": True}), 400
+            selected_wfh_reason = AttendanceWfhReason.query.filter_by(id=wfh_reason_id, is_active=True).first()
+            if not selected_wfh_reason:
+                return jsonify({"message": "Choose an active WFH reason before clocking in.", "wfh_reason_required": True}), 400
+            wfh_reason_label = selected_wfh_reason.label
+            wfh_reason_id = selected_wfh_reason.id
+            wfh_reason_explanation = None
     blocked = _office_restriction_block(user_id, lat, lng, "clock in")
     if blocked:
         return blocked
@@ -491,6 +690,8 @@ def clock_in():
         session_no=len(record.sessions) + 1, clock_in=utc_now_naive(), clock_in_note=note,
         clock_in_lat=lat, clock_in_lng=lng, clock_in_within_geofence=_check_geofence(lat, lng),
         work_location_id=work_location.id, work_location_name=work_location.name,
+        wfh_reason_id=wfh_reason_id,
+        wfh_reason=wfh_reason_label, wfh_reason_explanation=wfh_reason_explanation,
         clock_in_selfie=selfie_name, reentry_reason=reason if is_reentry else None,
     )
     record.sessions.append(session)
@@ -1324,6 +1525,13 @@ def _build_overview(claims, viewer_id, target_date):
     scope = _viewer_scope(claims, viewer_id)
     users = (User.query.filter(User.id.in_(scope or {0}), User.is_active.is_(True), User.role != "contract_employee")
              .order_by(User.full_name.asc()).all())
+    organization_users = User.query.filter_by(is_active=True).order_by(User.full_name.asc()).all()
+    organization_people = [{
+        "id": user.id,
+        "full_name": user.full_name,
+        "employee_code": user.employee_code,
+        "designation": user.designation,
+    } for user in organization_users]
     records = {r.user_id: r for r in Attendance.query.filter(Attendance.user_id.in_(scope or {0}), Attendance.work_date == target_date).all()}
     on_leave = {lv.user_id for lv in LeaveRequest.query.filter(
         LeaveRequest.user_id.in_(scope or {0}), LeaveRequest.status == "approved",
@@ -1416,7 +1624,7 @@ def _build_overview(claims, viewer_id, target_date):
         if outside:
             category_person_ids["outside_office"].append(u.id)
     return {"date": target_date.isoformat(), "is_holiday": bool(holiday), "holiday_name": holiday.name if holiday else None,
-            "summary": counts, "people": rows, "present_people": present_people,
+            "summary": counts, "people": rows, "organization_people": organization_people, "present_people": present_people,
             "category_person_ids": category_person_ids}
 
 

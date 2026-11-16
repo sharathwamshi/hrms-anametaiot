@@ -12,7 +12,7 @@ export default function Sidebar() {
 
   if (!user) return null;
 
-  const items = (NAV_BY_ROLE[user.role] || ["dashboard", "profile"]).map((key) => ({
+  const items = (NAV_BY_ROLE[user.role] || ["dashboard", "resignation", "profile"]).map((key) => ({
     key,
     ...NAV_ITEMS[key],
   }));

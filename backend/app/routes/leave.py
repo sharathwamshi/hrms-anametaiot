@@ -385,7 +385,9 @@ def pending_approvals():
             "message": "You do not have permission to view approvals."
         }), 403
 
-    query = LeaveRequest.query.filter_by(status="pending")
+    query = LeaveRequest.query.filter_by(status="pending").filter(
+        LeaveRequest.user_id != user_id
+    )
 
     if role == MANAGER:
         report_ids = [u.id for u in User.query.filter_by(manager_id=user_id).all()]
@@ -706,6 +708,8 @@ def decide(request_id):
         }), 403
 
     leave_request = LeaveRequest.query.get_or_404(request_id)
+    if leave_request.user_id == reviewer_id:
+        return jsonify({"message": "You cannot approve or reject your own leave request."}), 403
     if role == MANAGER and leave_request.user.manager_id != reviewer_id:
         return jsonify({"message": "You can only review leave requests from your direct reports."}), 403
     payload = request.get_json(silent=True) or {}

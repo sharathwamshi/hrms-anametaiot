@@ -5,6 +5,7 @@ import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
 import Loader from "../components/Loader";
 import LeaveBalanceSummary from "../components/LeaveBalanceSummary";
+import LeaveReasonPreview from "../components/LeaveReasonPreview";
 import ManagerLeaveDashboard from "../components/ManagerLeaveDashboard";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
@@ -27,8 +28,38 @@ export default function Leave() {
   const [success, setSuccess] = useState("");
   const [busyRequestId, setBusyRequestId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [leaveTab, setLeaveTab] = useState("my");
+  const [myPage, setMyPage] = useState(1);
+  const [myPageSize, setMyPageSize] = useState(10);
+  const [mySort, setMySort] = useState({ key: "start_date", direction: "desc" });
+  const [approvalPage, setApprovalPage] = useState(1);
+  const [approvalPageSize, setApprovalPageSize] = useState(10);
+  const [approvalSort, setApprovalSort] = useState({ key: "start_date", direction: "desc" });
   const isManager = user.role === ROLES.MANAGER;
   const isApprover = APPROVER_ROLES.includes(user.role) && !isManager;
+  const sortedMyRequests = [...myRequests].sort((a, b) => {
+    const left = a[mySort.key] ?? "";
+    const right = b[mySort.key] ?? "";
+    const comparison = typeof left === "number" && typeof right === "number"
+      ? left - right
+      : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
+    return comparison * (mySort.direction === "asc" ? 1 : -1);
+  });
+  const myPageCount = Math.max(1, Math.ceil(sortedMyRequests.length / myPageSize));
+  const pageMyRequests = sortedMyRequests.slice((myPage - 1) * myPageSize, myPage * myPageSize);
+  const sortedApprovals = [...approvals].sort((a, b) => {
+    const left = a[approvalSort.key] ?? "";
+    const right = b[approvalSort.key] ?? "";
+    const comparison = typeof left === "number" && typeof right === "number"
+      ? left - right
+      : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
+    return comparison * (approvalSort.direction === "asc" ? 1 : -1);
+  });
+  const approvalPageCount = Math.max(1, Math.ceil(sortedApprovals.length / approvalPageSize));
+  const pageApprovals = sortedApprovals.slice((approvalPage - 1) * approvalPageSize, approvalPage * approvalPageSize);
+
+  useEffect(() => { setMyPage(1); }, [myRequests, myPageSize]);
+  useEffect(() => { setApprovalPage(1); }, [approvals, approvalPageSize]);
 
   const loadAll = async () => {
     setLoading(true);
@@ -102,74 +133,112 @@ export default function Leave() {
     }
   };
 
+  const sortMyRequests = (key) => {
+    setMySort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
+    setMyPage(1);
+  };
+  const sortLabel = (key, label) => (
+    <button type="button" className="table-sort-button" onClick={() => sortMyRequests(key)}>
+      {label}{mySort.key === key ? (mySort.direction === "asc" ? " ▲" : " ▼") : ""}
+    </button>
+  );
+  const sortApprovalLabel = (key, label) => (
+    <button
+      type="button"
+      className="table-sort-button"
+      onClick={() => {
+        setApprovalSort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
+        setApprovalPage(1);
+      }}
+    >
+      {label}{approvalSort.key === key ? (approvalSort.direction === "asc" ? " ▲" : " ▼") : ""}
+    </button>
+  );
+
   if (loading) return <AppLayout title="Leave"><Loader /></AppLayout>;
 
   return (
     <AppLayout title="Leave" subtitle="Apply for leave and track approvals.">
       {error && <div className="login-error" role="alert">{error}</div>}
       {success && <div className="notice-success" role="status">{success}</div>}
-      <LeaveBalanceSummary balances={balances} showLink={false} />
-      {isManager && <ManagerLeaveDashboard />}
-
-      <div className="card section-gap">
-        <div className="card-title-row">
-          <h3>My Leave Requests</h3>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ Apply for Leave</button>
+      {(isManager || isApprover) && (
+        <div className="tag-list section-gap" role="tablist" aria-label="Leave views">
+          <button type="button" role="tab" aria-selected={leaveTab === "my"} className={`btn btn-sm ${leaveTab === "my" ? "btn-primary" : "btn-outline"}`} onClick={() => setLeaveTab("my")}>My Leave</button>
+          <button type="button" role="tab" aria-selected={leaveTab === "team"} className={`btn btn-sm ${leaveTab === "team" ? "btn-primary" : "btn-outline"}`} onClick={() => setLeaveTab("team")}>Team Leave</button>
         </div>
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Reviewer</th></tr>
-            </thead>
-            <tbody>
-              {myRequests.length === 0 && (
-                <tr className="empty-row"><td colSpan={6}>No leave requests yet.</td></tr>
-              )}
-              {myRequests.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.leave_type}</td>
-                  <td>{r.start_date}</td>
-                  <td>{r.end_date}</td>
-                  <td>{r.days}</td>
-                  <td><Badge status={r.status} /></td>
-                  <td>{r.reviewer_name || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      )}
 
-      {isApprover && (
+      {leaveTab === "my" && (
+        <>
+          <LeaveBalanceSummary balances={balances} showLink={false} />
+          <div className="card section-gap">
+            <div className="card-title-row">
+              <h3>My Leave Requests</h3>
+              <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ Apply for Leave</button>
+            </div>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr><th>{sortLabel("leave_type", "Type")}</th><th>{sortLabel("start_date", "From")}</th><th>{sortLabel("end_date", "To")}</th><th>{sortLabel("days", "Days")}</th><th>{sortLabel("status", "Status")}</th><th>Reviewer</th></tr>
+                </thead>
+                <tbody>
+                  {myRequests.length === 0 && <tr className="empty-row"><td colSpan={6}>No leave requests yet.</td></tr>}
+                  {pageMyRequests.map((r) => (
+                    <tr key={r.id}>
+                      <td>{r.leave_type}</td><td>{r.start_date}</td><td>{r.end_date}</td><td>{r.days}</td>
+                      <td><Badge status={r.status} /></td><td>{r.reviewer_name || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="table-pagination">
+              <span>{sortedMyRequests.length ? `Showing ${(myPage - 1) * myPageSize + 1}–${Math.min(myPage * myPageSize, sortedMyRequests.length)} of ${sortedMyRequests.length}` : "0 requests"}</span>
+              <label>Rows per page
+                <select value={myPageSize} onChange={(event) => { setMyPageSize(Number(event.target.value)); setMyPage(1); }}>
+                  {[10, 25, 50].map((size) => <option key={size} value={size}>{size}</option>)}
+                </select>
+              </label>
+              <button type="button" className="btn btn-sm btn-outline" disabled={myPage <= 1} onClick={() => setMyPage((current) => current - 1)}>Previous</button>
+              <span>Page {Math.min(myPage, myPageCount)} of {myPageCount}</span>
+              <button type="button" className="btn btn-sm btn-outline" disabled={myPage >= myPageCount} onClick={() => setMyPage((current) => current + 1)}>Next</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {leaveTab === "team" && isManager && <ManagerLeaveDashboard />}
+      {leaveTab === "team" && isApprover && (
         <div className="card">
           <div className="card-title-row"><h3>Pending Approvals</h3><ExportButton filename="Leave_Pending_Approvals" /></div>
           <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr><th>Employee</th><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Action</th></tr>
-              </thead>
+            <table className="data-table leave-approvals-table">
+              <thead><tr><th>{sortApprovalLabel("employee_name", "Employee")}</th><th>{sortApprovalLabel("employee_code", "Employee ID")}</th><th>{sortApprovalLabel("leave_type", "Type")}</th><th>{sortApprovalLabel("start_date", "From")}</th><th>{sortApprovalLabel("end_date", "To")}</th><th>{sortApprovalLabel("days", "Days")}</th><th>Reason</th><th>Action</th></tr></thead>
               <tbody>
-                {approvals.length === 0 && (
-                  <tr className="empty-row"><td colSpan={7}>No pending requests.</td></tr>
-                )}
-                {approvals.map((r) => (
+                {approvals.length === 0 && <tr className="empty-row"><td colSpan={8}>No pending requests.</td></tr>}
+                {pageApprovals.map((r) => (
                   <tr key={r.id}>
-                    <td>{r.employee_name}</td>
-                    <td>{r.leave_type}</td>
-                    <td>{r.start_date}</td>
-                    <td>{r.end_date}</td>
-                    <td>{r.days}</td>
-                    <td>{r.reason}</td>
-                    <td>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button className="btn btn-sm btn-success" disabled={busyRequestId === r.id} onClick={() => decide(r.id, "approved")}>Approve</button>
-                        <button className="btn btn-sm btn-danger" disabled={busyRequestId === r.id} onClick={() => decide(r.id, "rejected")}>Reject</button>
-                      </div>
-                    </td>
+                    <td>{r.employee_name}</td><td>{r.employee_code}</td><td>{r.leave_type}</td><td>{r.start_date}</td><td>{r.end_date}</td><td>{r.days}</td>
+                    <td><LeaveReasonPreview reason={r.reason} /></td>
+                    <td><div style={{ display: "flex", gap: 6 }}>
+                      <button className="btn btn-sm btn-success" disabled={busyRequestId === r.id} onClick={() => decide(r.id, "approved")}>Approve</button>
+                      <button className="btn btn-sm btn-danger" disabled={busyRequestId === r.id} onClick={() => decide(r.id, "rejected")}>Reject</button>
+                    </div></td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="table-pagination">
+            <span>{sortedApprovals.length ? `Showing ${(approvalPage - 1) * approvalPageSize + 1}–${Math.min(approvalPage * approvalPageSize, sortedApprovals.length)} of ${sortedApprovals.length}` : "0 requests"}</span>
+            <label>Rows per page
+              <select value={approvalPageSize} onChange={(event) => { setApprovalPageSize(Number(event.target.value)); setApprovalPage(1); }}>
+                {[10, 25, 50].map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </label>
+            <button type="button" className="btn btn-sm btn-outline" disabled={approvalPage <= 1} onClick={() => setApprovalPage((current) => current - 1)}>Previous</button>
+            <span>Page {Math.min(approvalPage, approvalPageCount)} of {approvalPageCount}</span>
+            <button type="button" className="btn btn-sm btn-outline" disabled={approvalPage >= approvalPageCount} onClick={() => setApprovalPage((current) => current + 1)}>Next</button>
           </div>
         </div>
       )}

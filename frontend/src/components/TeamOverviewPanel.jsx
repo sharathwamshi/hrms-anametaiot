@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import client from "../api/client";
 import Badge from "./Badge";
 import Loader from "./Loader";
-import ExportButton from "./ExportButton";
+import { downloadFile } from "../utils/download";
 import { fmtTime, fmtHours, arrivalLabel, localDateStr, placeLabel } from "../utils/attendanceTime";
 import { mapsUrl } from "../utils/geo";
 
@@ -24,6 +24,14 @@ export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0, timezo
   const [range, setRange] = useState({ from: localDateStr(new Date(Date.now() - 29 * 864e5)), to: localDateStr() });
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [exportDialog, setExportDialog] = useState("");
+  const [exportDate, setExportDate] = useState(localDateStr());
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const [exportNotice, setExportNotice] = useState("");
+  const [sort, setSort] = useState({ key: "name", direction: "asc" });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   useEffect(() => {
     setDate(localDateStr());
@@ -42,17 +50,44 @@ export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0, timezo
     return () => { off = true; };
   }, [date, refreshKey]);
 
-  const people = useMemo(() => (data?.people || []).filter((p) => !q || p.user.full_name.toLowerCase().includes(q.toLowerCase()) || (p.user.employee_code || "").toLowerCase().includes(q.toLowerCase())), [data, q]);
-  const peopleById = useMemo(() => new Map((data?.people || []).map((person) => [person.user.id, person])), [data]);
-  const presentPeople = data?.present_people || [];
-  const s = data?.summary;
+  const searchTerm = q.trim().toLowerCase();
+  const matchesSearch = useCallback((person) => !searchTerm
+    || String(person.user.full_name || "").toLowerCase().includes(searchTerm)
+    || String(person.user.employee_code || "").toLowerCase().includes(searchTerm), [searchTerm]);
+  const people = useMemo(() => (data?.people || []).filter(matchesSearch), [data, matchesSearch]);
+  const sortedPeople = useMemo(() => {
+    const valueFor = (person) => ({
+      name: person.user.full_name,
+      employee_id: person.user.employee_code || person.user.id,
+      status: person.status,
+      first_in: person.record?.clock_in || "",
+      last_out: person.record?.clock_out || "",
+      hours: Number(person.record?.total_hours || 0),
+    })[sort.key];
+    return [...people].sort((a, b) => {
+      const left = valueFor(a);
+      const right = valueFor(b);
+      const comparison = typeof left === "number" && typeof right === "number"
+        ? left - right
+        : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
+      return comparison * (sort.direction === "asc" ? 1 : -1);
+    });
+  }, [people, sort]);
+  const pageCount = Math.max(1, Math.ceil(sortedPeople.length / pageSize));
+  const pagePeople = sortedPeople.slice((page - 1) * pageSize, page * pageSize);
+  const peopleById = useMemo(() => new Map(people.map((person) => [person.user.id, person])), [people]);
+  const totalEmployees = (data?.organization_people || []).map((user) => ({ user })).filter(matchesSearch);
+  const presentPeople = (data?.present_people || []).filter(matchesSearch);
+  const notClockedInPeople = people.filter((person) => (
+    !person.record?.clock_in && !(person.record?.sessions || []).some((session) => session.clock_in)
+  ));
   const categoryPeople = {
-    present: presentPeople,
-    clocked_in_now: (data?.category_person_ids?.clocked_in_now || []).map((id) => peopleById.get(id)).filter(Boolean),
-    not_clocked_in: (data?.category_person_ids?.not_clocked_in || []).map((id) => peopleById.get(id)).filter(Boolean),
+    total_employees: totalEmployees,
+    present_today: presentPeople,
+    not_clocked_in: notClockedInPeople,
     absent: (data?.category_person_ids?.absent || []).map((id) => peopleById.get(id)).filter(Boolean),
     outside_office: (data?.category_person_ids?.outside_office || []).map((id) => peopleById.get(id)).filter(Boolean),
-    reentries: (data?.people || []).flatMap((person) => (person.record?.sessions || [])
+    reentries: people.flatMap((person) => (person.record?.sessions || [])
       .filter((session) => (session.session_no || 1) > 1)
       .map((session) => ({
         ...person,
@@ -61,33 +96,30 @@ export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0, timezo
       }))),
   };
   const summaryCards = [
-    { key: "present", count: s?.present, label: "Total present" },
-    { key: "clocked_in_now", count: s?.clocked_in_now, label: "Clocked in now" },
-    { key: "not_clocked_in", count: s?.not_clocked_in, label: "Not in yet" },
-    { key: "absent", count: s?.absent, label: "Absent" },
-    { key: "outside_office", count: s?.outside_office, label: "Out of office" },
-    { key: "reentries", count: s?.reentries, label: "Re-entries" },
+    { key: "total_employees", count: categoryPeople.total_employees.length, label: "Total Employees" },
+    { key: "present_today", count: categoryPeople.present_today.length, label: "Present Today" },
+    { key: "not_clocked_in", count: categoryPeople.not_clocked_in.length, label: "Not Clocked In Yet" },
+    { key: "absent", count: categoryPeople.absent.length, label: "Absent" },
+    { key: "outside_office", count: categoryPeople.outside_office.length, label: "Out of office" },
+    { key: "reentries", count: categoryPeople.reentries.length, label: "Re-entries" },
   ];
   const selectedCard = summaryCards.find((card) => card.key === selectedCategory);
   const displayedPeople = selectedCategory ? categoryPeople[selectedCategory] : [];
+  const attendanceColumns = [
+    { label: "Employee", render: (person) => <strong>{person.user.full_name}</strong> },
+    { label: "Employee ID", render: (person) => person.user.employee_code || person.user.id },
+    { label: "Designation", render: (person) => person.user.designation || "—" },
+    { label: "Attendance status", render: (person) => <Badge status={person.status} /> },
+    { label: "First check-in", render: (person) => person.record?.clock_in ? fmtTime(person.record.clock_in) : "—" },
+    { label: "Last check-out", render: (person) => person.record?.clock_out ? fmtTime(person.record.clock_out) : "—" },
+  ];
   const detailColumns = {
-    present: [
+    total_employees: [
       { label: "Employee", render: (person) => <strong>{person.user.full_name}</strong> },
       { label: "Employee ID", render: (person) => person.user.employee_code || person.user.id },
       { label: "Designation", render: (person) => person.user.designation || "—" },
-      { label: "Attendance status", render: (person) => <Badge status={person.status} /> },
-      { label: "First check-in", render: (person) => person.record?.clock_in ? fmtTime(person.record.clock_in) : "—" },
-      { label: "Last check-out", render: (person) => person.record?.clock_out ? fmtTime(person.record.clock_out) : "—" },
     ],
-    clocked_in_now: [
-      { label: "Employee", render: (person) => <strong>{person.user.full_name}</strong> },
-      { label: "Employee ID", render: (person) => person.user.employee_code || person.user.id },
-      { label: "Designation", render: (person) => person.user.designation || "—" },
-      { label: "First check-in", render: (person) => person.record?.clock_in ? fmtTime(person.record.clock_in) : "—" },
-      { label: "Current check-in status", render: (person) => person.record?.check_in_status ? arrivalLabel(person.record.check_in_status) : <Badge status={person.status} /> },
-      { label: "Work location", render: (person) => activeSession(person)?.work_location_name || workLocationNames(person) || "—" },
-      { label: "Last check-in", render: (person) => activeSession(person)?.clock_in ? fmtTime(activeSession(person).clock_in) : "—" },
-    ],
+    present_today: attendanceColumns,
     not_clocked_in: [
       { label: "Employee", render: (person) => <strong>{person.user.full_name}</strong> },
       { label: "Employee ID", render: (person) => person.user.employee_code || person.user.id },
@@ -121,12 +153,72 @@ export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0, timezo
     ],
   };
   const activeColumns = selectedCategory ? detailColumns[selectedCategory] : [];
-  const rangeValid = !!range.from && !!range.to && range.from <= range.to;
   const rangeError = !range.from || !range.to
     ? "Select both a from date and a to date to export."
     : range.from > range.to
       ? "From date must be on or before To date."
       : "";
+
+  useEffect(() => {
+    setPage(1);
+  }, [q, date, pageSize]);
+
+  const sortButton = (key, label) => (
+    <button
+      type="button"
+      className="table-sort-button"
+      aria-label={`Sort by ${label}`}
+      onClick={() => {
+        setSort((current) => ({
+          key,
+          direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+        }));
+        setPage(1);
+      }}
+    >
+      {label}{sort.key === key ? (sort.direction === "asc" ? " ▲" : " ▼") : ""}
+    </button>
+  );
+
+  const openExportDialog = (type) => {
+    setExportError("");
+    setExportNotice("");
+    setExportDate(date);
+    if (type === "range") {
+      setRange((current) => ({ from: current.from || date, to: current.to || date }));
+    }
+    setExportDialog(type);
+  };
+
+  const runExport = async () => {
+    if (exportDialog === "range" && rangeError) {
+      setExportError(rangeError);
+      return;
+    }
+    if (exportDialog === "day" && !exportDate) {
+      setExportError("Select an attendance date to export.");
+      return;
+    }
+    setExporting(true);
+    setExportError("");
+    try {
+      const selectedRange = exportDialog === "range";
+      const filename = selectedRange
+        ? `Team_Attendance_${range.from}_to_${range.to}`
+        : `Team_Attendance_${exportDate}`;
+      await downloadFile(
+        selectedRange ? "/attendance/export/team" : "/attendance/export/team-day",
+        `${filename}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        selectedRange ? range : { date: exportDate },
+      );
+      setExportNotice("Attendance export downloaded.");
+      setExportDialog("");
+    } catch (err) {
+      setExportError(err?.message || "Could not export attendance.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="card">
@@ -135,15 +227,13 @@ export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0, timezo
         <div className="team-attendance-toolbar">
           <input aria-label="Search employee name or code" placeholder="Search employee name or code" value={q} onChange={(e) => setQ(e.target.value)} />
           <label><span>Attendance date</span><input type="date" value={date} max={localDateStr()} onChange={(e) => e.target.value && setDate(e.target.value)} /></label>
-          <label><span>From</span><input type="date" value={range.from} max={localDateStr()} onChange={(e) => setRange({ ...range, from: e.target.value })} required /></label>
-          <label><span>To</span><input type="date" value={range.to} max={localDateStr()} onChange={(e) => setRange({ ...range, to: e.target.value })} required /></label>
           <div className="team-attendance-export-actions">
-            <ExportButton url="/attendance/export/team-day" params={{ date }} filename={`Team_Attendance_${date}`} label="Export selected day" />
-            <ExportButton url="/attendance/export/team" params={range} filename={`Team_Attendance_${range.from}_to_${range.to}`} label="Export range" disabled={!rangeValid} />
+            <button type="button" className="btn btn-sm btn-outline" onClick={() => openExportDialog("day")}>⬇ Export Selected Day</button>
+            <button type="button" className="btn btn-sm btn-outline" onClick={() => openExportDialog("range")}>⬇ Export Range</button>
           </div>
         </div>
       </div>
-      {rangeError && <div className="login-error" role="alert" style={{ marginBottom: 10 }}>{rangeError}</div>}
+      {exportNotice && <div className="notice-success" role="status" style={{ marginBottom: 10 }}>{exportNotice}</div>}
       {data?.is_holiday && <div className="att-chip amber" style={{ marginBottom: 10 }}>Holiday — {data.holiday_name}</div>}
       {error && !selectedCategory && <div className="login-error">{error}</div>}
       {!data && !error && !selectedCategory && <Loader />}
@@ -199,6 +289,7 @@ export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0, timezo
             <table className="data-table team-attendance-table">
               <colgroup>
                 <col className="team-attendance-col-employee" />
+                <col className="team-attendance-col-employee-id" />
                 <col className="team-attendance-col-status" />
                 <col className="team-attendance-col-time" />
                 <col className="team-attendance-col-time" />
@@ -209,17 +300,26 @@ export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0, timezo
                 <col className="team-attendance-col-view" />
               </colgroup>
               <thead>
-                <tr><th>Employee</th><th>Status</th><th>First In</th><th>Last Out</th><th>Hours</th><th>Check-ins</th><th>Work location</th><th>Where</th><th></th></tr>
+                <tr>
+                  <th>{sortButton("name", "Employee")}</th>
+                  <th>{sortButton("employee_id", "Employee ID")}</th>
+                  <th>{sortButton("status", "Status")}</th>
+                  <th>{sortButton("first_in", "First In")}</th>
+                  <th>{sortButton("last_out", "Last Out")}</th>
+                  <th>{sortButton("hours", "Hours")}</th>
+                  <th>Check-ins</th><th>Work location</th><th>Where</th><th></th>
+                </tr>
               </thead>
               <tbody>
-                {people.length === 0 && <tr className="empty-row"><td colSpan={9}>No one to show.</td></tr>}
-                {people.map((p) => {
+                {people.length === 0 && <tr className="empty-row"><td colSpan={10}>No one to show.</td></tr>}
+                {pagePeople.map((p) => {
                   const rec = p.record;
                   const loc = p.last_known_location;
                   const place = loc ? placeLabel(loc.within_geofence) : null;
                   return (
                     <tr key={p.user.id} className="att-person-row" onClick={() => onOpenPerson(p.user)}>
-                      <td><strong>{p.user.full_name}</strong><div className="muted" style={{ fontSize: 11.5 }}>{p.user.employee_code}{p.user.designation ? ` · ${p.user.designation}` : ""}</div>{p.user.restrict_to_office && <span className="att-chip amber" style={{ marginTop: 4, display: "inline-block" }} title="Clock in/out is only allowed from the office">Office only</span>}</td>
+                      <td><strong>{p.user.full_name}</strong>{p.user.designation && <div className="muted" style={{ fontSize: 11.5 }}>{p.user.designation}</div>}{p.user.restrict_to_office && <span className="att-chip amber" style={{ marginTop: 4, display: "inline-block" }} title="Clock in/out is only allowed from the office">Office only</span>}</td>
+                      <td>{p.user.employee_code || p.user.id}</td>
                       <td><Badge status={p.status} />{p.clocked_in_now && <div className="att-chip green" style={{ marginTop: 4 }}>In now</div>}{rec?.check_in_status && <div className={`att-chip ${rec.check_in_status === "late" ? "red" : "green"}`} style={{ marginTop: 4 }}>{arrivalLabel(rec.check_in_status)}</div>}</td>
                       <td>{rec?.clock_in ? fmtTime(rec.clock_in) : "—"}</td>
                       <td>{rec?.clock_in ? (rec.clock_out ? fmtTime(rec.clock_out) : "—") : "—"}</td>
@@ -241,7 +341,50 @@ export default function TeamOverviewPanel({ onOpenPerson, refreshKey = 0, timezo
               </tbody>
             </table>
           </div>
+          <div className="table-pagination">
+            <span>{sortedPeople.length ? `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, sortedPeople.length)} of ${sortedPeople.length}` : "0 employees"}</span>
+            <label>Rows per page
+              <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}>
+                {[10, 25, 50].map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </label>
+            <button type="button" className="btn btn-sm btn-outline" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>Previous</button>
+            <span>Page {Math.min(page, pageCount)} of {pageCount}</span>
+            <button type="button" className="btn btn-sm btn-outline" disabled={page >= pageCount} onClick={() => setPage((current) => current + 1)}>Next</button>
+          </div>
         </>
+      )}
+      {exportDialog && (
+        <div className="modal-overlay" onClick={() => !exporting && setExportDialog("")}>
+          <div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="team-attendance-export-title" onClick={(event) => event.stopPropagation()}>
+            <h3 id="team-attendance-export-title">{exportDialog === "day" ? "Export Selected Day" : "Export Date Range"}</h3>
+            {exportDialog === "day" ? (
+              <div className="form-field">
+                <label htmlFor="team-export-date">Attendance date</label>
+                <input id="team-export-date" type="date" max={localDateStr()} value={exportDate} onChange={(event) => setExportDate(event.target.value)} required />
+              </div>
+            ) : (
+              <div className="form-grid">
+                <div className="form-field">
+                  <label htmlFor="team-export-from">From date</label>
+                  <input id="team-export-from" type="date" max={localDateStr()} value={range.from} onChange={(event) => setRange((current) => ({ ...current, from: event.target.value }))} required />
+                </div>
+                <div className="form-field">
+                  <label htmlFor="team-export-to">To date</label>
+                  <input id="team-export-to" type="date" min={range.from || undefined} max={localDateStr()} value={range.to} onChange={(event) => setRange((current) => ({ ...current, to: event.target.value }))} required />
+                </div>
+              </div>
+            )}
+            {exportDialog === "range" && rangeError && <div className="login-error" role="alert">{rangeError}</div>}
+            {exportError && <div className="login-error" role="alert">{exportError}</div>}
+            <div className="form-actions">
+              <button type="button" className="btn btn-outline" disabled={exporting} onClick={() => setExportDialog("")}>Cancel</button>
+              <button type="button" className="btn btn-primary" disabled={exporting || (exportDialog === "range" && !!rangeError)} onClick={runExport}>
+                {exporting ? "Preparing…" : "Export"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

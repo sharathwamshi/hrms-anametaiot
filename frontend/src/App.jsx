@@ -24,7 +24,8 @@ import Assets from "./pages/Assets";
 import Profile from "./pages/Profile";
 import Insurance from "./pages/Insurance";
 
-import { ROLES } from "./config/roles";
+import { ALL_ROLES, ROLES } from "./config/roles";
+import Resignation from "./pages/Resignation";
 
 export default function App() {
   const { loading } = useAuth();
@@ -69,6 +70,15 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Leave />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/resignation"
+        element={
+          <ProtectedRoute allow={ALL_ROLES.filter((role) => role !== ROLES.CONTRACT_EMPLOYEE)}>
+            <Resignation />
           </ProtectedRoute>
         }
       />

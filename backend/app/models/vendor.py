@@ -17,6 +17,7 @@ class CompanySettings(db.Model):
     # Off by default.
     selfie_required = db.Column(db.Boolean, default=False, nullable=False, server_default="0")
     attendance_buffer_minutes = db.Column(db.Integer, default=10, nullable=False, server_default="10")
+    wfh_reasons_enabled = db.Column(db.Boolean, default=False, nullable=False, server_default="0")
     updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

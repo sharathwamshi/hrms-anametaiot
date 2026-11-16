@@ -14,7 +14,7 @@ class TestConfig(Config):
 from app import create_app
 from app.extensions import db
 from app.models import LeaveBalance, LeaveEntitlementAudit, LeaveRequest, LeaveType, User
-from app.roles import EMPLOYEE, HR_OPERATIONS, MANAGER
+from app.roles import EMPLOYEE, HR_OPERATIONS, MANAGER, SUPER_ADMIN
 
 
 app = create_app(TestConfig)
@@ -44,6 +44,7 @@ with app.app_context():
     manager = make_user("MANAGER", MANAGER)
     other_manager = make_user("OTHER_MANAGER", MANAGER)
     hr_operations = make_user("HR_OPERATIONS", HR_OPERATIONS)
+    super_admin = make_user("SUPER_ADMIN", SUPER_ADMIN)
     employee = make_user("EMPLOYEE", EMPLOYEE, manager.id)
     employee2 = make_user("EMPLOYEE2", EMPLOYEE, manager.id)
     leave_type = LeaveType(name="Annual", annual_quota=3)
@@ -79,6 +80,7 @@ with app.app_context():
     manager_headers = auth("manager@example.com")
     other_manager_headers = auth("other_manager@example.com")
     hr_headers = auth("hr_operations@example.com")
+    super_admin_headers = auth("super_admin@example.com")
 
     own_balance = client.get("/api/leave/balances", headers=employee_headers).get_json()[0]
     check("balance reports entitlement, approved leave and remaining leave",
@@ -307,6 +309,26 @@ with app.app_context():
               headers=manager_headers,
               json={"decision": "approved"},
           ).status_code == 403)
+    hr_own_request = client.post("/api/leave/apply", headers=hr_headers, json=leave_today)
+    check("HR Operations cannot approve their own leave request",
+          hr_own_request.status_code == 201 and
+          client.post(
+              f"/api/leave/{hr_own_request.get_json()['id']}/decision",
+              headers=hr_headers,
+              json={"decision": "approved"},
+          ).status_code == 403 and
+          all(row["id"] != hr_own_request.get_json()["id"]
+              for row in client.get("/api/leave/pending-approvals", headers=hr_headers).get_json()))
+    admin_own_request = client.post("/api/leave/apply", headers=super_admin_headers, json=leave_today)
+    check("Super Admin cannot approve their own leave request",
+          admin_own_request.status_code == 201 and
+          client.post(
+              f"/api/leave/{admin_own_request.get_json()['id']}/decision",
+              headers=super_admin_headers,
+              json={"decision": "approved"},
+          ).status_code == 403 and
+          all(row["id"] != admin_own_request.get_json()["id"]
+              for row in client.get("/api/leave/pending-approvals", headers=super_admin_headers).get_json()))
 
     future = {**leave_today, "start_date": (today + timedelta(days=10)).isoformat(),
               "end_date": (today + timedelta(days=10)).isoformat()}
