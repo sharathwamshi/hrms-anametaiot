@@ -1,6 +1,9 @@
 import sys
+import io
 import unittest
 from datetime import date, datetime
+
+from openpyxl import load_workbook
 
 sys.path.insert(0, ".")
 
@@ -196,6 +199,10 @@ class AttendanceDashboardApiTest(unittest.TestCase):
         self.assertNotIn(self.other_employee.id, {
             user_id for ids in category_ids.values() for user_id in ids
         })
+        self.assertIn(
+            self.other_employee.id,
+            {person["id"] for person in payload["organization_people"]},
+        )
 
     def test_employee_cannot_access_team_analytics(self):
         response = self.client.get(
@@ -240,6 +247,38 @@ class AttendanceDashboardApiTest(unittest.TestCase):
         )
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(oversized.status_code, 400)
+
+    def test_selected_day_and_range_exports_use_the_requested_dates(self):
+        headers = self.headers("manager@test.invalid")
+        daily = self.client.get(
+            "/api/attendance/export/team-day?date=2026-10-23",
+            headers=headers,
+        )
+        self.assertEqual(daily.status_code, 200)
+        self.assertIn("Team_Attendance_2026-10-23.xlsx", daily.headers["Content-Disposition"])
+        daily_book = load_workbook(io.BytesIO(daily.data), read_only=True, data_only=True)
+        self.assertIn("23-Oct-2026", daily_book["Team today"]["A1"].value)
+
+        ranged = self.client.get(
+            "/api/attendance/export/team?from=2026-10-23&to=2026-10-24",
+            headers=headers,
+        )
+        self.assertEqual(ranged.status_code, 200)
+        self.assertIn(
+            "Team_Attendance_2026-10-23_to_2026-10-24.xlsx",
+            ranged.headers["Content-Disposition"],
+        )
+        range_book = load_workbook(io.BytesIO(ranged.data), read_only=True, data_only=True)
+        daily_rows = list(range_book["Daily summary"].iter_rows(min_row=4, values_only=True))
+        self.assertEqual(
+            {row[0].date() if isinstance(row[0], datetime) else row[0] for row in daily_rows},
+            {date(2026, 10, 23), date(2026, 10, 24)},
+        )
+        detail_rows = list(range_book["Check-in details"].iter_rows(min_row=4, values_only=True))
+        self.assertEqual(
+            {row[0].date() if isinstance(row[0], datetime) else row[0] for row in detail_rows},
+            {date(2026, 10, 23)},
+        )
 
 
 if __name__ == "__main__":

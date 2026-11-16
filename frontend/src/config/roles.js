@@ -17,6 +17,7 @@ export const ROLES = {
   FINANCE_ACCOUNTS: "finance_accounts",
   OPERATIONS: "operations",
 };
+export const ALL_ROLES = Object.values(ROLES);
 
 export const ROLE_LABELS = {
   [ROLES.SUPER_ADMIN]: "Super Admin",
@@ -40,29 +41,29 @@ export const ROLE_LABELS = {
 // Which nav items each role sees. Every role gets Dashboard + Profile.
 export const NAV_BY_ROLE = {
   [ROLES.SUPER_ADMIN]: [
-    "dashboard", "employees", "attendance", "leave", "assets", "insurance", "profile",
+    "dashboard", "employees", "attendance", "leave", "resignation", "assets", "insurance", "profile",
   ],
   [ROLES.HR_OPERATIONS]: [
     "dashboard", "employees", "attendance", "leave", "payslips", "recruitment",
     "allCandidates", "recruiters", "vendors", "allPlacements", "announcements",
-    "assets", "insurance", "profile",
+    "assets", "insurance", "resignation", "profile",
   ],
   [ROLES.MANAGER]: [
     "dashboard", "employees", "attendance", "leave", "payslips", "recruitment",
-    "allCandidates", "recruiters", "vendors", "allPlacements", "insurance", "profile",
+    "allCandidates", "recruiters", "vendors", "allPlacements", "insurance", "resignation", "profile",
   ],
   [ROLES.FINANCE_ACCOUNTS]: [
     "dashboard", "attendance", "leave", "payslips", "payslipManagement", "allCandidates", "recruiters",
-    "vendors", "allPlacements", "insurance", "profile",
+    "vendors", "allPlacements", "insurance", "resignation", "profile",
   ],
   [ROLES.OPERATIONS]: [
-    "dashboard", "attendance", "assets", "employees", "vendors", "payslips", "profile",
+    "dashboard", "attendance", "assets", "employees", "vendors", "payslips", "resignation", "profile",
   ],
   [ROLES.HR_RECRUITER]: [
-    "dashboard", "attendance", "leave", "payslips", "recruitment", "allCandidates", "profile",
+    "dashboard", "attendance", "leave", "payslips", "recruitment", "allCandidates", "resignation", "profile",
   ],
   [ROLES.EMPLOYEE]: [
-    "home", "myAttendance", "leave", "payslips", "insurance", "profile",
+    "home", "myAttendance", "leave", "resignation", "payslips", "insurance", "profile",
   ],
   [ROLES.CONTRACT_EMPLOYEE]: [
     "dashboard", "payslips", "insurance", "profile",
@@ -78,6 +79,7 @@ export const NAV_ITEMS = {
   team: { path: "/attendance?tab=team", label: "Team", icon: "\u25A5" },
   reports: { path: "/attendance?tab=reports", label: "Reports", icon: "\u25A4" },
   leave: { path: "/leave", label: "Leave", icon: "\u2708" },
+  resignation: { path: "/resignation", label: "Resignation", icon: "\u21AA" },
   payslipManagement: { path: "/payroll/manage", label: "Payslip Management", icon: "\u20B9" },
   payslips: { path: "/payroll", label: "Payslips", icon: "\u20B9" },
   insurance: { path: "/insurance", label: "Insurance", icon: "\u2665" },

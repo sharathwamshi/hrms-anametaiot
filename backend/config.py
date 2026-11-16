@@ -48,6 +48,11 @@ class Config:
         os.path.join(basedir, "app", "private_uploads", "employee_documents"),
     )
     MAX_EMPLOYEE_DOCUMENT_BYTES = 10 * 1024 * 1024
+    RESIGNATION_DOCUMENT_FOLDER = os.environ.get(
+        "RESIGNATION_DOCUMENT_FOLDER",
+        os.path.join(basedir, "app", "private_uploads", "resignation_documents"),
+    )
+    MAX_RESIGNATION_DOCUMENT_BYTES = 10 * 1024 * 1024
     INSURANCE_DOCUMENT_FOLDER = os.environ.get(
         "INSURANCE_DOCUMENT_FOLDER",
         os.path.join(basedir, "app", "private_uploads", "insurance_documents"),

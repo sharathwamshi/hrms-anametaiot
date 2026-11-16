@@ -31,7 +31,10 @@ def create_app(config_class=Config):
         return user is None or not user.is_active
 
     @jwt.revoked_token_loader
-    def _revoked_response(_jwt_header, _jwt_payload):
+    def _revoked_response(_jwt_header, jwt_payload):
+        user = db.session.get(User, int(jwt_payload["sub"]))
+        if user is None:
+            return jsonify({"message": "The employee record for this account could not be found."}), 401
         return jsonify({"message": "This account is no longer active."}), 401
 
     from app.routes.auth import bp as auth_bp
@@ -51,6 +54,7 @@ def create_app(config_class=Config):
     from app.routes.misc import bp as misc_bp
     from app.routes.notifications import bp as notifications_bp
     from app.routes.exports import bp as exports_bp
+    from app.routes.resignation import bp as resignation_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(employees_bp)
@@ -69,6 +73,7 @@ def create_app(config_class=Config):
     app.register_blueprint(misc_bp)
     app.register_blueprint(notifications_bp)
     app.register_blueprint(exports_bp)
+    app.register_blueprint(resignation_bp)
 
     # Serve public uploaded files while blocking protected document paths.
     from flask import send_from_directory

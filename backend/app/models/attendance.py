@@ -317,6 +317,7 @@ class WorkLocation(db.Model):
     name = db.Column(db.String(100), nullable=False)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     is_default = db.Column(db.Boolean, nullable=False, default=False)
+    is_wfh = db.Column(db.Boolean, nullable=False, default=False)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     created_at = db.Column(db.DateTime, default=utc_now_naive)
 
@@ -326,6 +327,26 @@ class WorkLocation(db.Model):
             "name": self.name,
             "is_active": self.is_active,
             "is_default": self.is_default,
+            "is_wfh": self.is_wfh,
+        }
+
+
+class AttendanceWfhReason(db.Model):
+    __tablename__ = "attendance_wfh_reasons"
+
+    id = db.Column(db.Integer, primary_key=True)
+    label = db.Column(db.String(100), nullable=False, unique=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime, default=utc_now_naive)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "label": self.label,
+            "is_active": self.is_active,
+            "sort_order": self.sort_order,
         }
 
 
@@ -368,6 +389,9 @@ class AttendanceSession(db.Model):
     clock_in_within_geofence = db.Column(db.Boolean, nullable=True)
     work_location_id = db.Column(db.Integer, db.ForeignKey("attendance_work_locations.id"), nullable=True)
     work_location_name = db.Column(db.String(100), nullable=True)
+    wfh_reason_id = db.Column(db.Integer, db.ForeignKey("attendance_wfh_reasons.id", ondelete="SET NULL"), nullable=True)
+    wfh_reason = db.Column(db.String(100), nullable=True)
+    wfh_reason_explanation = db.Column(db.String(255), nullable=True)
     clock_out_lat = db.Column(db.Float, nullable=True)
     clock_out_lng = db.Column(db.Float, nullable=True)
     clock_out_within_geofence = db.Column(db.Boolean, nullable=True)
@@ -397,6 +421,9 @@ class AttendanceSession(db.Model):
             "clock_in_within_geofence": self.clock_in_within_geofence,
             "work_location_id": self.work_location_id,
             "work_location_name": self.work_location_name,
+            "wfh_reason_id": self.wfh_reason_id,
+            "wfh_reason": self.wfh_reason,
+            "wfh_reason_explanation": self.wfh_reason_explanation,
             "clock_out_lat": self.clock_out_lat, "clock_out_lng": self.clock_out_lng,
             "clock_out_within_geofence": self.clock_out_within_geofence,
             "has_clock_in_selfie": bool(self.clock_in_selfie),

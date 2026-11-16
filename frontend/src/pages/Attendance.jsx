@@ -224,7 +224,181 @@ function RegularizationReasonsModal({ onClose }) {
   );
 }
 
-function AttendancePolicyPanel() {
+function WfhReasonSettingsPanel() {
+  const [settings, setSettings] = useState(null);
+  const [label, setLabel] = useState("");
+  const [editingReason, setEditingReason] = useState(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    setError("");
+    try {
+      const { data } = await client.get("/attendance/wfh-reasons", { params: { active_only: "false" } });
+      setSettings(data);
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not load WFH reasons.");
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const updateEnabled = async (enabled) => {
+    setError("");
+    setSaving(true);
+    try {
+      await client.put("/attendance/wfh-reasons/settings", { enabled });
+      setSettings((current) => ({ ...current, enabled }));
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not update WFH reason settings.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addReason = async (event) => {
+    event.preventDefault();
+    setError("");
+    setSaving(true);
+    try {
+      await client.post("/attendance/wfh-reasons", { label });
+      setLabel("");
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not add WFH reason.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleReason = async (reason) => {
+    setError("");
+    setSaving(true);
+    try {
+      await client.put(`/attendance/wfh-reasons/${reason.id}`, { is_active: !reason.is_active });
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not update WFH reason.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveReason = async (event, reason) => {
+    event.preventDefault();
+    setError("");
+    setSaving(true);
+    try {
+      await client.put(`/attendance/wfh-reasons/${reason.id}`, { label: editingReason.label });
+      setEditingReason(null);
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not rename WFH reason.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteReason = async (reason) => {
+    if (!window.confirm(`Delete "${reason.label}"? Reasons used in attendance history cannot be deleted; retire those instead.`)) return;
+    setError("");
+    setSaving(true);
+    try {
+      await client.delete(`/attendance/wfh-reasons/${reason.id}`);
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not delete WFH reason.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const moveReason = async (reason, offset) => {
+    const reasons = [...settings.reasons];
+    const index = reasons.findIndex((item) => item.id === reason.id);
+    const destination = index + offset;
+    if (destination < 0 || destination >= reasons.length) return;
+    [reasons[index], reasons[destination]] = [reasons[destination], reasons[index]];
+    setError("");
+    setSaving(true);
+    try {
+      await client.put("/attendance/wfh-reasons/order", {
+        reason_ids: reasons.map((item) => item.id),
+      });
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not reorder WFH reasons.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="card section-gap">
+      <h3>Work-from-Home Reasons</h3>
+      <p className="muted">When enabled, employees must select a reason when clocking in from a WFH location. “Other” always requires an explanation.</p>
+      {error && <div className="login-error" role="alert">{error}</div>}
+      {!settings ? (error ? <button type="button" className="btn btn-sm btn-outline" onClick={load}>Retry loading WFH reasons</button> : <Loader />) : (
+        <>
+          <label className="form-check">
+            <input type="checkbox" checked={settings.enabled} disabled={saving} onChange={(event) => updateEnabled(event.target.checked)} />
+            Require a WFH reason when clocking in from a WFH location
+          </label>
+          <form onSubmit={addReason} className="form-field section-gap">
+            <label htmlFor="new-wfh-reason">Add a reason option</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input id="new-wfh-reason" value={label} maxLength={100} onChange={(event) => setLabel(event.target.value)} required />
+              <button className="btn btn-primary" type="submit" disabled={saving || !label.trim()}>Add</button>
+            </div>
+          </form>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead><tr><th>Reason</th><th>Status</th><th>Order</th><th>Actions</th></tr></thead>
+              <tbody>
+                {!settings.reasons.length && <tr className="empty-row"><td colSpan={4}>No custom WFH reasons. Employees can still choose Other.</td></tr>}
+                {settings.reasons.map((reason, index) => (
+                  <tr key={reason.id}>
+                    <td>
+                      {editingReason?.id === reason.id ? (
+                        <form onSubmit={(event) => saveReason(event, reason)} style={{ display: "flex", gap: 6 }}>
+                          <input
+                            aria-label="WFH reason name"
+                            value={editingReason.label}
+                            maxLength={100}
+                            onChange={(event) => setEditingReason({ ...editingReason, label: event.target.value })}
+                            required
+                          />
+                          <button className="btn btn-sm btn-success" disabled={saving || !editingReason.label.trim()}>Save</button>
+                          <button type="button" className="btn btn-sm btn-outline" disabled={saving} onClick={() => setEditingReason(null)}>Cancel</button>
+                        </form>
+                      ) : reason.label}
+                    </td>
+                    <td>{reason.is_active ? "Active" : "Retired"}</td>
+                    <td>
+                      <button type="button" className="btn btn-sm btn-outline" disabled={saving || index === 0} onClick={() => moveReason(reason, -1)} aria-label={`Move ${reason.label} up`}>↑</button>{" "}
+                      <button type="button" className="btn btn-sm btn-outline" disabled={saving || index === settings.reasons.length - 1} onClick={() => moveReason(reason, 1)} aria-label={`Move ${reason.label} down`}>↓</button>
+                    </td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      {editingReason?.id !== reason.id && (
+                        <>
+                          <button type="button" className="btn btn-sm btn-outline" disabled={saving} onClick={() => setEditingReason({ id: reason.id, label: reason.label })}>Rename</button>{" "}
+                          <button type="button" className="btn btn-sm btn-outline" disabled={saving} onClick={() => toggleReason(reason)}>{reason.is_active ? "Retire" : "Reactivate"}</button>{" "}
+                          <button type="button" className="btn btn-sm btn-danger" disabled={saving} onClick={() => deleteReason(reason)}>Delete</button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AttendancePolicyPanel({ canManageWfhReasons }) {
   const [policy, setPolicy] = useState(null);
   const [bufferMinutes, setBufferMinutes] = useState("10");
   const [error, setError] = useState("");
@@ -281,6 +455,7 @@ function AttendancePolicyPanel() {
           {saved && <span className="att-chip green">Saved</span>}
         </form>
       )}
+      {canManageWfhReasons && <WfhReasonSettingsPanel />}
     </div>
   );
 }
@@ -415,11 +590,12 @@ export default function Attendance() {
           {loading ? <Loader /> : (
             <div className="table-wrap">
               <table className="data-table">
-                <thead><tr><th>Date</th><th>Clock In</th><th>Arrival</th><th>Clock Out</th><th>Hours</th><th>Check-ins</th><th>Where</th><th>Status</th><th>Regularization</th><th></th></tr></thead>
+                <thead><tr><th>Date</th><th>Clock In</th><th>Arrival</th><th>Clock Out</th><th>Hours</th><th>Check-ins</th><th>Where</th><th>WFH reason</th><th>Status</th><th>Regularization</th><th></th></tr></thead>
                 <tbody>
-                  {history.length === 0 && <tr className="empty-row"><td colSpan={10}>No attendance records for this month.</td></tr>}
+                  {history.length === 0 && <tr className="empty-row"><td colSpan={11}>No attendance records for this month.</td></tr>}
                   {history.map((r) => {
                     const places = [...new Set((r.sessions || []).flatMap((x) => [x.clock_in_within_geofence, x.clock_out && x.clock_out_within_geofence]).filter((v) => v !== null && v !== undefined && v !== ""))];
+                    const wfhSessions = (r.sessions || []).filter((session) => session.wfh_reason);
                     return (
                       <tr key={r.id}>
                         <td>{r.work_date}</td>
@@ -431,6 +607,11 @@ export default function Attendance() {
                         <td>
                           {places.length === 0 ? <span className="muted">—</span> : places.map((v) => { const p = placeLabel(v); return <span key={String(v)} className={`att-chip ${p.cls}`} style={{ marginRight: 4 }}>{p.text}</span>; })}
                         </td>
+                        <td>{wfhSessions.length ? wfhSessions.map((session) => (
+                          <div key={session.session_no} className="att-chip" title={session.wfh_reason_explanation || ""}>
+                            {session.wfh_reason}{session.wfh_reason_explanation ? ` — ${session.wfh_reason_explanation}` : ""}
+                          </div>
+                        )) : <span className="muted">—</span>}</td>
                         <td><Badge status={r.status} /></td>
                         <td>
                           {regStatusChip(r.regularization_status)}
@@ -581,7 +762,7 @@ export default function Attendance() {
       )}
 
       {tab === "holidays" && <HolidaysPanel canManage={canManageCalendar} />}
-      {tab === "policy" && canApprove && <AttendancePolicyPanel />}
+      {tab === "policy" && canApprove && <AttendancePolicyPanel canManageWfhReasons={[ROLES.MANAGER, ROLES.SUPER_ADMIN].includes(user.role)} />}
       {tab === "work-locations" && (
         <WorkLocationOptionsPanel
           canManage={canApprove}

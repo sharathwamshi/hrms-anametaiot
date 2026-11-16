@@ -38,6 +38,10 @@ For an existing database, run `mysql -u root anametaiot_hrms < backend/migration
 to add the regularization request history table and backfill this month's existing submissions.
 Also run `mysql -u root anametaiot_hrms < backend/migration_attendance_work_rules.sql` to add the
 configurable check-in buffer (defaults to 10 minutes) and manager edit-time audit details.
+For configurable WFH reasons in an existing database, run
+`backend/migration_attendance_wfh_reasons.sql` first, then
+`backend/migration_attendance_wfh_reason_management.sql`; the latter adds persistent reason
+ordering and links attendance snapshots to their source reason without changing saved reason text.
 
 Attendance uses the company timezone configured by `COMPANY_TIMEZONE` (default `Asia/Kolkata`).
 Existing attendance `DATETIME` values are stored as naive UTC; the application converts them
@@ -53,6 +57,17 @@ existing leave schema already stores annual allocations and usage; no table alte
 For an existing database, run
 `mysql -u root anametaiot_hrms < backend/migration_leave_entitlement_audit.sql`
 to create the audit table used by manager leave-entitlement changes.
+
+For an existing database, run
+`mysql -u root anametaiot_hrms < backend/migration_resignation_management.sql`
+to create the staged resignation workflow, audit history, configurable L2 approver
+routing, private document metadata, finance settlement and exit checklist tables.
+The migration does not alter employee records and seeds the supplied initial
+company approver mappings where the named active users exist. HR Operations and
+Super Admin can maintain the mappings in Resignation → Approver Routing.
+Configure `RESIGNATION_DOCUMENT_FOLDER` to writable, persistent private storage
+in production. The legacy Profile and Employees resignation actions now direct
+users to the staged workflow; legacy resignation API endpoints are retired.
 
 For company-specific payroll and private payslip PDFs, back up an existing database and
 manually apply `backend/migration_company_specific_payslips.sql`. Existing employees will
@@ -70,7 +85,7 @@ The application does not run this migration automatically.
 
 ```bash
 cd backend
-python3 -m venv venurce venv/bin/activate          # Windows: venv\Scripts\activate
+python3 -m venv venu venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 cp .env.example .env              # already defaults to root / no password / localhost

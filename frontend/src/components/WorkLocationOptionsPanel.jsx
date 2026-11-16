@@ -8,6 +8,7 @@ const inputStyle = { border: "1px solid var(--color-border)", borderRadius: 6, p
 export default function WorkLocationOptionsPanel({ canManage = false, canManageOffices = false }) {
   const [locations, setLocations] = useState(null);
   const [name, setName] = useState("");
+  const [isWfh, setIsWfh] = useState(false);
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,8 +30,9 @@ export default function WorkLocationOptionsPanel({ canManage = false, canManageO
     setBusy(true);
     setError("");
     try {
-      await client.post("/attendance/work-locations", { name });
+      await client.post("/attendance/work-locations", { name, is_wfh: isWfh });
       setName("");
+      setIsWfh(false);
       await load();
     } catch (err) {
       setError(err?.response?.data?.message || "Could not add this work location.");
@@ -68,6 +70,10 @@ export default function WorkLocationOptionsPanel({ canManage = false, canManageO
               <label htmlFor="new-work-location">Add a location</label>
               <input id="new-work-location" value={name} onChange={(event) => setName(event.target.value)} maxLength={100} placeholder="e.g. Secondary Office" required />
             </div>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+              <input type="checkbox" checked={isWfh} onChange={(event) => setIsWfh(event.target.checked)} />
+              Work-from-home location
+            </label>
             <button className="btn btn-success btn-sm" disabled={busy || !name.trim()}>{busy ? "Saving…" : "Add location"}</button>
           </form>
         )}
@@ -75,7 +81,7 @@ export default function WorkLocationOptionsPanel({ canManage = false, canManageO
         {locations === null ? <Loader /> : (
           <div className="table-wrap">
             <table className="data-table">
-              <thead><tr><th>Location</th><th>Status</th><th>Default</th>{canManage && <th>Actions</th>}</tr></thead>
+              <thead><tr><th>Location</th><th>Type</th><th>Status</th><th>Default</th>{canManage && <th>Actions</th>}</tr></thead>
               <tbody>
                 {locations.map((location) => (
                   <tr key={location.id}>
@@ -94,6 +100,7 @@ export default function WorkLocationOptionsPanel({ canManage = false, canManageO
                         </form>
                       ) : <strong>{location.name}</strong>}
                     </td>
+                    <td>{location.is_wfh ? "Work from home" : "Office / other"}</td>
                     <td>{location.is_active ? <span className="att-chip green">Active</span> : <span className="att-chip">Inactive</span>}</td>
                     <td>{location.is_default ? <span className="att-chip green">Default</span> : "—"}</td>
                     {canManage && (
@@ -101,6 +108,7 @@ export default function WorkLocationOptionsPanel({ canManage = false, canManageO
                         {editing?.id !== location.id && (
                           <>
                             <button className="btn btn-sm btn-outline" disabled={busy} onClick={() => setEditing({ id: location.id, name: location.name })}>Edit</button>{" "}
+                            <button className="btn btn-sm btn-outline" disabled={busy} onClick={() => update(location, { is_wfh: !location.is_wfh })}>{location.is_wfh ? "Mark non-WFH" : "Mark WFH"}</button>{" "}
                             {location.is_active && !location.is_default && (
                               <button className="btn btn-sm btn-outline" disabled={busy} onClick={() => update(location, { is_default: true })}>Make default</button>
                             )}{" "}
@@ -117,7 +125,7 @@ export default function WorkLocationOptionsPanel({ canManage = false, canManageO
                     )}
                   </tr>
                 ))}
-                {locations.length === 0 && <tr className="empty-row"><td colSpan={canManage ? 4 : 3}>No work locations are set up.</td></tr>}
+                {locations.length === 0 && <tr className="empty-row"><td colSpan={canManage ? 5 : 4}>No work locations are set up.</td></tr>}
               </tbody>
             </table>
           </div>

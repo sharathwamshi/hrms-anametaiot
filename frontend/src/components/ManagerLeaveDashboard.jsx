@@ -3,6 +3,7 @@ import client from "../api/client";
 import Badge from "./Badge";
 import Loader from "./Loader";
 import StatCard from "./StatCard";
+import LeaveReasonPreview from "./LeaveReasonPreview";
 
 const EMPTY_FILTERS = {
   employee_id: "",
@@ -32,6 +33,12 @@ export default function ManagerLeaveDashboard() {
   });
   const [savingEntitlement, setSavingEntitlement] = useState(false);
   const [selectedRequestStatus, setSelectedRequestStatus] = useState(null);
+  const [sort, setSort] = useState({ key: "start_date", direction: "desc" });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [balanceSort, setBalanceSort] = useState({ key: "employee_name", direction: "asc" });
+  const [balancePage, setBalancePage] = useState(1);
+  const [balancePageSize, setBalancePageSize] = useState(10);
   const requestsSectionRef = useRef(null);
 
   const loadData = useCallback(async (activeFilters = EMPTY_FILTERS) => {
@@ -233,6 +240,61 @@ export default function ManagerLeaveDashboard() {
 
   const counts = summary?.counts || {};
   const hasPendingRequests = requests.some((request) => request.status === "pending");
+  const sortedRequests = [...requests].sort((a, b) => {
+    const left = a[sort.key] ?? "";
+    const right = b[sort.key] ?? "";
+    const comparison = typeof left === "number" && typeof right === "number"
+      ? left - right
+      : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
+    return comparison * (sort.direction === "asc" ? 1 : -1);
+  });
+  const pageCount = Math.max(1, Math.ceil(sortedRequests.length / pageSize));
+  const pageRequests = sortedRequests.slice((page - 1) * pageSize, page * pageSize);
+  const balanceRows = (summary?.employees || []).flatMap((employee) => employee.balances.map((balance) => ({
+    ...balance,
+    employee_id: employee.employee_id,
+    employee_code: employee.employee_code,
+    employee_name: employee.employee_name,
+    eligible_for_entitlement_edit: employee.eligible_for_entitlement_edit,
+  })));
+  const sortedBalanceRows = [...balanceRows].sort((a, b) => {
+    const left = a[balanceSort.key] ?? "";
+    const right = b[balanceSort.key] ?? "";
+    const comparison = typeof left === "number" && typeof right === "number"
+      ? left - right
+      : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
+    return comparison * (balanceSort.direction === "asc" ? 1 : -1);
+  });
+  const balancePageCount = Math.max(1, Math.ceil(sortedBalanceRows.length / balancePageSize));
+  const pageBalances = sortedBalanceRows.slice((balancePage - 1) * balancePageSize, balancePage * balancePageSize);
+
+  useEffect(() => { setPage(1); }, [requests, pageSize]);
+  useEffect(() => { setBalancePage(1); }, [summary, balancePageSize]);
+
+  const sortButton = (key, label) => (
+    <button
+      type="button"
+      className="table-sort-button"
+      onClick={() => {
+        setSort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
+        setPage(1);
+      }}
+    >
+      {label}{sort.key === key ? (sort.direction === "asc" ? " ▲" : " ▼") : ""}
+    </button>
+  );
+  const balanceSortButton = (key, label) => (
+    <button
+      type="button"
+      className="table-sort-button"
+      onClick={() => {
+        setBalanceSort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
+        setBalancePage(1);
+      }}
+    >
+      {label}{balanceSort.key === key ? (balanceSort.direction === "asc" ? " ▲" : " ▼") : ""}
+    </button>
+  );
 
   return (
     <section className="section-gap" aria-labelledby="manager-leave-heading">
@@ -281,30 +343,52 @@ export default function ManagerLeaveDashboard() {
               <div className="table-wrap">
                 <table className="data-table">
                   <thead>
-                    <tr><th>Employee</th><th>Employee ID</th><th>Leave Type</th><th>Annual Entitlement</th><th>Approved Leave Taken</th><th>Remaining Leave</th><th>Action</th></tr>
+                    <tr>
+                      <th>{balanceSortButton("employee_name", "Employee")}</th>
+                      <th>{balanceSortButton("employee_code", "Employee ID")}</th>
+                      <th>{balanceSortButton("leave_type", "Leave Type")}</th>
+                      <th>{balanceSortButton("annual_entitlement", "Annual Entitlement")}</th>
+                      <th>{balanceSortButton("approved_leave_taken", "Approved Leave Taken")}</th>
+                      <th>{balanceSortButton("remaining_leave", "Remaining Leave")}</th>
+                      <th>Action</th>
+                    </tr>
                   </thead>
                   <tbody>
-                    {summary.employees.flatMap((employee) => employee.balances.map((balance) => (
-                      <tr key={`${employee.employee_id}-${balance.leave_type}`}>
-                        <td>{employee.employee_name}</td>
-                        <td>{employee.employee_code}</td>
-                        <td>{balance.leave_type}</td>
-                        <td>{balance.annual_entitlement} days</td>
-                        <td>{balance.approved_leave_taken} days</td>
-                        <td>{balance.remaining_leave} days</td>
-                        <td>{employee.eligible_for_entitlement_edit ? (
+                    {!balanceRows.length && <tr className="empty-row"><td colSpan={7}>No employee leave balances to show.</td></tr>}
+                    {pageBalances.map((row) => (
+                      <tr key={`${row.employee_id}-${row.leave_type}`}>
+                        <td>{row.employee_name}</td>
+                        <td>{row.employee_code}</td>
+                        <td>{row.leave_type}</td>
+                        <td>{row.annual_entitlement} days</td>
+                        <td>{row.approved_leave_taken} days</td>
+                        <td>{row.remaining_leave} days</td>
+                        <td>{row.eligible_for_entitlement_edit ? (
                           <button
                             className="btn btn-sm btn-outline"
                             type="button"
-                            onClick={() => openEmployeeEditor(employee, balance.leave_type_id, balance.annual_entitlement)}
+                            onClick={() => openEmployeeEditor(row, row.leave_type_id, row.annual_entitlement)}
                           >
                             Edit
                           </button>
                         ) : "—"}</td>
                       </tr>
-                    )))}
+                    ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {!!balanceRows.length && (
+              <div className="table-pagination">
+                <span>{`Showing ${(balancePage - 1) * balancePageSize + 1}–${Math.min(balancePage * balancePageSize, sortedBalanceRows.length)} of ${sortedBalanceRows.length}`}</span>
+                <label>Rows per page
+                  <select value={balancePageSize} onChange={(event) => { setBalancePageSize(Number(event.target.value)); setBalancePage(1); }}>
+                    {[10, 25, 50].map((size) => <option key={size} value={size}>{size}</option>)}
+                  </select>
+                </label>
+                <button type="button" className="btn btn-sm btn-outline" disabled={balancePage <= 1} onClick={() => setBalancePage((current) => current - 1)}>Previous</button>
+                <span>Page {Math.min(balancePage, balancePageCount)} of {balancePageCount}</span>
+                <button type="button" className="btn btn-sm btn-outline" disabled={balancePage >= balancePageCount} onClick={() => setBalancePage((current) => current + 1)}>Next</button>
               </div>
             )}
           </div>
@@ -372,15 +456,14 @@ export default function ManagerLeaveDashboard() {
                   <col className="manager-leave-col-reason" />
                   <col className="manager-leave-col-remaining" />
                   <col className="manager-leave-col-status" />
-                  <col className="manager-leave-col-comment" />
                   {hasPendingRequests && <col className="manager-leave-col-action" />}
                 </colgroup>
                 <thead>
-                  <tr><th>Employee</th><th>Employee ID</th><th>Leave Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Remaining</th><th>Status</th><th>Review Comment</th>{hasPendingRequests && <th>Action</th>}</tr>
+                  <tr><th>{sortButton("employee_name", "Employee")}</th><th>{sortButton("employee_code", "Employee ID")}</th><th>{sortButton("leave_type", "Leave Type")}</th><th>{sortButton("start_date", "From")}</th><th>{sortButton("end_date", "To")}</th><th>{sortButton("days", "Days")}</th><th>Reason</th><th>{sortButton("remaining_leave", "Remaining")}</th><th>{sortButton("status", "Status")}</th>{hasPendingRequests && <th>Action</th>}</tr>
                 </thead>
                 <tbody>
-                  {!requests.length && <tr className="empty-row"><td colSpan={hasPendingRequests ? 11 : 10}>No team leave requests match these filters.</td></tr>}
-                  {requests.map((request) => (
+                  {!requests.length && <tr className="empty-row"><td colSpan={hasPendingRequests ? 10 : 9}>No team leave requests match these filters.</td></tr>}
+                  {pageRequests.map((request) => (
                     <tr key={request.id}>
                       <td>{request.employee_name}</td>
                       <td>{request.employee_code}</td>
@@ -388,10 +471,9 @@ export default function ManagerLeaveDashboard() {
                       <td>{request.start_date}</td>
                       <td>{request.end_date}</td>
                       <td>{request.days}</td>
-                      <td>{request.reason || "—"}</td>
+                      <td><LeaveReasonPreview reason={request.reason} /></td>
                       <td>{request.remaining_leave == null ? "—" : `${request.remaining_leave} days`}</td>
                       <td><Badge status={request.status} /></td>
-                      <td>{request.review_comment || "—"}</td>
                       {hasPendingRequests && (
                         <td>
                           {request.status === "pending" ? (
@@ -408,6 +490,17 @@ export default function ManagerLeaveDashboard() {
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="table-pagination">
+              <span>{sortedRequests.length ? `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, sortedRequests.length)} of ${sortedRequests.length}` : "0 requests"}</span>
+              <label>Rows per page
+                <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}>
+                  {[10, 25, 50].map((size) => <option key={size} value={size}>{size}</option>)}
+                </select>
+              </label>
+              <button type="button" className="btn btn-sm btn-outline" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>Previous</button>
+              <span>Page {Math.min(page, pageCount)} of {pageCount}</span>
+              <button type="button" className="btn btn-sm btn-outline" disabled={page >= pageCount} onClick={() => setPage((current) => current + 1)}>Next</button>
             </div>
           </div>
         </>

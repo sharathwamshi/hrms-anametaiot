@@ -126,6 +126,7 @@ CREATE TABLE company_settings (
 	state VARCHAR(50), 
 	selfie_required BOOL NOT NULL DEFAULT '0', 
 	attendance_buffer_minutes INTEGER NOT NULL DEFAULT 10,
+	wfh_reasons_enabled BOOL NOT NULL DEFAULT '0',
 	updated_by INTEGER, 
 	updated_at DATETIME, 
 	PRIMARY KEY (id), 
@@ -292,6 +293,7 @@ CREATE TABLE attendance_work_locations (
 	name VARCHAR(100) NOT NULL,
 	is_active BOOL NOT NULL,
 	is_default BOOL NOT NULL,
+	is_wfh BOOL NOT NULL DEFAULT '0',
 	created_by INTEGER,
 	created_at DATETIME,
 	PRIMARY KEY (id),
@@ -563,6 +565,18 @@ CREATE TABLE vendor_agreements (
 	FOREIGN KEY(uploaded_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE attendance_wfh_reasons (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	label VARCHAR(100) NOT NULL,
+	is_active BOOL NOT NULL DEFAULT '1',
+	sort_order INTEGER NOT NULL DEFAULT 0,
+	created_by INTEGER,
+	created_at DATETIME,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_attendance_wfh_reason_label UNIQUE (label),
+	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
 CREATE TABLE attendance_sessions (
 	id INTEGER NOT NULL AUTO_INCREMENT, 
 	attendance_id INTEGER NOT NULL, 
@@ -574,6 +588,11 @@ CREATE TABLE attendance_sessions (
 	clock_in_lat FLOAT, 
 	clock_in_lng FLOAT, 
 	clock_in_within_geofence BOOL, 
+	work_location_id INTEGER,
+	work_location_name VARCHAR(100),
+	wfh_reason_id INTEGER,
+	wfh_reason VARCHAR(100),
+	wfh_reason_explanation VARCHAR(255),
 	clock_out_lat FLOAT, 
 	clock_out_lng FLOAT, 
 	clock_out_within_geofence BOOL, 
@@ -584,7 +603,8 @@ CREATE TABLE attendance_sessions (
 	PRIMARY KEY (id), 
 	CONSTRAINT uq_attendance_session_no UNIQUE (attendance_id, session_no), 
 	FOREIGN KEY(attendance_id) REFERENCES attendance (id) ON DELETE CASCADE,
-	FOREIGN KEY(work_location_id) REFERENCES attendance_work_locations (id)
+	FOREIGN KEY(work_location_id) REFERENCES attendance_work_locations (id),
+	FOREIGN KEY(wfh_reason_id) REFERENCES attendance_wfh_reasons (id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 CREATE TABLE candidates (
@@ -869,4 +889,142 @@ CREATE TABLE vendor_invoice_items (
 	PRIMARY KEY (id), 
 	FOREIGN KEY(invoice_id) REFERENCES vendor_invoices (id), 
 	FOREIGN KEY(hire_id) REFERENCES vendor_hires (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE resignation_policies (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	company_name VARCHAR(150) NOT NULL,
+	notice_period_days INTEGER NOT NULL,
+	buyback_daily_divisor INTEGER,
+	buyback_multiplier NUMERIC(8, 4),
+	version INTEGER NOT NULL,
+	updated_by INTEGER NOT NULL,
+	updated_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (company_name),
+	FOREIGN KEY(updated_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE resignation_requests (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	employee_id INTEGER NOT NULL,
+	company_name VARCHAR(150) NOT NULL,
+	department_name VARCHAR(100),
+	resignation_date DATE NOT NULL,
+	exit_choice VARCHAR(40),
+	exit_policy_snapshot JSON,
+	buyback_estimated_amount NUMERIC(12, 2),
+	buyback_unserved_days INTEGER,
+	buyback_calculation_verified_by INTEGER,
+	buyback_calculation_verified_at DATETIME,
+	buyback_payment_status VARCHAR(30),
+	buyback_payment_reference VARCHAR(255),
+	buyback_payment_verified_by INTEGER,
+	buyback_payment_verified_at DATETIME,
+	original_last_working_date DATE NOT NULL,
+	proposed_last_working_date DATE NOT NULL,
+	approved_last_working_date DATE,
+	reason TEXT NOT NULL,
+	comments TEXT,
+	status VARCHAR(30) NOT NULL,
+	current_stage VARCHAR(30) NOT NULL,
+	current_approver_id INTEGER,
+	active_key VARCHAR(20),
+	notice_period_days INTEGER,
+	dates_approved_at DATETIME,
+	document_storage_key VARCHAR(255),
+	document_filename VARCHAR(255),
+	document_mime_type VARCHAR(100),
+	document_size INTEGER,
+	pending_revision_id INTEGER,
+	withdrawal_approver_id INTEGER,
+	withdrawal_approver_role VARCHAR(30),
+	withdrawal_previous_status VARCHAR(30),
+	withdrawal_previous_stage VARCHAR(30),
+	finance_pending_salary NUMERIC(12, 2),
+	finance_advances NUMERIC(12, 2),
+	finance_reimbursements NUMERIC(12, 2),
+	finance_other_dues NUMERIC(12, 2),
+	final_settlement_amount NUMERIC(12, 2),
+	final_settlement_status VARCHAR(30),
+	finance_cleared_at DATETIME,
+	created_at DATETIME NOT NULL,
+	updated_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (active_key),
+	INDEX ix_resignation_requests_employee_id (employee_id),
+	INDEX ix_resignation_requests_company_name (company_name),
+	INDEX ix_resignation_requests_status (status),
+	FOREIGN KEY(employee_id) REFERENCES users (id),
+	FOREIGN KEY(current_approver_id) REFERENCES users (id),
+	FOREIGN KEY(withdrawal_approver_id) REFERENCES users (id),
+	FOREIGN KEY(buyback_calculation_verified_by) REFERENCES users (id),
+	FOREIGN KEY(buyback_payment_verified_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE resignation_date_revisions (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	resignation_id INTEGER NOT NULL,
+	requested_by INTEGER NOT NULL,
+	proposed_last_working_date DATE NOT NULL,
+	reason TEXT NOT NULL,
+	status VARCHAR(30) NOT NULL,
+	current_stage VARCHAR(30) NOT NULL,
+	prior_status VARCHAR(30) NOT NULL,
+	prior_stage VARCHAR(30) NOT NULL,
+	prior_approved_last_working_date DATE,
+	prior_notice_period_days INTEGER,
+	prior_dates_approved_at DATETIME,
+	created_at DATETIME NOT NULL,
+	decided_at DATETIME,
+	PRIMARY KEY (id),
+	INDEX ix_resignation_date_revisions_resignation_id (resignation_id),
+	FOREIGN KEY(resignation_id) REFERENCES resignation_requests (id),
+	FOREIGN KEY(requested_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE resignation_routing (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	company_name VARCHAR(150) NOT NULL,
+	approver_user_id INTEGER NOT NULL,
+	created_by INTEGER NOT NULL,
+	created_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (company_name, approver_user_id),
+	INDEX ix_resignation_routing_company_name (company_name),
+	INDEX ix_resignation_routing_approver_user_id (approver_user_id),
+	FOREIGN KEY(approver_user_id) REFERENCES users (id),
+	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE resignation_events (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	resignation_id INTEGER NOT NULL,
+	actor_id INTEGER NOT NULL,
+	event_type VARCHAR(40) NOT NULL,
+	stage VARCHAR(30),
+	status VARCHAR(30),
+	comments TEXT,
+	details TEXT,
+	created_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	INDEX ix_resignation_events_resignation_id (resignation_id),
+	INDEX ix_resignation_events_created_at (created_at),
+	FOREIGN KEY(resignation_id) REFERENCES resignation_requests (id),
+	FOREIGN KEY(actor_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE resignation_checklist_items (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	resignation_id INTEGER NOT NULL,
+	item_key VARCHAR(40) NOT NULL,
+	label VARCHAR(100) NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	completed_by INTEGER,
+	completed_at DATETIME,
+	PRIMARY KEY (id),
+	UNIQUE (resignation_id, item_key),
+	INDEX ix_resignation_checklist_items_resignation_id (resignation_id),
+	FOREIGN KEY(resignation_id) REFERENCES resignation_requests (id),
+	FOREIGN KEY(completed_by) REFERENCES users (id)
 ) ENGINE=InnoDB;

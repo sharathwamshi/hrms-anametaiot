@@ -1,7 +1,7 @@
 import sys
 sys.path.insert(0, ".")
 
-from datetime import date, timedelta
+from datetime import date
 from config import Config
 
 
@@ -64,93 +64,19 @@ with app.app_context():
 
     employee_headers = headers("E1")
     manager_headers = headers("M1")
-    other_manager_headers = headers("M2")
-    hr_headers = headers("HR")
-
     response = client.get("/api/auth/me", headers=employee_headers)
     check("employment status is exposed in the signed-in profile", response.get_json()["user"]["employment_status"] == "active")
 
     response = client.post("/api/employees/me/resignation", headers=employee_headers)
-    check("employee can submit a resignation request", response.status_code == 201)
-    check("request sets status to pending", response.get_json()["user"]["employment_status"] == "resignation_pending")
-    pending_as_manager = client.get(
-        "/api/employees?status=resignation_pending",
-        headers=manager_headers,
-    )
-    check("manager can see pending requests from direct reports", any(row["id"] == employee.id for row in pending_as_manager.get_json()))
-    pending_as_other_manager = client.get(
-        "/api/employees?status=resignation_pending",
-        headers=other_manager_headers,
-    )
-    check("manager cannot see resignation requests outside their team", pending_as_other_manager.get_json() == [])
-    pending_as_hr = client.get(
-        "/api/employees?status=resignation_pending",
-        headers=hr_headers,
-    )
-    check("HR Operations can see organization-wide pending requests", any(row["id"] == employee.id for row in pending_as_hr.get_json()))
-
-    response = client.post(
-        f"/api/employees/{employee.id}/resignation/review",
-        headers=other_manager_headers,
-        json={"decision": "accepted", "last_working_day": (date.today() + timedelta(days=14)).isoformat()},
-    )
-    check("a different manager cannot review the resignation", response.status_code == 403)
-
-    response = client.post(
-        f"/api/employees/{employee.id}/resignation/review",
-        headers=hr_headers,
-        json={"decision": "accepted", "last_working_day": (date.today() + timedelta(days=14)).isoformat()},
-    )
-    check("HR Operations can review employee resignation requests", response.status_code == 200 and response.get_json()["employee"]["notice_period_days"] == 14)
-
-    client.post("/api/employees/me/resignation/withdraw", headers=employee_headers)
-    client.post("/api/employees/me/resignation", headers=employee_headers)
-
-    response = client.post(
-        f"/api/employees/{employee.id}/resignation/review",
-        headers=manager_headers,
-        json={"decision": "accepted", "last_working_day": "not-a-date"},
-    )
-    check("manager must select a valid notice-period end date", response.status_code == 400)
-    response = client.post(
-        f"/api/employees/{employee.id}/resignation/review",
-        headers=manager_headers,
-        json={"decision": "accepted", "last_working_day": (date.today() - timedelta(days=1)).isoformat()},
-    )
-    check("past notice-period end date is rejected", response.status_code == 400)
-
-    selected_end_date = date.today() + timedelta(days=30)
-    response = client.post(
-        f"/api/employees/{employee.id}/resignation/review",
-        headers=manager_headers,
-        json={"decision": "accepted", "last_working_day": selected_end_date.isoformat()},
-    )
-    body = response.get_json()["employee"]
-    check("manager acceptance starts the configured notice period", body["employment_status"] == "notice_period" and body["notice_period_days"] == 30)
-    check("selected date is stored as the last working day", body["last_working_day"] == selected_end_date.isoformat())
-
+    check("legacy submission API cannot bypass resignation workflow", response.status_code == 410)
     response = client.post("/api/employees/me/resignation/withdraw", headers=employee_headers)
-    check("employee can withdraw an accepted resignation", response.status_code == 200 and response.get_json()["user"]["employment_status"] == "active")
-
-    client.post("/api/employees/me/resignation", headers=employee_headers)
-    response = client.post("/api/employees/me/resignation/withdraw", headers=employee_headers)
-    check("employee can also withdraw while manager review is pending", response.status_code == 200 and response.get_json()["user"]["employment_status"] == "active")
-
-    client.post("/api/employees/me/resignation", headers=employee_headers)
+    check("legacy withdrawal API cannot bypass approval", response.status_code == 410)
     response = client.post(
         f"/api/employees/{employee.id}/resignation/review",
         headers=manager_headers,
-        json={"decision": "rejected"},
+        json={"decision": "accepted"},
     )
-    check("manager rejection returns status to Active", response.status_code == 200 and response.get_json()["employee"]["employment_status"] == "active")
-
-    client.post("/api/employees/me/resignation", headers=employee_headers)
-    accepted = client.post(
-        f"/api/employees/{employee.id}/resignation/review",
-        headers=manager_headers,
-        json={"decision": "accepted", "last_working_day": (date.today() + timedelta(days=90)).isoformat()},
-    )
-    check("manager can choose a custom notice period", accepted.status_code == 200 and accepted.get_json()["employee"]["notice_period_days"] == 90)
+    check("legacy review API cannot bypass staged approvals", response.status_code == 410)
     response = client.post(
         f"/api/employees/{outsider.id}/employment-status",
         headers=manager_headers,

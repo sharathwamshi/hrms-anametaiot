@@ -1,7 +1,7 @@
 
 from app.models.user import User, Department
 from app.models.attendance import (
-    Attendance, AttendanceRegularizationReason, AttendanceRegularizationRequest,
+    Attendance, AttendanceRegularizationReason, AttendanceRegularizationRequest, AttendanceWfhReason,
     Holiday, OfficeLocation, WorkLocation, DeviceToken, AttendanceSession,
 )
 from app.models.leave import LeaveType, LeaveBalance, LeaveRequest, LeaveEntitlementAudit
@@ -24,11 +24,16 @@ from app.models.mocktest import (
     MockTestAssignment, MockTestAnswer, MockTestResult,
 )
 from app.models.misc import Announcement, Asset
+from app.models.resignation import (
+    ResignationPolicy, ResignationRequest, ResignationDateRevision, ResignationRouting,
+    ResignationEvent, ResignationChecklistItem,
+)
 
 __all__ = [
     "User", "Department",
     "Attendance",
     "AttendanceRegularizationRequest",
+    "AttendanceWfhReason",
     "WorkLocation",
     "LeaveType", "LeaveBalance", "LeaveRequest", "LeaveEntitlementAudit",
     "SalaryStructure", "Payslip", "SalaryTemplate",
@@ -47,4 +52,6 @@ __all__ = [
     "TopicLibrary", "MockTestTemplate", "MockTestQuestion",
     "MockTestAssignment", "MockTestAnswer", "MockTestResult",
     "Announcement", "Asset",
+    "ResignationPolicy", "ResignationRequest", "ResignationDateRevision", "ResignationRouting",
+    "ResignationEvent", "ResignationChecklistItem",
 ]
