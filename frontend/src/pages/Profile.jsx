@@ -1,14 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import client from "../api/client";
 import AppLayout from "../components/AppLayout";
 import { useAuth } from "../context/AuthContext";
-import { ROLE_LABELS, ROLES } from "../config/roles";
-import LeaveApprovalsPanel from "../components/LeaveApprovalsPanel";
+import { ROLE_LABELS } from "../config/roles";
 import EmployeeFamilyPanel from "../components/EmployeeFamilyPanel";
 import EmployeeDocumentsPanel from "../components/EmployeeDocumentsPanel";
-
-const APPROVER_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.SUPER_ADMIN];
 
 export default function Profile() {
   const { user, roleLabel, setUser } = useAuth();
@@ -16,6 +12,9 @@ export default function Profile() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [employmentError, setEmploymentError] = useState("");
+  const [employmentBusy, setEmploymentBusy] = useState(false);
+  const [resignationDialogOpen, setResignationDialogOpen] = useState(false);
+  const [today, setToday] = useState(new Date());
   const [profile, setProfile] = useState(null);
   const [savedProfile, setSavedProfile] = useState(null);
   const [editingProfile, setEditingProfile] = useState(false);
@@ -24,6 +23,11 @@ export default function Profile() {
   const [profileSuccess, setProfileSuccess] = useState("");
   const [uan, setUan] = useState(null);
   const [uanError, setUanError] = useState("");
+
+  useEffect(() => {
+    const timer = setInterval(() => setToday(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     client.get(`/employees/${user.id}`)
@@ -46,12 +50,51 @@ export default function Profile() {
       .catch((err) => setUanError(err?.response?.data?.message || "Could not load your PF information."));
   }, [user.id]);
 
+  const requestResignation = async () => {
+    setEmploymentBusy(true);
+    setEmploymentError("");
+    try {
+      const { data } = await client.post("/employees/me/resignation");
+      setUser(data.user);
+      setResignationDialogOpen(false);
+    } catch (err) {
+      setEmploymentError(err?.response?.data?.message || "Could not submit your resignation request.");
+    } finally {
+      setEmploymentBusy(false);
+    }
+  };
+
+  const withdrawResignation = async () => {
+    if (!window.confirm("Withdraw your resignation request and return your employment status to Active?")) return;
+    setEmploymentBusy(true);
+    setEmploymentError("");
+    try {
+      const { data } = await client.post("/employees/me/resignation/withdraw");
+      setUser(data.user);
+    } catch (err) {
+      setEmploymentError(err?.response?.data?.message || "Could not withdraw your resignation.");
+    } finally {
+      setEmploymentBusy(false);
+    }
+  };
+
   const employmentStatusLabels = {
     active: "Active",
-    resignation_pending: "Resignation in progress",
+    resignation_pending: "Resignation pending manager review",
     notice_period: "Serving notice period",
     left: "Left the company",
   };
+  const daysUntilLastWorkingDay = (lastWorkingDay) => {
+    if (!lastWorkingDay) return null;
+    const [year, month, day] = lastWorkingDay.split("-").map(Number);
+    const end = Date.UTC(year, month - 1, day);
+    const current = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    return Math.max(0, Math.ceil((end - current) / 86_400_000));
+  };
+  const noticeDaysRemaining = user.last_working_day
+    ? daysUntilLastWorkingDay(user.last_working_day)
+    : null;
+
   const submit = async (e) => {
     e.preventDefault();
     setError("");
@@ -115,7 +158,7 @@ export default function Profile() {
               <div>{employmentStatusLabels[user.employment_status || "active"] || "Active"}</div>
               {user.employment_status === "notice_period" && user.last_working_day && (
                 <div className="muted" style={{ fontSize: 12 }}>
-                  Last working day: {user.last_working_day}{user.notice_period_days != null ? ` · ${user.notice_period_days} day notice period` : ""}
+                  Last working day: {user.last_working_day} · {noticeDaysRemaining} {noticeDaysRemaining === 1 ? "day" : "days"} remaining
                 </div>
               )}
               {user.employment_status === "resignation_pending" && (
@@ -124,11 +167,18 @@ export default function Profile() {
             </div>
           </div>
           {employmentError && <div className="login-error" style={{ marginTop: 12 }}>{employmentError}</div>}
-          {user.role !== ROLES.CONTRACT_EMPLOYEE && (
-            <div style={{ marginTop: 16 }}>
-              <Link className="btn btn-primary btn-sm" to="/resignation">Open Resignation</Link>
-            </div>
-          )}
+          <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+            {(user.employment_status || "active") === "active" && (
+              <button className="btn btn-danger btn-sm" disabled={employmentBusy} onClick={() => setResignationDialogOpen(true)}>
+                Submit resignation
+              </button>
+            )}
+            {["resignation_pending", "notice_period"].includes(user.employment_status) && (
+              <button className="btn btn-outline btn-sm" disabled={employmentBusy} onClick={withdrawResignation}>
+                {employmentBusy ? "Please wait…" : "Withdraw resignation"}
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="card">
@@ -269,7 +319,22 @@ export default function Profile() {
         <EmployeeFamilyPanel />
         <EmployeeDocumentsPanel />
       </div>
-      {APPROVER_ROLES.includes(user.role) && <LeaveApprovalsPanel />}
+      {resignationDialogOpen && (
+        <div className="modal-overlay" role="presentation">
+          <div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="resignation-confirm-title">
+            <h3 id="resignation-confirm-title">Confirm resignation request</h3>
+            <p className="muted" style={{ fontSize: 13, margin: "12px 0 18px" }}>
+              Your request will be sent to your manager and HR for review. If accepted, they will discuss and confirm your notice period and last working day with you. You can withdraw your resignation while it is pending or during your notice period.
+            </p>
+            <div className="form-actions">
+              <button className="btn btn-outline" disabled={employmentBusy} onClick={() => setResignationDialogOpen(false)}>Cancel</button>
+              <button className="btn btn-danger" disabled={employmentBusy} onClick={requestResignation}>
+                {employmentBusy ? "Submitting…" : "Confirm resignation"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }
