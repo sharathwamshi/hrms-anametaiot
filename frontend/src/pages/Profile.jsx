@@ -169,7 +169,7 @@ export default function Profile() {
           {employmentError && <div className="login-error" style={{ marginTop: 12 }}>{employmentError}</div>}
           <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
             {(user.employment_status || "active") === "active" && (
-              <button className="btn btn-danger btn-sm" disabled={employmentBusy} onClick={() => setResignationDialogOpen(true)}>
+              <button className="btn btn-danger btn-sm" style={{ display: "none" }} disabled={employmentBusy} onClick={() => setResignationDialogOpen(true)}>
                 Submit resignation
               </button>
             )}
