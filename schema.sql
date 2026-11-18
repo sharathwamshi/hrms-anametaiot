@@ -1,0 +1,872 @@
+-- AnametaIOT HRMS -- MySQL schema (auto-generated from SQLAlchemy models)
+-- Import with: mysql -u root < schema.sql
+
+CREATE DATABASE IF NOT EXISTS anametaiot_hrms CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE anametaiot_hrms;
+
+CREATE TABLE departments (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	name VARCHAR(100) NOT NULL, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	UNIQUE (name)
+) ENGINE=InnoDB;
+
+CREATE TABLE leave_types (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	name VARCHAR(50) NOT NULL, 
+	annual_quota FLOAT, 
+	PRIMARY KEY (id), 
+	UNIQUE (name)
+) ENGINE=InnoDB;
+
+CREATE TABLE topic_library (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	name VARCHAR(80) NOT NULL, 
+	PRIMARY KEY (id), 
+	UNIQUE (name)
+) ENGINE=InnoDB;
+
+CREATE TABLE users (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	employee_code VARCHAR(20) NOT NULL, 
+	full_name VARCHAR(150) NOT NULL, 
+	email VARCHAR(150) NOT NULL, 
+	phone VARCHAR(20), 
+	password_hash VARCHAR(255) NOT NULL, 
+	date_of_birth DATE,
+	gender VARCHAR(30),
+	residential_address TEXT,
+	permanent_address TEXT,
+	emergency_contact_name VARCHAR(150),
+	emergency_contact_relationship VARCHAR(100),
+	emergency_contact_phone VARCHAR(30),
+	uan VARCHAR(12),
+	`role` VARCHAR(30) NOT NULL, 
+	designation VARCHAR(120), 
+	department_id INTEGER, 
+	manager_id INTEGER, 
+	date_of_joining DATE, 
+	avatar_url VARCHAR(255), 
+	is_active BOOL, 
+	employment_status VARCHAR(30) NOT NULL DEFAULT 'active',
+	resignation_requested_at DATETIME,
+	resignation_reviewed_at DATETIME,
+	resignation_reviewed_by INTEGER,
+	resignation_decision VARCHAR(20),
+	notice_period_days INTEGER,
+	last_working_day DATE,
+	resignation_withdrawn_at DATETIME,
+	left_company_at DATE,
+	removed_at DATETIME, 
+	removed_by INTEGER, 
+	removal_reason VARCHAR(255), 
+	restrict_to_office BOOL NOT NULL DEFAULT 0, 
+	restrict_set_by INTEGER, 
+	restrict_set_at DATETIME, 
+	self_verify_rights BOOL, 
+	self_verify_granted_by INTEGER, 
+	revalidation_interval_days INTEGER, 
+	created_at DATETIME, 
+	updated_at DATETIME, 
+	PRIMARY KEY (id), 
+	UNIQUE (employee_code), 
+	UNIQUE (email), 
+	FOREIGN KEY(department_id) REFERENCES departments (id), 
+	FOREIGN KEY(manager_id) REFERENCES users (id), 
+	FOREIGN KEY(resignation_reviewed_by) REFERENCES users (id),
+	FOREIGN KEY(removed_by) REFERENCES users (id), 
+	FOREIGN KEY(restrict_set_by) REFERENCES users (id), 
+	FOREIGN KEY(self_verify_granted_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE announcements (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	title VARCHAR(200) NOT NULL, 
+	body TEXT NOT NULL, 
+	posted_by INTEGER, 
+	audience_role VARCHAR(30), 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(posted_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE assets (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	asset_tag VARCHAR(50) NOT NULL, 
+	category VARCHAR(50), 
+	description VARCHAR(200), 
+	assigned_to INTEGER, 
+	assigned_on DATE, 
+	returned_on DATE, 
+	status VARCHAR(20), 
+	PRIMARY KEY (id), 
+	UNIQUE (asset_tag), 
+	FOREIGN KEY(assigned_to) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE attendance_regularization_reasons (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	label VARCHAR(100) NOT NULL, 
+	description VARCHAR(255), 
+	is_active BOOL, 
+	created_by INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	UNIQUE (label), 
+	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE company_settings (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	company_name VARCHAR(150), 
+	address TEXT, 
+	gstin VARCHAR(20), 
+	pan VARCHAR(20), 
+	state VARCHAR(50), 
+	selfie_required BOOL NOT NULL DEFAULT '0', 
+	attendance_buffer_minutes INTEGER NOT NULL DEFAULT 10,
+	updated_by INTEGER, 
+	updated_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(updated_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE device_tokens (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	user_id INTEGER NOT NULL, 
+	token VARCHAR(255) NOT NULL, 
+	platform VARCHAR(20), 
+	created_at DATETIME, 
+	last_seen_at DATETIME, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_device_token UNIQUE (token), 
+	FOREIGN KEY(user_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE employee_documents (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	user_id INTEGER NOT NULL, 
+	doc_type VARCHAR(30) NOT NULL, 
+	title VARCHAR(150) NOT NULL, 
+	file_path VARCHAR(255) NOT NULL, 
+	uploaded_at DATETIME, 
+	original_filename VARCHAR(255),
+	storage_key VARCHAR(255),
+	mime_type VARCHAR(100),
+	file_size BIGINT,
+	uploaded_by INTEGER,
+	verification_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+	verification_note VARCHAR(500),
+	verified_by INTEGER,
+	verified_at DATETIME,
+	PRIMARY KEY (id), 
+	FOREIGN KEY(user_id) REFERENCES users (id),
+	FOREIGN KEY(uploaded_by) REFERENCES users (id),
+	FOREIGN KEY(verified_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE employee_family_members (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	user_id INTEGER NOT NULL,
+	name VARCHAR(150) NOT NULL,
+	relationship VARCHAR(100) NOT NULL,
+	date_of_birth DATE,
+	phone VARCHAR(30),
+	is_emergency_contact BOOL NOT NULL DEFAULT 0,
+	notes VARCHAR(500),
+	created_at DATETIME NOT NULL,
+	updated_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	INDEX ix_employee_family_members_user_id (user_id),
+	FOREIGN KEY(user_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE employee_emergency_communications (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	employee_id INTEGER NOT NULL,
+	family_member_id INTEGER,
+	contact_name VARCHAR(150) NOT NULL,
+	relationship VARCHAR(100),
+	contact_phone VARCHAR(30),
+	communication_method VARCHAR(30) NOT NULL,
+	purpose VARCHAR(255) NOT NULL,
+	notes VARCHAR(1000),
+	outcome VARCHAR(255),
+	contacted_at DATETIME NOT NULL,
+	recorded_by INTEGER NOT NULL,
+	PRIMARY KEY (id),
+	INDEX ix_employee_emergency_communications_employee_id (employee_id),
+	FOREIGN KEY(employee_id) REFERENCES users (id),
+	FOREIGN KEY(family_member_id) REFERENCES employee_family_members (id) ON DELETE SET NULL,
+	FOREIGN KEY(recorded_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE employee_permissions (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	user_id INTEGER NOT NULL, 
+	permission_key VARCHAR(50) NOT NULL, 
+	granted_by INTEGER, 
+	granted_at DATETIME, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_employee_permission UNIQUE (user_id, permission_key), 
+	FOREIGN KEY(user_id) REFERENCES users (id), 
+	FOREIGN KEY(granted_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE holidays (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	name VARCHAR(150) NOT NULL, 
+	holiday_date DATE NOT NULL, 
+	description VARCHAR(255), 
+	created_by INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	UNIQUE (holiday_date), 
+	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE leave_balances (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	user_id INTEGER NOT NULL, 
+	leave_type_id INTEGER NOT NULL, 
+	year INTEGER NOT NULL, 
+	allocated FLOAT, 
+	used FLOAT, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_balance_user_type_year UNIQUE (user_id, leave_type_id, year), 
+	FOREIGN KEY(user_id) REFERENCES users (id), 
+	FOREIGN KEY(leave_type_id) REFERENCES leave_types (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE leave_requests (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	user_id INTEGER NOT NULL, 
+	leave_type_id INTEGER NOT NULL, 
+	start_date DATE NOT NULL, 
+	end_date DATE NOT NULL, 
+	days FLOAT NOT NULL, 
+	reason VARCHAR(500), 
+	status VARCHAR(20), 
+	reviewed_by INTEGER, 
+	review_comment VARCHAR(255), 
+	created_at DATETIME, 
+	updated_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(user_id) REFERENCES users (id), 
+	FOREIGN KEY(leave_type_id) REFERENCES leave_types (id), 
+	FOREIGN KEY(reviewed_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE leave_entitlement_audit (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	leave_type_id INTEGER NOT NULL,
+	employee_id INTEGER,
+	actor_id INTEGER NOT NULL,
+	scope VARCHAR(30) NOT NULL,
+	year INTEGER,
+	old_entitlement FLOAT NOT NULL,
+	new_entitlement FLOAT NOT NULL,
+	created_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(leave_type_id) REFERENCES leave_types (id),
+	FOREIGN KEY(employee_id) REFERENCES users (id),
+	FOREIGN KEY(actor_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE office_locations (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	name VARCHAR(150) NOT NULL, 
+	latitude FLOAT NOT NULL, 
+	longitude FLOAT NOT NULL, 
+	radius_meters INTEGER NOT NULL, 
+	is_active BOOL, 
+	created_by INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE attendance_work_locations (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	name VARCHAR(100) NOT NULL,
+	is_active BOOL NOT NULL,
+	is_default BOOL NOT NULL,
+	created_by INTEGER,
+	created_at DATETIME,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_attendance_work_location_name UNIQUE (name),
+	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE payslips (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	user_id INTEGER NOT NULL, 
+	month INTEGER NOT NULL, 
+	year INTEGER NOT NULL, 
+	days_present FLOAT, 
+	days_on_leave FLOAT, 
+	lop_days FLOAT, 
+	gross_earnings FLOAT, 
+	total_deductions FLOAT, 
+	net_pay FLOAT, 
+	status VARCHAR(20), 
+	pdf_path VARCHAR(255), 
+	generated_by INTEGER, 
+	generated_at DATETIME, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_payslip_user_month_year UNIQUE (user_id, month, year), 
+	FOREIGN KEY(user_id) REFERENCES users (id), 
+	FOREIGN KEY(generated_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE salary_structures (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	user_id INTEGER NOT NULL, 
+	basic FLOAT, 
+	hra FLOAT, 
+	special_allowance FLOAT, 
+	other_allowance FLOAT, 
+	pf_employee FLOAT, 
+	esi_employee FLOAT, 
+	insurance FLOAT, 
+	professional_tax FLOAT, 
+	tds FLOAT, 
+	effective_from DATE, 
+	PRIMARY KEY (id), 
+	UNIQUE (user_id), 
+	FOREIGN KEY(user_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE salary_templates (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	name VARCHAR(100) NOT NULL, 
+	description VARCHAR(255), 
+	basic_pct FLOAT, 
+	hra_pct FLOAT, 
+	special_allowance_pct FLOAT, 
+	other_allowance_pct FLOAT, 
+	pf_employee_pct FLOAT, 
+	esi_employee_pct FLOAT, 
+	insurance_pct FLOAT, 
+	professional_tax_flat FLOAT, 
+	tds_pct FLOAT, 
+	created_by INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE insurance_policies (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	employee_id INTEGER NOT NULL,
+	insurance_type VARCHAR(30) NOT NULL,
+	provider_name VARCHAR(150) NOT NULL,
+	policy_number VARCHAR(150) NOT NULL,
+	member_id VARCHAR(150),
+	certificate_number VARCHAR(150),
+	credentials JSON,
+	coverage_amount DECIMAL(14,2),
+	coverage_description TEXT,
+	policy_start_date DATE NOT NULL,
+	policy_expiry_date DATE NOT NULL,
+	notes TEXT,
+	contact_name VARCHAR(150),
+	contact_email VARCHAR(150),
+	contact_phone VARCHAR(40),
+	status VARCHAR(20) NOT NULL DEFAULT 'active',
+	renewed_from_id INTEGER,
+	created_by INTEGER NOT NULL,
+	updated_by INTEGER NOT NULL,
+	created_at DATETIME NOT NULL,
+	updated_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	INDEX ix_insurance_policies_employee_id (employee_id),
+	FOREIGN KEY(employee_id) REFERENCES users (id),
+	FOREIGN KEY(renewed_from_id) REFERENCES insurance_policies (id),
+	FOREIGN KEY(created_by) REFERENCES users (id),
+	FOREIGN KEY(updated_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE insurance_type_settings (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	available_types JSON NOT NULL,
+	updated_by INTEGER,
+	updated_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(updated_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE insurance_documents (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	policy_id INTEGER NOT NULL,
+	document_type VARCHAR(40) NOT NULL,
+	original_filename VARCHAR(255) NOT NULL,
+	storage_key VARCHAR(255) NOT NULL,
+	mime_type VARCHAR(120) NOT NULL,
+	file_size INTEGER NOT NULL,
+	status VARCHAR(20) NOT NULL DEFAULT 'active',
+	uploaded_by INTEGER NOT NULL,
+	uploaded_at DATETIME NOT NULL,
+	archived_at DATETIME,
+	replaced_by_id INTEGER,
+	PRIMARY KEY (id),
+	UNIQUE (storage_key),
+	INDEX ix_insurance_documents_policy_id (policy_id),
+	FOREIGN KEY(policy_id) REFERENCES insurance_policies (id),
+	FOREIGN KEY(uploaded_by) REFERENCES users (id),
+	FOREIGN KEY(replaced_by_id) REFERENCES insurance_documents (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE insurance_reminders (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	policy_id INTEGER NOT NULL,
+	recipient_id INTEGER NOT NULL,
+	reminder_date DATE NOT NULL,
+	sent_at DATETIME,
+	delivery_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+	error_message VARCHAR(500),
+	PRIMARY KEY (id),
+	UNIQUE (policy_id, recipient_id, reminder_date),
+	INDEX ix_insurance_reminders_policy_id (policy_id),
+	FOREIGN KEY(policy_id) REFERENCES insurance_policies (id),
+	FOREIGN KEY(recipient_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE vendors (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	name VARCHAR(150) NOT NULL, 
+	normalized_name VARCHAR(150), 
+	address TEXT, 
+	state VARCHAR(50), 
+	gstin VARCHAR(20), 
+	pan VARCHAR(20), 
+	contact_person VARCHAR(120), 
+	contact_email VARCHAR(150), 
+	contact_phone VARCHAR(20), 
+	bank_name VARCHAR(120), 
+	bank_account_no VARCHAR(40), 
+	bank_ifsc VARCHAR(20), 
+	bank_branch VARCHAR(120), 
+	status VARCHAR(20), 
+	created_by INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE attendance (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	user_id INTEGER NOT NULL, 
+	work_date DATE NOT NULL, 
+	clock_in DATETIME, 
+	clock_out DATETIME, 
+	clock_in_note VARCHAR(255), 
+	clock_out_note VARCHAR(255), 
+	status VARCHAR(20), 
+	total_hours FLOAT, 
+	is_regularized BOOL, 
+	regularization_reason VARCHAR(255), 
+	regularization_status VARCHAR(20), 
+	regularization_reason_id INTEGER, 
+	regularization_note VARCHAR(255), 
+	regularization_requested_at DATETIME, 
+	regularization_reviewed_by INTEGER, 
+	regularization_reviewed_at DATETIME, 
+	regularization_review_comment VARCHAR(255), 
+	absence_reason VARCHAR(100),
+	absence_note VARCHAR(500),
+	absence_recorded_by INTEGER,
+	absence_recorded_at DATETIME,
+	clock_in_lat FLOAT, 
+	clock_in_lng FLOAT, 
+	clock_in_within_geofence BOOL, 
+	work_location_id INTEGER,
+	work_location_name VARCHAR(100),
+	clock_out_lat FLOAT, 
+	clock_out_lng FLOAT, 
+	clock_out_within_geofence BOOL, 
+	clock_in_selfie VARCHAR(255), 
+	clock_out_selfie VARCHAR(255), 
+	edited_by INTEGER, 
+	edited_at DATETIME, 
+	edit_note VARCHAR(255), 
+	edit_details TEXT,
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_attendance_user_date UNIQUE (user_id, work_date), 
+	FOREIGN KEY(user_id) REFERENCES users (id), 
+	FOREIGN KEY(regularization_reason_id) REFERENCES attendance_regularization_reasons (id), 
+	FOREIGN KEY(regularization_reviewed_by) REFERENCES users (id), 
+	FOREIGN KEY(edited_by) REFERENCES users (id),
+	FOREIGN KEY(absence_recorded_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE attendance_regularization_requests (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	user_id INTEGER NOT NULL,
+	attendance_id INTEGER NOT NULL,
+	submitted_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	INDEX ix_regularization_request_user_submitted (user_id, submitted_at),
+	FOREIGN KEY(user_id) REFERENCES users (id),
+	FOREIGN KEY(attendance_id) REFERENCES attendance (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE job_postings (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	title VARCHAR(150) NOT NULL, 
+	department_id INTEGER, 
+	employment_type VARCHAR(30), 
+	openings INTEGER, 
+	description TEXT, 
+	salary_min FLOAT, 
+	salary_max FLOAT, 
+	priority VARCHAR(20), 
+	auto_close_date DATE, 
+	requisition_status VARCHAR(20), 
+	approved_by INTEGER, 
+	approved_at DATETIME, 
+	screening_questions TEXT, 
+	post_image_url VARCHAR(255), 
+	linkedin_post_url VARCHAR(255), 
+	naukri_post_url VARCHAR(255), 
+	interview_levels TEXT, 
+	requisition_type VARCHAR(20), 
+	vendor_id INTEGER, 
+	status VARCHAR(20), 
+	created_by INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(department_id) REFERENCES departments (id), 
+	FOREIGN KEY(approved_by) REFERENCES users (id), 
+	FOREIGN KEY(vendor_id) REFERENCES vendors (id), 
+	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE vendor_agreements (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	vendor_id INTEGER NOT NULL, 
+	title VARCHAR(150), 
+	file_path VARCHAR(255) NOT NULL, 
+	effective_from DATE, 
+	effective_to DATE, 
+	termination_notice_days INTEGER, 
+	confidentiality_days INTEGER, 
+	feedback_days INTEGER, 
+	status VARCHAR(20), 
+	parsed_with_ai BOOL, 
+	raw_extracted_text TEXT, 
+	uploaded_by INTEGER, 
+	uploaded_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(vendor_id) REFERENCES vendors (id), 
+	FOREIGN KEY(uploaded_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE attendance_sessions (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	attendance_id INTEGER NOT NULL, 
+	session_no INTEGER NOT NULL, 
+	clock_in DATETIME NOT NULL, 
+	clock_out DATETIME, 
+	clock_in_note VARCHAR(255), 
+	clock_out_note VARCHAR(255), 
+	clock_in_lat FLOAT, 
+	clock_in_lng FLOAT, 
+	clock_in_within_geofence BOOL, 
+	clock_out_lat FLOAT, 
+	clock_out_lng FLOAT, 
+	clock_out_within_geofence BOOL, 
+	clock_in_selfie VARCHAR(255), 
+	clock_out_selfie VARCHAR(255), 
+	reentry_reason VARCHAR(255), 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_attendance_session_no UNIQUE (attendance_id, session_no), 
+	FOREIGN KEY(attendance_id) REFERENCES attendance (id) ON DELETE CASCADE,
+	FOREIGN KEY(work_location_id) REFERENCES attendance_work_locations (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE candidates (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	job_id INTEGER NOT NULL, 
+	full_name VARCHAR(150) NOT NULL, 
+	email VARCHAR(150), 
+	email_normalized VARCHAR(150), 
+	phone VARCHAR(20), 
+	phone_normalized VARCHAR(20), 
+	resume_url VARCHAR(255), 
+	resume_file_path VARCHAR(255), 
+	source VARCHAR(50), 
+	skills VARCHAR(500), 
+	location VARCHAR(120), 
+	open_to_relocation BOOL, 
+	current_level VARCHAR(100), 
+	stage VARCHAR(30), 
+	notes TEXT, 
+	validation_status VARCHAR(20), 
+	validation_notes TEXT, 
+	duplicate_of_candidate_id INTEGER, 
+	verification_status VARCHAR(20), 
+	verified_by INTEGER, 
+	verified_at DATETIME, 
+	next_revalidation_due DATETIME, 
+	referring_employee_id INTEGER, 
+	referral_bonus_status VARCHAR(20), 
+	bgv_status VARCHAR(20), 
+	linked_employee_id INTEGER, 
+	added_by INTEGER, 
+	assigned_to INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(job_id) REFERENCES job_postings (id), 
+	FOREIGN KEY(duplicate_of_candidate_id) REFERENCES candidates (id), 
+	FOREIGN KEY(verified_by) REFERENCES users (id), 
+	FOREIGN KEY(referring_employee_id) REFERENCES users (id), 
+	FOREIGN KEY(linked_employee_id) REFERENCES users (id), 
+	FOREIGN KEY(added_by) REFERENCES users (id), 
+	FOREIGN KEY(assigned_to) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE mock_test_templates (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	title VARCHAR(150) NOT NULL, 
+	job_id INTEGER, 
+	topics VARCHAR(255) NOT NULL, 
+	complexity VARCHAR(20), 
+	duration_minutes INTEGER, 
+	passing_threshold_pct FLOAT, 
+	created_by INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(job_id) REFERENCES job_postings (id), 
+	FOREIGN KEY(created_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE vendor_agreement_roles (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	agreement_id INTEGER NOT NULL, 
+	role_name VARCHAR(120) NOT NULL, 
+	service_fee_pct FLOAT NOT NULL, 
+	replacement_days INTEGER, 
+	tenure_days INTEGER, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(agreement_id) REFERENCES vendor_agreements (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE vendor_invoices (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	vendor_id INTEGER NOT NULL, 
+	agreement_id INTEGER, 
+	invoice_number VARCHAR(50) NOT NULL, 
+	invoice_date DATE NOT NULL, 
+	subtotal FLOAT, 
+	cgst_amount FLOAT, 
+	sgst_amount FLOAT, 
+	igst_amount FLOAT, 
+	total_amount FLOAT, 
+	status VARCHAR(20), 
+	approved_by INTEGER, 
+	approved_at DATETIME, 
+	approval_comment VARCHAR(255), 
+	paid_at DATETIME, 
+	pdf_path VARCHAR(255), 
+	generated_by INTEGER, 
+	generated_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(vendor_id) REFERENCES vendors (id), 
+	FOREIGN KEY(agreement_id) REFERENCES vendor_agreements (id), 
+	UNIQUE (invoice_number), 
+	FOREIGN KEY(approved_by) REFERENCES users (id), 
+	FOREIGN KEY(generated_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE candidate_audit_log (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	candidate_id INTEGER NOT NULL, 
+	action VARCHAR(80) NOT NULL, 
+	detail VARCHAR(500), 
+	actor_id INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(candidate_id) REFERENCES candidates (id), 
+	FOREIGN KEY(actor_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE candidate_notes (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	candidate_id INTEGER NOT NULL, 
+	author_id INTEGER NOT NULL, 
+	body TEXT NOT NULL, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(candidate_id) REFERENCES candidates (id), 
+	FOREIGN KEY(author_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE interviews (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	candidate_id INTEGER NOT NULL, 
+	scheduled_at DATETIME NOT NULL, 
+	round_name VARCHAR(50), 
+	mode VARCHAR(20), 
+	status VARCHAR(20), 
+	reschedule_reason VARCHAR(255), 
+	feedback TEXT, 
+	scorecard TEXT, 
+	result VARCHAR(20), 
+	scheduled_by INTEGER, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(candidate_id) REFERENCES candidates (id), 
+	FOREIGN KEY(scheduled_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE mock_test_assignments (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	template_id INTEGER NOT NULL, 
+	candidate_id INTEGER NOT NULL, 
+	attempt_number INTEGER, 
+	assigned_by INTEGER, 
+	access_token VARCHAR(64), 
+	window_start DATETIME NOT NULL, 
+	window_end DATETIME NOT NULL, 
+	status VARCHAR(20), 
+	started_at DATETIME, 
+	submitted_at DATETIME, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(template_id) REFERENCES mock_test_templates (id), 
+	FOREIGN KEY(candidate_id) REFERENCES candidates (id), 
+	FOREIGN KEY(assigned_by) REFERENCES users (id), 
+	UNIQUE (access_token)
+) ENGINE=InnoDB;
+
+CREATE TABLE mock_test_questions (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	template_id INTEGER NOT NULL, 
+	topic VARCHAR(80), 
+	question_text TEXT NOT NULL, 
+	question_type VARCHAR(20), 
+	options_json TEXT, 
+	correct_answer VARCHAR(500), 
+	marks FLOAT, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(template_id) REFERENCES mock_test_templates (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE offers (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	candidate_id INTEGER NOT NULL, 
+	designation VARCHAR(120) NOT NULL, 
+	salary FLOAT NOT NULL, 
+	joining_date DATE NOT NULL, 
+	status VARCHAR(20), 
+	counter_notes TEXT, 
+	drafted_by INTEGER, 
+	approver_id INTEGER, 
+	approved_at DATETIME, 
+	approval_comment VARCHAR(255), 
+	created_at DATETIME, 
+	updated_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(candidate_id) REFERENCES candidates (id), 
+	FOREIGN KEY(drafted_by) REFERENCES users (id), 
+	FOREIGN KEY(approver_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE screening_calls (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	candidate_id INTEGER NOT NULL, 
+	attempt_number INTEGER, 
+	scheduled_at DATETIME NOT NULL, 
+	called_at DATETIME, 
+	status VARCHAR(20), 
+	recording_url VARCHAR(255), 
+	transcript TEXT, 
+	summary TEXT, 
+	outcome VARCHAR(20), 
+	triggered_by INTEGER, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(candidate_id) REFERENCES candidates (id), 
+	FOREIGN KEY(triggered_by) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE vendor_hires (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	vendor_id INTEGER NOT NULL, 
+	agreement_id INTEGER NOT NULL, 
+	agreement_role_id INTEGER NOT NULL, 
+	candidate_id INTEGER, 
+	employee_id INTEGER, 
+	candidate_name VARCHAR(150) NOT NULL, 
+	ctc FLOAT NOT NULL, 
+	tenure_start_date DATE NOT NULL, 
+	placement_type VARCHAR(20), 
+	billing_type VARCHAR(20), 
+	last_billed_month VARCHAR(7), 
+	status VARCHAR(20), 
+	replacement_of_hire_id INTEGER, 
+	assigned_by INTEGER, 
+	assigned_at DATETIME, 
+	recruiter_id INTEGER, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(vendor_id) REFERENCES vendors (id), 
+	FOREIGN KEY(agreement_id) REFERENCES vendor_agreements (id), 
+	FOREIGN KEY(agreement_role_id) REFERENCES vendor_agreement_roles (id), 
+	FOREIGN KEY(candidate_id) REFERENCES candidates (id), 
+	FOREIGN KEY(employee_id) REFERENCES users (id), 
+	FOREIGN KEY(replacement_of_hire_id) REFERENCES vendor_hires (id), 
+	FOREIGN KEY(assigned_by) REFERENCES users (id), 
+	FOREIGN KEY(recruiter_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE interview_panelists (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	interview_id INTEGER NOT NULL, 
+	interviewer_id INTEGER NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(interview_id) REFERENCES interviews (id), 
+	FOREIGN KEY(interviewer_id) REFERENCES users (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE mock_test_answers (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	assignment_id INTEGER NOT NULL, 
+	question_id INTEGER NOT NULL, 
+	answer_text TEXT, 
+	score_awarded FLOAT, 
+	ai_feedback TEXT, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(assignment_id) REFERENCES mock_test_assignments (id), 
+	FOREIGN KEY(question_id) REFERENCES mock_test_questions (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE mock_test_results (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	assignment_id INTEGER NOT NULL, 
+	score FLOAT, 
+	max_score FLOAT, 
+	percentage FLOAT, 
+	topic_breakdown_json TEXT, 
+	ai_feedback TEXT, 
+	passed BOOL, 
+	graded_at DATETIME, 
+	PRIMARY KEY (id), 
+	UNIQUE (assignment_id), 
+	FOREIGN KEY(assignment_id) REFERENCES mock_test_assignments (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE vendor_invoice_items (
+	id INTEGER NOT NULL AUTO_INCREMENT, 
+	invoice_id INTEGER NOT NULL, 
+	hire_id INTEGER NOT NULL, 
+	candidate_name VARCHAR(150) NOT NULL, 
+	role_name VARCHAR(120), 
+	ctc FLOAT NOT NULL, 
+	fee_pct FLOAT NOT NULL, 
+	fee_amount FLOAT NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(invoice_id) REFERENCES vendor_invoices (id), 
+	FOREIGN KEY(hire_id) REFERENCES vendor_hires (id)
+) ENGINE=InnoDB;
