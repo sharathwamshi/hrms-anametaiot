@@ -904,6 +904,8 @@ def regularize(record_id):
         return jsonify({"message": "You do not have permission to regularize attendance."}), 403
 
     record = Attendance.query.get_or_404(record_id)
+    if record.work_date.weekday() == 6:
+        return jsonify({"message": "Attendance cannot be regularized on a Sunday."}), 400
     if not _authorize_reviewer(claims, int(get_jwt_identity()), record):
         return jsonify({"message": "You can only regularize attendance for your own direct reports."}), 403
     payload = request.get_json(silent=True) or {}
@@ -939,13 +941,18 @@ def create_regularization_reason():
     if claims.get("role") not in APPROVER_ROLES:
         return jsonify({"message": "Only a manager or HR Operations can define regularization reasons."}), 403
     payload = request.get_json(silent=True) or {}
-    label = (payload.get("label") or "").strip()
-    if not label:
-        return jsonify({"message": "A label is required."}), 400
+    label = payload.get("label")
+    description = payload.get("description")
+    if not isinstance(label, str) or not label.strip() or len(label.strip()) > 100:
+        return jsonify({"message": "A reason name of 1 to 100 characters is required."}), 400
+    if description is not None and (not isinstance(description, str) or len(description) > 255):
+        return jsonify({"message": "Description must be text of at most 255 characters."}), 400
+    label = label.strip()
     if AttendanceRegularizationReason.query.filter_by(label=label).first():
         return jsonify({"message": f"'{label}' already exists."}), 409
     reason = AttendanceRegularizationReason(
-        label=label, description=payload.get("description"), created_by=int(get_jwt_identity())
+        label=label, description=description.strip() if description else None,
+        created_by=int(get_jwt_identity())
     )
     db.session.add(reason)
     db.session.commit()
@@ -960,14 +967,47 @@ def update_regularization_reason(reason_id):
         return jsonify({"message": "Only a manager or HR Operations can edit regularization reasons."}), 403
     reason = AttendanceRegularizationReason.query.get_or_404(reason_id)
     payload = request.get_json(silent=True) or {}
-    if "label" in payload and payload["label"].strip():
-        reason.label = payload["label"].strip()
+    if not isinstance(payload, dict):
+        return jsonify({"message": "Reason details must be a JSON object."}), 400
+    if "label" in payload:
+        label = payload["label"]
+        if not isinstance(label, str) or not label.strip() or len(label.strip()) > 100:
+            return jsonify({"message": "A reason name of 1 to 100 characters is required."}), 400
+        label = label.strip()
+        duplicate = AttendanceRegularizationReason.query.filter(
+            AttendanceRegularizationReason.label == label,
+            AttendanceRegularizationReason.id != reason.id,
+        ).first()
+        if duplicate:
+            return jsonify({"message": f"'{label}' already exists."}), 409
+        reason.label = label
     if "description" in payload:
-        reason.description = payload["description"]
+        description = payload["description"]
+        if description is not None and (
+            not isinstance(description, str) or len(description) > 255
+        ):
+            return jsonify({"message": "Description must be text of at most 255 characters."}), 400
+        reason.description = description.strip() if description else None
     if "is_active" in payload:
         reason.is_active = bool(payload["is_active"])
     db.session.commit()
     return jsonify(reason.to_dict())
+
+
+@bp.delete("/regularization-reasons/<int:reason_id>")
+@jwt_required()
+def delete_regularization_reason(reason_id):
+    claims = get_jwt()
+    if claims.get("role") not in APPROVER_ROLES:
+        return jsonify({"message": "Only a manager or HR Operations can delete regularization reasons."}), 403
+    reason = AttendanceRegularizationReason.query.get_or_404(reason_id)
+    if Attendance.query.filter_by(regularization_reason_id=reason.id).first():
+        return jsonify({
+            "message": "This reason is referenced by attendance history. Retire it instead to preserve historical records."
+        }), 409
+    db.session.delete(reason)
+    db.session.commit()
+    return jsonify({"message": "Regularization reason deleted."})
 
 
 # ============================================================================
@@ -1012,13 +1052,17 @@ def request_regularization():
     """An employee (any role with clock in/out, including recruiters) asks for a
     date to be excused, with a reason picked from the manager-defined list."""
     user_id = int(get_jwt_identity())
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"message": "A valid regularization request is required."}), 400
     try:
         work_date = datetime.strptime(payload.get("work_date", ""), "%Y-%m-%d").date()
     except ValueError:
         return jsonify({"message": "A valid work_date (YYYY-MM-DD) is required."}), 400
     if work_date > company_today():
         return jsonify({"message": "You cannot request regularization for a future date."}), 400
+    if work_date.weekday() == 6:
+        return jsonify({"message": "Attendance regularization is not available on Sundays."}), 400
 
     User.query.filter_by(id=user_id).with_for_update().first()
 
@@ -1909,12 +1953,16 @@ def _reason_and_note(payload, require=True):
 
 
 def _parse_work_date(payload):
+    if not isinstance(payload, dict):
+        return None, (jsonify({"message": "A valid work date is required."}), 400)
     try:
         work_date = datetime.strptime(payload.get("work_date", ""), "%Y-%m-%d").date()
     except (ValueError, TypeError):
         return None, (jsonify({"message": "A valid work_date (YYYY-MM-DD) is required."}), 400)
     if work_date > company_today():
         return None, (jsonify({"message": "You cannot correct a future date."}), 400)
+    if work_date.weekday() == 6:
+        return None, (jsonify({"message": "Attendance cannot be corrected on a Sunday."}), 400)
     return work_date, None
 
 

@@ -114,6 +114,9 @@ function RegularizationReasonsModal({ onClose }) {
   const [reasons, setReasons] = useState(null);
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
+  const [editingReason, setEditingReason] = useState(null);
+  const [editLabel, setEditLabel] = useState("");
+  const [editDescription, setEditDescription] = useState("");
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [success, setSuccess] = useState("");
@@ -157,6 +160,47 @@ function RegularizationReasonsModal({ onClose }) {
       await load();
     } catch (err) {
       setError(err?.response?.data?.message || "Could not update this reason.");
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+  const beginEdit = (reason) => {
+    setEditingReason(reason.id);
+    setEditLabel(reason.label);
+    setEditDescription(reason.description || "");
+    setError("");
+    setSuccess("");
+  };
+  const saveEdit = async (event) => {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
+    setUpdatingId(editingReason);
+    try {
+      await client.put(`/attendance/regularization-reasons/${editingReason}`, {
+        label: editLabel,
+        description: editDescription,
+      });
+      setEditingReason(null);
+      setSuccess("Regularization reason updated.");
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not update this reason.");
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+  const remove = async (reason) => {
+    if (!window.confirm(`Delete "${reason.label}"? Reasons used in attendance history cannot be deleted; retire them instead.`)) return;
+    setError("");
+    setSuccess("");
+    setUpdatingId(reason.id);
+    try {
+      await client.delete(`/attendance/regularization-reasons/${reason.id}`);
+      setSuccess("Regularization reason deleted.");
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not delete this reason.");
     } finally {
       setUpdatingId(null);
     }
@@ -209,10 +253,32 @@ function RegularizationReasonsModal({ onClose }) {
                 {reasons.length === 0 && <tr className="empty-row"><td colSpan={4}>No reasons defined yet — add one above.</td></tr>}
                 {reasons.map((r) => (
                   <tr key={r.id}>
-                    <td><strong>{r.label}</strong></td>
-                    <td className="muted">{r.description || "—"}</td>
+                    {editingReason === r.id ? (
+                      <>
+                        <td><input aria-label="Edit reason name" maxLength={100} value={editLabel} onChange={(event) => setEditLabel(event.target.value)} required /></td>
+                        <td><input aria-label="Edit reason description" maxLength={255} value={editDescription} onChange={(event) => setEditDescription(event.target.value)} /></td>
+                      </>
+                    ) : (
+                      <>
+                        <td><strong>{r.label}</strong></td>
+                        <td className="muted">{r.description || "—"}</td>
+                      </>
+                    )}
                     <td><span className={`chip ${r.is_active ? "green" : ""}`}>{r.is_active ? "Active" : "Retired"}</span></td>
-                    <td><button className={`btn btn-sm ${r.is_active ? "btn-outline" : "btn-success"}`} disabled={updatingId !== null} onClick={() => toggle(r)}>{updatingId === r.id ? "Updating…" : r.is_active ? "Retire" : "Reactivate"}</button></td>
+                    <td>
+                      {editingReason === r.id ? (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button type="button" className="btn btn-sm btn-primary" disabled={updatingId !== null || !editLabel.trim()} onClick={saveEdit}>{updatingId === r.id ? "Saving…" : "Save"}</button>
+                          <button type="button" className="btn btn-sm btn-outline" disabled={updatingId !== null} onClick={() => setEditingReason(null)}>Cancel</button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button type="button" className="btn btn-sm btn-outline" disabled={updatingId !== null} onClick={() => beginEdit(r)}>Edit</button>
+                          <button type="button" className={`btn btn-sm ${r.is_active ? "btn-outline" : "btn-success"}`} disabled={updatingId !== null} onClick={() => toggle(r)}>{updatingId === r.id ? "Updating…" : r.is_active ? "Retire" : "Reactivate"}</button>
+                          <button type="button" className="btn btn-sm btn-danger" disabled={updatingId !== null} onClick={() => remove(r)}>Delete</button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -59,13 +59,27 @@ with app.app_context():
     reasons = client.get('/api/attendance/regularization-reasons', headers=H['rec1']).get_json()
     ok("both reasons are visible", {r['label'] for r in reasons} == {"Forgot to clock in", "Field visit / on-site"}, reasons)
 
+    r = client.put(
+        f"/api/attendance/regularization-reasons/{reason2['id']}",
+        headers=H['mgr'],
+        json={'label': 'On-site visit', 'description': 'Client or field work'},
+    )
+    ok("manager can edit a reason name and description",
+       r.status_code == 200 and r.get_json()['label'] == 'On-site visit' and
+       r.get_json()['description'] == 'Client or field work', r.get_json())
     r = client.put(f"/api/attendance/regularization-reasons/{reason2['id']}", headers=H['mgr'], json={'is_active': False})
     ok("manager can retire a reason", r.status_code == 200 and r.get_json()['is_active'] is False, r.get_json())
     active = client.get('/api/attendance/regularization-reasons', headers=H['rec1']).get_json()
     ok("retired reason no longer offered by default", {r['label'] for r in active} == {"Forgot to clock in"}, active)
+    ok("manager can delete an unused retired reason",
+       client.delete(f"/api/attendance/regularization-reasons/{reason2['id']}",
+                     headers=H['mgr']).status_code == 200)
 
     # ---- 2. Recruiter sees their own attendance ------------------------------------------
-    missed_day = (date.today() - timedelta(days=2)).isoformat()
+    missed_date = date.today() - timedelta(days=2)
+    while missed_date.weekday() == 6:
+        missed_date -= timedelta(days=1)
+    missed_day = missed_date.isoformat()
     r = client.get('/api/attendance/history', headers=H['rec1'])
     ok("recruiter can see their own attendance history", r.status_code == 200, r.get_json())
 
@@ -75,6 +89,9 @@ with app.app_context():
     r = client.post('/api/attendance/regularize-request', headers=H['rec1'], json={'work_date': missed_day, 'reason_id': reason1['id'], 'note': 'Forgot to punch in before the client call'})
     ok("recruiter can request regularization with a valid reason", r.status_code == 201, r.get_json())
     req1 = r.get_json()
+    ok("referenced reasons cannot be deleted",
+       client.delete(f"/api/attendance/regularization-reasons/{reason1['id']}",
+                     headers=H['mgr']).status_code == 409)
     ok("request auto-creates the day's record as pending", req1['regularization_status'] == 'pending' and req1['regularization_reason_label'] == 'Forgot to clock in', req1)
     ok("request date is generated automatically", req1['regularization_request_date'] == date.today().isoformat(), req1.get('regularization_request_date'))
     r = client.post('/api/attendance/regularize-request', headers=H['rec1'], json={'work_date': missed_day, 'reason_id': reason1['id']})
@@ -107,8 +124,20 @@ with app.app_context():
     future = (date.today() + timedelta(days=3)).isoformat()
     r = client.post('/api/attendance/regularize-request', headers=H['rec1'], json={'work_date': future, 'reason_id': reason1['id']})
     ok("cannot request regularization for a future date", r.status_code == 400, r.get_json())
+    sunday_date = date.today() - timedelta(days=date.today().weekday() + 1)
+    r = client.post('/api/attendance/regularize-request', headers=H['rec1'], json={
+        'work_date': sunday_date.isoformat(), 'reason_id': reason1['id'],
+    })
+    ok("Sundays cannot be submitted for regularization", r.status_code == 400, r.get_json())
+    r = client.post('/api/attendance/manager/regularize', headers=H['mgr'], json={
+        'user_id': rec1.id, 'work_date': sunday_date.isoformat(), 'reason_id': reason1['id'],
+    })
+    ok("managers cannot directly regularize Sundays", r.status_code == 400, r.get_json())
 
-    day2 = (date.today() - timedelta(days=5)).isoformat()
+    day2_date = date.today() - timedelta(days=5)
+    while day2_date.weekday() == 6:
+        day2_date -= timedelta(days=1)
+    day2 = day2_date.isoformat()
     client.post('/api/attendance/regularize-request', headers=H['rec2'], json={'work_date': day2, 'reason_id': reason1['id'], 'note': 'System was down'})
 
     # ---- 4. Manager scoping on the review queue --------------------------------------------

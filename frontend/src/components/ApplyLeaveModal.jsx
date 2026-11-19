@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import client from "../api/client";
-import { localDateStr } from "../utils/attendanceTime";
+import LeaveBalancePreview from "./LeaveBalancePreview";
+import {
+  isDisallowedBackdatedLeaveDate,
+  isSundayDate,
+  BACKDATED_LEAVE_ERROR,
+  currentMonthLeaveStart,
+} from "../utils/attendanceTime";
 
 const emptyForm = (startDate) => ({
   leave_type_id: "",
@@ -15,8 +21,10 @@ export default function ApplyLeaveModal({ startDate, onClose, onDone }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const today = localDateStr();
-
+  const minimumDate = currentMonthLeaveStart();
+  const minimumEndDate = form.start_date && (!minimumDate || form.start_date > minimumDate)
+    ? form.start_date
+    : minimumDate;
   useEffect(() => {
     let cancelled = false;
     client.get("/leave/types")
@@ -31,6 +39,17 @@ export default function ApplyLeaveModal({ startDate, onClose, onDone }) {
   const submit = async (e) => {
     e.preventDefault();
     setError("");
+    if (isSundayDate(form.start_date) || isSundayDate(form.end_date)) {
+      setError("Leave start and end dates cannot be Sundays.");
+      return;
+    }
+    if (
+      isDisallowedBackdatedLeaveDate(form.start_date) ||
+      isDisallowedBackdatedLeaveDate(form.end_date)
+    ) {
+      setError(BACKDATED_LEAVE_ERROR);
+      return;
+    }
     setSubmitting(true);
     try {
       await client.post("/leave/apply", form);
@@ -39,6 +58,22 @@ export default function ApplyLeaveModal({ startDate, onClose, onDone }) {
       setError(err?.response?.data?.message || "Could not submit leave request.");
       setSubmitting(false);
     }
+  };
+  const updateDate = (field, value) => {
+    if (isSundayDate(value)) {
+      setError("Sundays cannot be selected for leave.");
+      return;
+    }
+    if (isDisallowedBackdatedLeaveDate(value)) {
+      setError(BACKDATED_LEAVE_ERROR);
+      return;
+    }
+    setError("");
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === "start_date" && current.end_date < value ? { end_date: value } : {}),
+    }));
   };
 
   return (
@@ -49,7 +84,7 @@ export default function ApplyLeaveModal({ startDate, onClose, onDone }) {
           <button type="button" className="btn btn-sm btn-outline" onClick={onClose}>Close</button>
         </div>
         <p className="muted" style={{ fontSize: 12.5, marginTop: -8, marginBottom: 14 }}>
-          Leave may be requested for today or a future date. Your manager must approve it.
+          Employees may apply for leave on eligible dates in the current month or future dates. Sundays are not selectable.
         </p>
         {error && <div className="login-error">{error}</div>}
         {loading ? <p className="muted">Loading leave types…</p> : (
@@ -65,15 +100,20 @@ export default function ApplyLeaveModal({ startDate, onClose, onDone }) {
               <div className="form-field">
                 <label>Start Date</label>
                 <input
-                  type="date" required min={today} value={form.start_date}
-                  onChange={(e) => setForm({ ...form, start_date: e.target.value, end_date: form.end_date < e.target.value ? e.target.value : form.end_date })}
+                  type="date" required min={minimumDate} value={form.start_date}
+                  onChange={(e) => updateDate("start_date", e.target.value)}
                 />
               </div>
               <div className="form-field">
                 <label>End Date</label>
-                <input type="date" required min={form.start_date || today} value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
+                <input type="date" required min={minimumEndDate} value={form.end_date} onChange={(e) => updateDate("end_date", e.target.value)} />
               </div>
             </div>
+            <LeaveBalancePreview
+              leaveTypeId={form.leave_type_id}
+              startDate={form.start_date}
+              endDate={form.end_date}
+            />
             <div className="form-field">
               <label>Reason</label>
               <textarea rows={3} maxLength={500} required value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
