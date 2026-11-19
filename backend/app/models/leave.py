@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from app.extensions import db
 
 
@@ -63,10 +63,15 @@ def ensure_leave_balances(user_id, year):
                 LeaveRequest.start_date <= year_end,
                 LeaveRequest.end_date >= year_start,
             ).all()
-            used = sum(
-                (min(row.end_date, year_end) - max(row.start_date, year_start)).days + 1
-                for row in approved_requests
-            )
+            used = 0
+            for row in approved_requests:
+                day = max(row.start_date, year_start)
+                end = min(row.end_date, year_end)
+                legacy_inclusive_days = row.days == (row.end_date - row.start_date).days + 1
+                while day <= end:
+                    if legacy_inclusive_days or day.weekday() != 6:
+                        used += 1
+                    day += timedelta(days=1)
             db.session.add(
                 LeaveBalance(
                     user_id=user_id,
@@ -100,6 +105,12 @@ class LeaveRequest(db.Model):
     user = db.relationship("User", foreign_keys=[user_id], backref="leave_requests")
     reviewer = db.relationship("User", foreign_keys=[reviewed_by])
     leave_type = db.relationship("LeaveType")
+    review_history = db.relationship(
+        "LeaveReviewHistory",
+        backref="leave_request",
+        order_by="LeaveReviewHistory.created_at",
+        cascade="all, delete-orphan",
+    )
 
     def to_dict(self):
         return {
@@ -117,6 +128,29 @@ class LeaveRequest(db.Model):
             "status": self.status,
             "reviewer_name": self.reviewer.full_name if self.reviewer else None,
             "review_comment": self.review_comment,
+            "created_at": self.created_at.isoformat(),
+            "review_history": [entry.to_dict() for entry in self.review_history],
+        }
+
+
+class LeaveReviewHistory(db.Model):
+    __tablename__ = "leave_review_history"
+
+    id = db.Column(db.Integer, primary_key=True)
+    leave_request_id = db.Column(db.Integer, db.ForeignKey("leave_requests.id"), nullable=False)
+    reviewer_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    action = db.Column(db.String(20), nullable=False)
+    comment = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    reviewer = db.relationship("User")
+
+    def to_dict(self):
+        return {
+            "action": self.action,
+            "comment": self.comment,
+            "reviewer_id": self.reviewer_id,
+            "reviewer_name": self.reviewer.full_name if self.reviewer else None,
             "created_at": self.created_at.isoformat(),
         }
 

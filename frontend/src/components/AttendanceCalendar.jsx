@@ -380,8 +380,9 @@ export default function AttendanceCalendar({
           <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
             Leave request statuses appear on the applicable dates. Click any
             day to view attendance details, including check-in and check-out
-            times, punch locations, and re-entry reasons. On today or a future
-            date, you can also apply for leave.
+            times, punch locations, and re-entry reasons. You can apply for
+            leave on eligible dates in the current month or future months,
+            except Sundays.
           </p>
         </>
       )}

@@ -58,6 +58,35 @@ export const localDateStr = (d = new Date()) => {
   return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
 };
 
+export const isSundayDate = (dateString) => (
+  Boolean(dateString) && new Date(`${dateString}T00:00:00`).getDay() === 0
+);
+
+export const BACKDATED_LEAVE_ERROR = "You can apply for leave only from the first day of the current month onward. Applications for previous months are not allowed.";
+
+export function currentMonthLeaveStart(today = localDateStr()) {
+  return `${today.slice(0, 7)}-01`;
+}
+
+export const isDisallowedBackdatedLeaveDate = (dateString, today = localDateStr()) => {
+  return Boolean(dateString) && dateString < currentMonthLeaveStart(today);
+};
+
+export const leaveDaysByYear = (startDate, endDate) => {
+  const days = {};
+  if (!startDate || !endDate || startDate > endDate) return days;
+  const current = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  while (current <= end) {
+    if (current.getDay() !== 0) {
+      const year = current.getFullYear();
+      days[year] = (days[year] || 0) + 1;
+    }
+    current.setDate(current.getDate() + 1);
+  }
+  return days;
+};
+
 export function formatCompanyDateLabel(dateString, options) {
   const date = new Date(`${dateString}T00:00:00Z`);
   return new Intl.DateTimeFormat("en-IN", { ...options, timeZone: "UTC" }).format(date);

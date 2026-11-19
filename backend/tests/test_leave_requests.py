@@ -13,8 +13,10 @@ class TestConfig(Config):
 
 from app import create_app
 from app.extensions import db
-from app.models import LeaveBalance, LeaveEntitlementAudit, LeaveRequest, LeaveType, User
+from app.models import LeaveBalance, LeaveEntitlementAudit, LeaveRequest, LeaveReviewHistory, LeaveType, User
 from app.roles import EMPLOYEE, HR_OPERATIONS, MANAGER, SUPER_ADMIN
+from app.routes.leave import _current_month_leave_start
+from app.utils.company_time import company_today
 
 
 app = create_app(TestConfig)
@@ -27,6 +29,12 @@ def check(label, condition, details=""):
 
 with app.app_context():
     db.create_all()
+
+    check("current-month start handles month, leap-year, and year changes",
+          _current_month_leave_start(date(2026, 11, 19)) == date(2026, 11, 1) and
+          _current_month_leave_start(date(2026, 11, 2)) == date(2026, 11, 1) and
+          _current_month_leave_start(date(2024, 2, 29)) == date(2024, 2, 1) and
+          _current_month_leave_start(date(2025, 1, 3)) == date(2025, 1, 1))
 
     def make_user(code, role, manager_id=None):
         user = User(
@@ -53,7 +61,7 @@ with app.app_context():
     balance = LeaveBalance(
         user_id=employee.id,
         leave_type_id=leave_type.id,
-        year=date.today().year,
+        year=company_today().year,
         allocated=5,
         used=0,
     )
@@ -61,7 +69,7 @@ with app.app_context():
     db.session.add(LeaveBalance(
         user_id=employee2.id,
         leave_type_id=leave_type.id,
-        year=date.today().year,
+        year=company_today().year,
         allocated=3,
         used=0,
     ))
@@ -155,8 +163,8 @@ with app.app_context():
     db.session.add(LeaveRequest(
         user_id=employee2.id,
         leave_type_id=leave_type.id,
-        start_date=date.today(),
-        end_date=date.today(),
+        start_date=company_today(),
+        end_date=company_today(),
         days=1,
         reason="Legacy approved leave",
         status="approved",
@@ -223,21 +231,177 @@ with app.app_context():
     employee2_balance.used = 1
     db.session.commit()
 
-    today = date.today()
+    company_current_date = company_today()
+    today_is_sunday = company_current_date.weekday() == 6
+    today = company_current_date + timedelta(days=1) if today_is_sunday else company_current_date
     leave_today = {
         "leave_type_id": leave_type.id,
         "start_date": today.isoformat(),
         "end_date": today.isoformat(),
         "reason": "Personal appointment",
     }
-    past = {**leave_today, "start_date": (today - timedelta(days=1)).isoformat(), "end_date": (today - timedelta(days=1)).isoformat()}
-    check("past dates are rejected", client.post("/api/leave/apply", headers=employee_headers, json=past).status_code == 400)
+    cutoff = _current_month_leave_start(company_current_date)
+    recent_backdate = cutoff
+    while recent_backdate.weekday() == 6:
+        recent_backdate += timedelta(days=1)
+    recent_payload = {
+        **leave_today,
+        "start_date": recent_backdate.isoformat(),
+        "end_date": recent_backdate.isoformat(),
+    }
+    recent_request = client.post(
+        "/api/leave/apply", headers=employee_headers, json=recent_payload
+    )
+    check("employee can apply at the current-month boundary",
+          recent_request.status_code == 201, recent_request.get_json())
+    recent_request_id = recent_request.get_json()["id"]
+    rejected_recent = client.post(
+        f"/api/leave/{recent_request_id}/decision",
+        headers=manager_headers,
+        json={"decision": "rejected", "comment": "Recent backdate test."},
+    )
+    reapplied_recent = client.post(
+        "/api/leave/apply", headers=employee_headers, json=recent_payload
+    )
+    check("employee can reapply for an eligible date from a rejected request",
+          rejected_recent.status_code == 200 and
+          reapplied_recent.status_code == 201 and
+          reapplied_recent.get_json()["status"] == "pending",
+          reapplied_recent.get_json())
+    client.post(
+        f"/api/leave/{reapplied_recent.get_json()['id']}/decision",
+        headers=manager_headers,
+        json={"decision": "rejected", "comment": "Reapplication test cleanup."},
+    )
+
+    previous_month_day = cutoff - timedelta(days=1)
+    previous_month_payload = {
+        **leave_today,
+        "start_date": previous_month_day.isoformat(),
+        "end_date": previous_month_day.isoformat(),
+    }
+    previous_month_response = client.post(
+        "/api/leave/apply", headers=employee_headers, json=previous_month_payload
+    )
+    check("employee cannot apply for dates in the previous month",
+          previous_month_response.status_code == 400,
+          previous_month_response.get_json())
+
+    too_old = previous_month_day
+    while too_old.weekday() == 6:
+        too_old -= timedelta(days=1)
+    too_old_payload = {
+        **leave_today,
+        "start_date": too_old.isoformat(),
+        "end_date": too_old.isoformat(),
+    }
+    too_old_response = client.post(
+        "/api/leave/apply", headers=employee_headers, json=too_old_payload
+    )
+    error_message = (
+        "You can apply for leave only from the first day of the current "
+        "month onward. Applications for previous months are not allowed."
+    )
+    check("employee cannot apply for dates in the previous month",
+          too_old_response.status_code == 400 and
+          too_old_response.get_json()["message"] == error_message,
+          too_old_response.get_json())
+
+    historical_rejection = LeaveRequest(
+        user_id=employee.id,
+        leave_type_id=leave_type.id,
+        start_date=too_old,
+        end_date=too_old,
+        days=1,
+        reason="Historical rejected request",
+        status="rejected",
+    )
+    db.session.add(historical_rejection)
+    db.session.commit()
+    rejected_old_reapplication = client.post(
+        "/api/leave/apply", headers=employee_headers, json=too_old_payload
+    )
+    check("employee cannot reapply for a rejected date from a previous month",
+          rejected_old_reapplication.status_code == 400 and
+          rejected_old_reapplication.get_json()["message"] == error_message,
+          rejected_old_reapplication.get_json())
+
+    current_month_backdate = company_current_date - timedelta(days=1)
+    if current_month_backdate >= cutoff and current_month_backdate.weekday() != 6:
+        current_month_response = client.post(
+            "/api/leave/apply",
+            headers=employee_headers,
+            json={
+                **leave_today,
+                "start_date": current_month_backdate.isoformat(),
+                "end_date": current_month_backdate.isoformat(),
+            },
+        )
+        check("employee can apply for an eligible past date in the current month",
+              current_month_response.status_code == 201,
+              current_month_response.get_json())
+        client.post(
+            f"/api/leave/{current_month_response.get_json()['id']}/decision",
+            headers=manager_headers,
+            json={"decision": "rejected", "comment": "Recent backdate test cleanup."},
+        )
+    manager_backdate = client.post(
+        "/api/leave/apply", headers=manager_headers, json=too_old_payload
+    )
+    check("manager self-service leave applications follow the same month boundary",
+          manager_backdate.status_code == 400 and
+          manager_backdate.get_json()["message"] == error_message,
+          manager_backdate.get_json())
+    sunday = today + timedelta(days=(6 - today.weekday()) % 7 or 7)
+    sunday_payload = {**leave_today, "start_date": sunday.isoformat(), "end_date": sunday.isoformat()}
+    check("Sunday leave dates are rejected",
+          client.post("/api/leave/apply", headers=employee_headers, json=sunday_payload).status_code == 400)
     check("a reason is required", client.post("/api/leave/apply", headers=employee_headers, json={**leave_today, "reason": " "}).status_code == 400)
 
     created = client.post("/api/leave/apply", headers=employee_headers, json=leave_today)
-    check("employee can apply for today", created.status_code == 201, created.get_json())
+    check("employee can apply for today or the next eligible date",
+          created.status_code == 201, created.get_json())
+    if today_is_sunday:
+        sunday_today_payload = {
+            **leave_today,
+            "start_date": company_current_date.isoformat(),
+            "end_date": company_current_date.isoformat(),
+        }
+        check("Sunday today remains unavailable",
+              client.post(
+                  "/api/leave/apply",
+                  headers=employee_headers,
+                  json=sunday_today_payload,
+              ).status_code == 400)
     check("pending requests do not reduce the leave balance", balance.used == 0, balance.used)
     request_id = created.get_json()["id"]
+    displayed_balance = client.get("/api/leave/balances", headers=employee_headers).get_json()[0]
+    check("leave balance response shows pending reservations separately",
+          displayed_balance["remaining_leave"] == 6 and
+          displayed_balance["pending_reserved"] == 1 and
+          displayed_balance["available"] == 5,
+          displayed_balance)
+    range_start = today + timedelta(days=1)
+    while range_start.weekday() != 4:
+        range_start += timedelta(days=1)
+    range_end = range_start + timedelta(days=3)
+    weekend_range = client.post(
+        "/api/leave/apply",
+        headers=employee_headers,
+        json={
+            **leave_today,
+            "start_date": range_start.isoformat(),
+            "end_date": range_end.isoformat(),
+        },
+    )
+    check("leave duration excludes Sundays inside a date range",
+          weekend_range.status_code == 201 and weekend_range.get_json()["days"] == 3,
+          weekend_range.get_json())
+    client.post(
+        f"/api/leave/{weekend_range.get_json()['id']}/decision",
+        headers=manager_headers,
+        json={"decision": "rejected", "comment": "Weekend range test cleanup."},
+    )
     team_requests = client.get("/api/leave/team-requests", headers=manager_headers, query_string={
         "employee_id": employee.id,
         "status": "pending",
@@ -260,6 +424,24 @@ with app.app_context():
                      query_string={"start_date": "not-a-date"}).status_code == 400)
     check("overlapping pending applications are rejected",
           client.post("/api/leave/apply", headers=employee_headers, json=leave_today).status_code == 409)
+    overbook_start = today + timedelta(days=20)
+    while overbook_start.weekday() == 6:
+        overbook_start += timedelta(days=1)
+    overbook_end = overbook_start + timedelta(days=10)
+    while overbook_end.weekday() == 6:
+        overbook_end += timedelta(days=1)
+    overbook = client.post(
+        "/api/leave/apply",
+        headers=employee_headers,
+        json={
+            **leave_today,
+            "start_date": overbook_start.isoformat(),
+            "end_date": overbook_end.isoformat(),
+        },
+    )
+    check("submission rejects a request exceeding available balance",
+          overbook.status_code == 409 and "Insufficient leave balance" in overbook.get_json()["message"],
+          overbook.get_json())
 
     calendar = client.get(
         "/api/attendance/my-calendar",
@@ -298,6 +480,27 @@ with app.app_context():
                       json={"decision": "rejected", "comment": "Coverage unavailable."}).status_code == 200 and
           balance.used == 0 and
           db.session.get(LeaveRequest, rejected_id).review_comment == "Coverage unavailable.")
+    rejected_history = LeaveReviewHistory.query.filter_by(leave_request_id=rejected_id).all()
+    reapproved = client.post(
+        f"/api/leave/{rejected_id}/reapprove",
+        headers=manager_headers,
+        json={"comment": "Coverage confirmed."},
+    )
+    check("manager can reapprove a rejected direct-report request and retain both reviews",
+          reapproved.status_code == 200 and reapproved.get_json()["status"] == "approved" and
+          [entry.action for entry in LeaveReviewHistory.query.filter_by(
+              leave_request_id=rejected_id
+          ).order_by(LeaveReviewHistory.id).all()] == ["rejected", "reapproved"] and
+          len(rejected_history) == 1 and balance.used == 1,
+          reapproved.get_json())
+    check("reapproving an approved request cannot deduct balance twice",
+          client.post(f"/api/leave/{rejected_id}/reapprove", headers=manager_headers,
+                      json={}).status_code == 409 and balance.used == 1)
+    check("unassigned manager cannot reapprove a rejected request",
+          client.post(f"/api/leave/{rejected_id}/reapprove", headers=other_manager_headers,
+                      json={}).status_code == 403)
+    client.post(f"/api/leave/{rejected_id}/cancel", headers=employee_headers)
+    check("cancelling reapproved leave restores its balance", balance.used == 0, balance.used)
 
     manager_own_request = client.post(
         "/api/leave/apply", headers=manager_headers, json=leave_today
@@ -330,8 +533,11 @@ with app.app_context():
           all(row["id"] != admin_own_request.get_json()["id"]
               for row in client.get("/api/leave/pending-approvals", headers=super_admin_headers).get_json()))
 
-    future = {**leave_today, "start_date": (today + timedelta(days=10)).isoformat(),
-              "end_date": (today + timedelta(days=10)).isoformat()}
+    future_day = today + timedelta(days=10)
+    while future_day.weekday() == 6:
+        future_day += timedelta(days=1)
+    future = {**leave_today, "start_date": future_day.isoformat(),
+              "end_date": future_day.isoformat()}
     pending = client.post("/api/leave/apply", headers=employee_headers, json=future)
     pending_id = pending.get_json()["id"]
     balance.used = balance.allocated
@@ -347,10 +553,15 @@ with app.app_context():
     client.post(f"/api/leave/{pending_id}/decision", headers=manager_headers, json={"decision": "rejected"})
 
     year_end = date(today.year, 12, 31)
+    while year_end.weekday() == 6:
+        year_end -= timedelta(days=1)
+    next_year_start = date(today.year + 1, 1, 1)
+    while next_year_start.weekday() == 6:
+        next_year_start += timedelta(days=1)
     cross_year = {
         **leave_today,
         "start_date": year_end.isoformat(),
-        "end_date": date(today.year + 1, 1, 1).isoformat(),
+        "end_date": next_year_start.isoformat(),
     }
     cross_year_created = client.post("/api/leave/apply", headers=employee_headers, json=cross_year)
     check("a request spanning two calendar years is accepted",

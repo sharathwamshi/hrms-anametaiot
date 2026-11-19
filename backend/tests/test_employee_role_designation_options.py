@@ -6,7 +6,7 @@ sys.path.insert(0, ".")
 from config import Config
 from app import create_app
 from app.extensions import db
-from app.models import User
+from app.models import Department, User
 from app.roles import (
     ADMIN,
     BUSINESS_ANALYST,
@@ -20,6 +20,7 @@ from app.roles import (
     TEAM_LEAD,
     TESTER_QA,
 )
+from app.utils.companies import PAYROLL_COMPANIES
 
 
 class EmployeeRoleOptionsTestConfig(Config):
@@ -168,6 +169,50 @@ class EmployeeRoleDesignationOptionsTests(unittest.TestCase):
             json=self.employee_payload("CREATED-BY-ADMIN", EMPLOYEE, "Developer"),
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_employee_directory_supports_combined_employment_status_filters(self):
+        department = Department(name="Product")
+        db.session.add(department)
+        db.session.flush()
+        first = self.employee_payload("FILTER-1", EMPLOYEE, "Analyst")
+        first.update({
+            "department_id": department.id,
+            "company_name": PAYROLL_COMPANIES[0],
+        })
+        created = self.client.post("/api/employees", headers=self.hr_headers, json=first)
+        self.assertEqual(created.status_code, 201)
+        employee = db.session.get(User, created.get_json()["id"])
+        employee.employment_status = "resignation_pending"
+
+        second = self.employee_payload("FILTER-2", DEVELOPER, "Engineer")
+        second["company_name"] = PAYROLL_COMPANIES[0]
+        self.assertEqual(
+            self.client.post("/api/employees", headers=self.hr_headers, json=second).status_code,
+            201,
+        )
+        db.session.commit()
+
+        response = self.client.get(
+            "/api/employees",
+            headers=self.hr_headers,
+            query_string={
+                "role": EMPLOYEE,
+                "department_id": department.id,
+                "company_name": PAYROLL_COMPANIES[0],
+                "designation": "Analyst",
+                "employment_status": "resignation_pending",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["id"] for row in response.get_json()], [employee.id])
+        self.assertEqual(
+            self.client.get(
+                "/api/employees",
+                headers=self.hr_headers,
+                query_string={"employment_status": "not-a-status"},
+            ).status_code,
+            400,
+        )
 
 
 if __name__ == "__main__":

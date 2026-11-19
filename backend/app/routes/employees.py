@@ -87,6 +87,7 @@ def list_employees():
     department_id = request.args.get("department_id", type=int)
     role = request.args.get("role")
     designation = request.args.get("designation", "").strip()
+    employment_status = request.args.get("employment_status")
     status = request.args.get("status")
     company_name = request.args.get("company_name")
     if company_name and company_name not in PAYROLL_COMPANIES:
@@ -126,6 +127,10 @@ def list_employees():
         query = query.filter_by(designation=designation)
     if company_name:
         query = query.filter_by(company_name=company_name)
+    if employment_status:
+        if employment_status not in {"active", "resignation_pending", "notice_period", "left"}:
+            return jsonify({"message": "The selected employment status is invalid."}), 400
+        query = query.filter_by(employment_status=employment_status)
 
     if status == "removed":
         rows = query.order_by(User.removed_at.desc(), User.full_name.asc()).all()

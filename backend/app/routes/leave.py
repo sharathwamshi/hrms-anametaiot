@@ -1,22 +1,95 @@
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.extensions import db
-from app.models import LeaveRequest, LeaveType, LeaveBalance, LeaveEntitlementAudit, User
+from app.models import LeaveRequest, LeaveType, LeaveBalance, LeaveEntitlementAudit, LeaveReviewHistory, User
 from app.models.leave import ensure_leave_balances
 from app.roles import MANAGER, HR_OPERATIONS, SUPER_ADMIN, APPROVER_ROLES, CONTRACT_EMPLOYEE
+from app.utils.company_time import company_today
 
 bp = Blueprint("leave", __name__, url_prefix="/api/leave")
+
+
+def _current_month_leave_start(today=None):
+    today = today or company_today()
+    return date(today.year, today.month, 1)
 
 
 def _manager_report_ids(manager_id):
     return [user.id for user in User.query.filter_by(manager_id=manager_id).all()]
 
 
-def _validated_leave_fields(payload, user_id):
+def _leave_days_by_year(start, end):
+    days_by_year = {}
+    current = start
+    while current <= end:
+        if current.weekday() != 6:
+            days_by_year[current.year] = days_by_year.get(current.year, 0) + 1
+        current += timedelta(days=1)
+    return days_by_year
+
+
+def _calendar_days_by_year(start, end):
+    days_by_year = {}
+    current = start
+    while current <= end:
+        days_by_year[current.year] = days_by_year.get(current.year, 0) + 1
+        current += timedelta(days=1)
+    return days_by_year
+
+
+def _leave_request_days_by_year(leave_request):
+    calendar_days = _calendar_days_by_year(
+        leave_request.start_date, leave_request.end_date
+    )
+    if leave_request.days == sum(calendar_days.values()):
+        return calendar_days
+    return _leave_days_by_year(leave_request.start_date, leave_request.end_date)
+
+
+def _available_balance_error(user_id, leave_type_id, start, end, exclude_request_id=None):
+    days_by_year = _leave_days_by_year(start, end)
+    if not days_by_year:
+        return "The selected date range contains no eligible working days."
+
+    for year, requested_days in days_by_year.items():
+        ensure_leave_balances(user_id, year)
+    db.session.flush()
+
+    for year, requested_days in days_by_year.items():
+        balance = LeaveBalance.query.filter_by(
+            user_id=user_id, leave_type_id=leave_type_id, year=year
+        ).with_for_update().first()
+        available = balance.balance if balance else 0
+        pending_requests = LeaveRequest.query.filter(
+            LeaveRequest.user_id == user_id,
+            LeaveRequest.leave_type_id == leave_type_id,
+            LeaveRequest.status == "pending",
+            LeaveRequest.start_date <= date(year, 12, 31),
+            LeaveRequest.end_date >= date(year, 1, 1),
+        )
+        if exclude_request_id is not None:
+            pending_requests = pending_requests.filter(LeaveRequest.id != exclude_request_id)
+        reserved_days = sum(
+            _leave_request_days_by_year(row).get(year, 0)
+            for row in pending_requests.all()
+        )
+        available = max(0, available - reserved_days)
+        if requested_days > available:
+            return (
+                f"Insufficient leave balance for {year}. "
+                f"Available after pending requests: {available} day(s); "
+                f"requested: {requested_days}."
+            )
+    return None
+
+
+def _validated_leave_fields(
+    payload, user_id, exclude_request_id=None, restrict_backdating=False
+):
     try:
         start = datetime.strptime(payload.get("start_date"), "%Y-%m-%d").date()
         end = datetime.strptime(payload.get("end_date"), "%Y-%m-%d").date()
@@ -26,8 +99,14 @@ def _validated_leave_fields(payload, user_id):
 
     if end < start:
         return None, "End date cannot be before start date."
-    if start < date.today():
-        return None, "Leave can only be requested for today or a future date."
+    if start.weekday() == 6 or end.weekday() == 6:
+        return None, "Leave start and end dates cannot be Sundays."
+
+    if restrict_backdating and start < _current_month_leave_start():
+        return None, (
+            "You can apply for leave only from the first day of the current "
+            "month onward. Applications for previous months are not allowed."
+        )
 
     reason = payload.get("reason")
     if not isinstance(reason, str) or not reason.strip():
@@ -40,23 +119,35 @@ def _validated_leave_fields(payload, user_id):
     if leave_type is None:
         return None, "The selected leave type is invalid."
 
-    overlap = LeaveRequest.query.filter(
+    overlap_query = LeaveRequest.query.filter(
         LeaveRequest.user_id == user_id,
         LeaveRequest.status.in_(("pending", "approved")),
         LeaveRequest.start_date <= end,
         LeaveRequest.end_date >= start,
-    ).first()
+    )
+    if exclude_request_id is not None:
+        overlap_query = overlap_query.filter(LeaveRequest.id != exclude_request_id)
+    overlap = overlap_query.first()
     if overlap:
         return None, (
             "You already have a pending or approved leave request "
             "for part of this date range."
         )
 
+    days_by_year = _leave_days_by_year(start, end)
+    if not days_by_year:
+        return None, "The selected date range contains no eligible working days."
+    balance_error = _available_balance_error(
+        user_id, leave_type.id, start, end, exclude_request_id
+    )
+    if balance_error:
+        return None, balance_error
+
     return {
         "leave_type_id": leave_type.id,
         "start_date": start,
         "end_date": end,
-        "days": (end - start).days + 1,
+        "days": sum(days_by_year.values()),
         "reason": reason,
     }, None
 
@@ -127,8 +218,23 @@ def leave_types():
 def balances():
     user_id = int(get_jwt_identity())
     year = request.args.get("year", type=int) or date.today().year
+    ensure_leave_balances(user_id, year)
     rows = LeaveBalance.query.filter_by(user_id=user_id, year=year).all()
-    return jsonify([r.to_dict() for r in rows])
+    results = []
+    for row in rows:
+        pending = LeaveRequest.query.filter_by(
+            user_id=user_id, leave_type_id=row.leave_type_id, status="pending"
+        ).filter(
+            LeaveRequest.start_date <= date(year, 12, 31),
+            LeaveRequest.end_date >= date(year, 1, 1),
+        ).all()
+        reserved = sum(_leave_request_days_by_year(item).get(year, 0) for item in pending)
+        result = row.to_dict()
+        result["pending_reserved"] = reserved
+        result["available"] = max(0, row.balance - reserved)
+        results.append(result)
+    db.session.commit()
+    return jsonify(results)
 
 
 @bp.get("/balances/<int:employee_id>")
@@ -172,11 +278,19 @@ def apply_leave():
     if not isinstance(payload, dict):
         return jsonify({"message": "A valid leave request is required."}), 400
 
-    fields, error = _validated_leave_fields(payload, user_id)
+    User.query.filter_by(id=user_id).with_for_update().first()
+    fields, error = _validated_leave_fields(
+        payload,
+        user_id,
+        restrict_backdating=True,
+    )
 
     if error:
         # Preserve the conflict response for overlapping requests.
-        if "already have a pending or approved leave request" in error:
+        if (
+            "already have a pending or approved leave request" in error
+            or "Insufficient leave balance" in error
+        ):
             return jsonify({"message": error}), 409
 
         return jsonify({"message": error}), 400
@@ -197,8 +311,9 @@ def apply_leave():
 @jwt_required()
 def update_leave(request_id):
     user_id = int(get_jwt_identity())
+    claims = get_jwt()
 
-    if get_jwt().get("role") == CONTRACT_EMPLOYEE:
+    if claims.get("role") == CONTRACT_EMPLOYEE:
         return jsonify({
             "message": (
                 "Contract Employees manage their documents and payroll only "
@@ -206,7 +321,7 @@ def update_leave(request_id):
             )
         }), 403
 
-    leave_request = LeaveRequest.query.get_or_404(request_id)
+    leave_request = LeaveRequest.query.filter_by(id=request_id).with_for_update().first_or_404()
 
     if leave_request.user_id != user_id:
         return jsonify({
@@ -218,88 +333,26 @@ def update_leave(request_id):
             "message": "Only pending leave requests can be edited."
         }), 400
 
-    payload = request.get_json(silent=True) or {}
-
+    payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"message": "A valid leave request is required."}), 400
 
-    # Exclude the current request from overlap checking.
-    try:
-        start = datetime.strptime(payload["start_date"], "%Y-%m-%d").date()
-        end = datetime.strptime(payload["end_date"], "%Y-%m-%d").date()
-        leave_type_id = int(payload["leave_type_id"])
-    except (KeyError, TypeError, ValueError):
-        return jsonify({
-            "message": "start_date, end_date and leave_type_id are required."
-        }), 400
+    User.query.filter_by(id=user_id).with_for_update().first()
+    fields, error = _validated_leave_fields(
+        payload,
+        user_id,
+        exclude_request_id=leave_request.id,
+        restrict_backdating=True,
+    )
+    if error:
+        status = 409 if (
+            "already have a pending or approved leave request" in error
+            or "Insufficient leave balance" in error
+        ) else 400
+        return jsonify({"message": error}), status
 
-    if end < start:
-        return jsonify({
-            "message": "End date cannot be before start date."
-        }), 400
-
-    if start < date.today():
-        return jsonify({
-            "message": "Leave can only be requested for today or a future date."
-        }), 400
-
-    reason = payload.get("reason")
-
-    if not isinstance(reason, str) or not reason.strip():
-        return jsonify({"message": "A reason is required."}), 400
-
-    reason = reason.strip()
-
-    if len(reason) > 500:
-        return jsonify({
-            "message": "Reason cannot exceed 500 characters."
-        }), 400
-
-    leave_type = db.session.get(LeaveType, leave_type_id)
-
-    if not leave_type:
-        return jsonify({"message": "The selected leave type is invalid."}), 400
-
-    overlap = LeaveRequest.query.filter(
-        LeaveRequest.user_id == user_id,
-        LeaveRequest.id != leave_request.id,
-        LeaveRequest.status.in_(("pending", "approved")),
-        LeaveRequest.start_date <= end,
-        LeaveRequest.end_date >= start,
-    ).first()
-
-    if overlap:
-        return jsonify({
-            "message": (
-                "You already have a pending or approved leave request "
-                "for part of this date range."
-            )
-        }), 409
-
-    days = (end - start).days + 1
-
-    balance = LeaveBalance.query.filter_by(
-        user_id=user_id, leave_type_id=leave_type_id, year=start.year
-    ).first()
-    if balance and balance.balance < days:
-        return jsonify({"message": f"Insufficient balance. Available: {balance.balance} day(s)."}), 400
-
-    leave_request = LeaveRequest(
-        user_id=user_id,
-        leave_type_id=leave_type_id,
-        year=start.year,
-    ).first()
-
-    if balance and balance.balance < days:
-        return jsonify({
-            "message": f"Insufficient balance. Available: {balance.balance} day(s)."
-        }), 400
-
-    leave_request.start_date = start
-    leave_request.end_date = end
-    leave_request.leave_type_id = leave_type_id
-    leave_request.days = days
-    leave_request.reason = reason
+    for field, value in fields.items():
+        setattr(leave_request, field, value)
 
     db.session.commit()
 
@@ -319,7 +372,7 @@ def cancel_leave(request_id):
             )
         }), 403
 
-    leave_request = LeaveRequest.query.get_or_404(request_id)
+    leave_request = LeaveRequest.query.filter_by(id=request_id).with_for_update().first_or_404()
 
     if leave_request.user_id != user_id:
         return jsonify({
@@ -334,16 +387,11 @@ def cancel_leave(request_id):
         return jsonify({"message": "Approved leave can only be cancelled before it starts."}), 400
 
     if leave_request.status == "approved":
-        for year in range(leave_request.start_date.year, leave_request.end_date.year + 1):
+        days_by_year = _leave_request_days_by_year(leave_request)
+        for year in days_by_year:
             ensure_leave_balances(user_id, year)
         db.session.flush()
-        for year in range(leave_request.start_date.year, leave_request.end_date.year + 1):
-            year_start = date(year, 1, 1)
-            year_end = date(year, 12, 31)
-            days_in_year = (
-                min(leave_request.end_date, year_end)
-                - max(leave_request.start_date, year_start)
-            ).days + 1
+        for year, days_in_year in days_by_year.items():
             balance = LeaveBalance.query.filter_by(
                 user_id=user_id,
                 leave_type_id=leave_request.leave_type_id,
@@ -707,7 +755,7 @@ def decide(request_id):
             "message": "You do not have permission to approve or reject leave."
         }), 403
 
-    leave_request = LeaveRequest.query.get_or_404(request_id)
+    leave_request = LeaveRequest.query.filter_by(id=request_id).with_for_update().first_or_404()
     if leave_request.user_id == reviewer_id:
         return jsonify({"message": "You cannot approve or reject your own leave request."}), 403
     if role == MANAGER and leave_request.user.manager_id != reviewer_id:
@@ -723,6 +771,10 @@ def decide(request_id):
         return jsonify({
             "message": "decision must be 'approved' or 'rejected'."
         }), 400
+    comment = payload.get("comment", "")
+    if not isinstance(comment, str):
+        return jsonify({"message": "Review comment must be text."}), 400
+    comment = comment.strip()[:255]
 
     # A cancelled request cannot be reviewed. Return 400 to indicate that
     # the attempted action is invalid for this request's state.
@@ -737,22 +789,23 @@ def decide(request_id):
         return jsonify({"message": "This leave request has already been reviewed."}), 409
 
     if decision == "approved":
-        for year in range(leave_request.start_date.year, leave_request.end_date.year + 1):
+        if leave_request.start_date.weekday() == 6 or leave_request.end_date.weekday() == 6:
+            db.session.rollback()
+            return jsonify({
+                "message": "This request starts or ends on a Sunday. Ask the employee to correct and resubmit it."
+            }), 409
+        days_by_year = _leave_days_by_year(leave_request.start_date, leave_request.end_date)
+        leave_request.days = sum(days_by_year.values())
+        for year in days_by_year:
             ensure_leave_balances(leave_request.user_id, year)
         db.session.flush()
         yearly_balances = []
-        for year in range(leave_request.start_date.year, leave_request.end_date.year + 1):
-            year_start = date(year, 1, 1)
-            year_end = date(year, 12, 31)
-            days_in_year = (
-                min(leave_request.end_date, year_end)
-                - max(leave_request.start_date, year_start)
-            ).days + 1
+        for year, days_in_year in days_by_year.items():
             balance = LeaveBalance.query.filter_by(
                 user_id=leave_request.user_id,
                 leave_type_id=leave_request.leave_type_id,
                 year=year,
-            ).first()
+            ).with_for_update().first()
             if balance is None or balance.balance < days_in_year:
                 db.session.rollback()
                 available = balance.balance if balance else 0
@@ -765,8 +818,75 @@ def decide(request_id):
 
     leave_request.status = decision
     leave_request.reviewed_by = reviewer_id
-    leave_request.review_comment = payload.get("comment", "")
+    leave_request.review_comment = comment
+    leave_request.review_history.append(LeaveReviewHistory(
+        reviewer_id=reviewer_id,
+        action=decision,
+        comment=comment,
+    ))
 
     db.session.commit()
 
+    return jsonify(leave_request.to_dict())
+
+
+@bp.post("/<int:request_id>/reapprove")
+@jwt_required()
+def reapprove(request_id):
+    role = get_jwt().get("role")
+    reviewer_id = int(get_jwt_identity())
+    if role not in APPROVER_ROLES:
+        return jsonify({"message": "You do not have permission to reapprove leave."}), 403
+
+    leave_request = LeaveRequest.query.filter_by(id=request_id).with_for_update().first_or_404()
+    if leave_request.user_id == reviewer_id:
+        return jsonify({"message": "You cannot approve your own leave request."}), 403
+    if role == MANAGER and leave_request.user.manager_id != reviewer_id:
+        return jsonify({"message": "You can only review leave requests from your direct reports."}), 403
+    if leave_request.status != "rejected":
+        return jsonify({"message": "Only rejected leave requests can be reapproved."}), 409
+    if leave_request.start_date.weekday() == 6 or leave_request.end_date.weekday() == 6:
+        db.session.rollback()
+        return jsonify({
+            "message": "This request starts or ends on a Sunday. Ask the employee to submit a corrected request."
+        }), 409
+
+    days_by_year = _leave_days_by_year(leave_request.start_date, leave_request.end_date)
+    leave_request.days = sum(days_by_year.values())
+    for year in days_by_year:
+        ensure_leave_balances(leave_request.user_id, year)
+    db.session.flush()
+    yearly_balances = []
+    for year, days_in_year in days_by_year.items():
+        balance = LeaveBalance.query.filter_by(
+            user_id=leave_request.user_id,
+            leave_type_id=leave_request.leave_type_id,
+            year=year,
+        ).with_for_update().first()
+        if balance is None or balance.balance < days_in_year:
+            db.session.rollback()
+            available = balance.balance if balance else 0
+            return jsonify({
+                "message": f"Insufficient balance for {year}. Available: {available} day(s)."
+            }), 409
+        yearly_balances.append((balance, days_in_year))
+
+    for balance, days_in_year in yearly_balances:
+        balance.used += days_in_year
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict) or not isinstance(payload.get("comment", ""), str):
+        db.session.rollback()
+        return jsonify({"message": "Review comment must be text."}), 400
+    comment = payload.get("comment", "")
+    comment = comment.strip()[:255]
+    leave_request.status = "approved"
+    leave_request.reviewed_by = reviewer_id
+    leave_request.review_comment = comment
+    leave_request.review_history.append(LeaveReviewHistory(
+        reviewer_id=reviewer_id,
+        action="reapproved",
+        comment=comment,
+    ))
+    db.session.commit()
     return jsonify(leave_request.to_dict())

@@ -237,9 +237,25 @@ export default function ManagerLeaveDashboard() {
       setBusyRequestId(null);
     }
   };
+  const reapprove = async (request) => {
+    if (!window.confirm(`Reapprove ${request.employee_name}'s ${request.leave_type} request? This will deduct the leave balance.`)) return;
+    const comment = window.prompt("Optional reapproval comment:", "");
+    if (comment === null) return;
+    setError("");
+    setSuccess("");
+    setBusyRequestId(request.id);
+    try {
+      await client.post(`/leave/${request.id}/reapprove`, { comment });
+      if (await loadData(filters)) setSuccess("Leave request reapproved.");
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not reapprove this leave request.");
+    } finally {
+      setBusyRequestId(null);
+    }
+  };
 
   const counts = summary?.counts || {};
-  const hasPendingRequests = requests.some((request) => request.status === "pending");
+  const hasActionRequests = requests.some((request) => ["pending", "rejected"].includes(request.status));
   const sortedRequests = [...requests].sort((a, b) => {
     const left = a[sort.key] ?? "";
     const right = b[sort.key] ?? "";
@@ -248,8 +264,10 @@ export default function ManagerLeaveDashboard() {
       : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
     return comparison * (sort.direction === "asc" ? 1 : -1);
   });
-  const pageCount = Math.max(1, Math.ceil(sortedRequests.length / pageSize));
-  const pageRequests = sortedRequests.slice((page - 1) * pageSize, page * pageSize);
+  const pageCount = pageSize === 0 ? 1 : Math.max(1, Math.ceil(sortedRequests.length / pageSize));
+  const pageRequests = pageSize === 0
+    ? sortedRequests
+    : sortedRequests.slice((page - 1) * pageSize, page * pageSize);
   const balanceRows = (summary?.employees || []).flatMap((employee) => employee.balances.map((balance) => ({
     ...balance,
     employee_id: employee.employee_id,
@@ -265,8 +283,10 @@ export default function ManagerLeaveDashboard() {
       : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
     return comparison * (balanceSort.direction === "asc" ? 1 : -1);
   });
-  const balancePageCount = Math.max(1, Math.ceil(sortedBalanceRows.length / balancePageSize));
-  const pageBalances = sortedBalanceRows.slice((balancePage - 1) * balancePageSize, balancePage * balancePageSize);
+  const balancePageCount = balancePageSize === 0 ? 1 : Math.max(1, Math.ceil(sortedBalanceRows.length / balancePageSize));
+  const pageBalances = balancePageSize === 0
+    ? sortedBalanceRows
+    : sortedBalanceRows.slice((balancePage - 1) * balancePageSize, balancePage * balancePageSize);
 
   useEffect(() => { setPage(1); }, [requests, pageSize]);
   useEffect(() => { setBalancePage(1); }, [summary, balancePageSize]);
@@ -380,15 +400,16 @@ export default function ManagerLeaveDashboard() {
             )}
             {!!balanceRows.length && (
               <div className="table-pagination">
-                <span>{`Showing ${(balancePage - 1) * balancePageSize + 1}–${Math.min(balancePage * balancePageSize, sortedBalanceRows.length)} of ${sortedBalanceRows.length}`}</span>
+                <span>{`Showing ${balancePageSize === 0 ? 1 : (balancePage - 1) * balancePageSize + 1}–${balancePageSize === 0 ? sortedBalanceRows.length : Math.min(balancePage * balancePageSize, sortedBalanceRows.length)} of ${sortedBalanceRows.length}`}</span>
                 <label>Rows per page
                   <select value={balancePageSize} onChange={(event) => { setBalancePageSize(Number(event.target.value)); setBalancePage(1); }}>
                     {[10, 25, 50].map((size) => <option key={size} value={size}>{size}</option>)}
+                    <option value={0}>Show All</option>
                   </select>
                 </label>
-                <button type="button" className="btn btn-sm btn-outline" disabled={balancePage <= 1} onClick={() => setBalancePage((current) => current - 1)}>Previous</button>
-                <span>Page {Math.min(balancePage, balancePageCount)} of {balancePageCount}</span>
-                <button type="button" className="btn btn-sm btn-outline" disabled={balancePage >= balancePageCount} onClick={() => setBalancePage((current) => current + 1)}>Next</button>
+                <button type="button" className="btn btn-sm btn-outline" disabled={balancePage <= 1 || balancePageSize === 0} onClick={() => setBalancePage((current) => current - 1)}>Previous</button>
+                <span>Page {balancePageSize === 0 ? 1 : Math.min(balancePage, balancePageCount)} of {balancePageCount}</span>
+                <button type="button" className="btn btn-sm btn-outline" disabled={balancePage >= balancePageCount || balancePageSize === 0} onClick={() => setBalancePage((current) => current + 1)}>Next</button>
               </div>
             )}
           </div>
@@ -445,7 +466,7 @@ export default function ManagerLeaveDashboard() {
               </div>
             </form>
             <div className="table-wrap manager-leave-table-wrap">
-              <table className={`data-table manager-leave-table${hasPendingRequests ? " has-actions" : " no-actions"}`}>
+              <table className={`data-table manager-leave-table${hasActionRequests ? " has-actions" : " no-actions"}`}>
                 <colgroup>
                   <col className="manager-leave-col-employee" />
                   <col className="manager-leave-col-id" />
@@ -456,13 +477,13 @@ export default function ManagerLeaveDashboard() {
                   <col className="manager-leave-col-reason" />
                   <col className="manager-leave-col-remaining" />
                   <col className="manager-leave-col-status" />
-                  {hasPendingRequests && <col className="manager-leave-col-action" />}
+                  {hasActionRequests && <col className="manager-leave-col-action" />}
                 </colgroup>
                 <thead>
-                  <tr><th>{sortButton("employee_name", "Employee")}</th><th>{sortButton("employee_code", "Employee ID")}</th><th>{sortButton("leave_type", "Leave Type")}</th><th>{sortButton("start_date", "From")}</th><th>{sortButton("end_date", "To")}</th><th>{sortButton("days", "Days")}</th><th>Reason</th><th>{sortButton("remaining_leave", "Remaining")}</th><th>{sortButton("status", "Status")}</th>{hasPendingRequests && <th>Action</th>}</tr>
+                  <tr><th>{sortButton("employee_name", "Employee")}</th><th>{sortButton("employee_code", "Employee ID")}</th><th>{sortButton("leave_type", "Leave Type")}</th><th>{sortButton("start_date", "From")}</th><th>{sortButton("end_date", "To")}</th><th>{sortButton("days", "Days")}</th><th>Reason / Review history</th><th>{sortButton("remaining_leave", "Remaining")}</th><th>{sortButton("status", "Status")}</th>{hasActionRequests && <th>Action</th>}</tr>
                 </thead>
                 <tbody>
-                  {!requests.length && <tr className="empty-row"><td colSpan={hasPendingRequests ? 10 : 9}>No team leave requests match these filters.</td></tr>}
+                  {!requests.length && <tr className="empty-row"><td colSpan={hasActionRequests ? 10 : 9}>No team leave requests match these filters.</td></tr>}
                   {pageRequests.map((request) => (
                     <tr key={request.id}>
                       <td>{request.employee_name}</td>
@@ -471,10 +492,23 @@ export default function ManagerLeaveDashboard() {
                       <td>{request.start_date}</td>
                       <td>{request.end_date}</td>
                       <td>{request.days}</td>
-                      <td><LeaveReasonPreview reason={request.reason} /></td>
+                      <td>
+                        <LeaveReasonPreview reason={request.reason} />
+                        {request.review_history?.length > 0 && (
+                          <details style={{ marginTop: 6 }}>
+                            <summary>Review history ({request.review_history.length})</summary>
+                            {request.review_history.map((entry, index) => (
+                              <div key={`${entry.created_at}-${index}`} className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                                {entry.action} by {entry.reviewer_name || "approver"} · {new Date(entry.created_at).toLocaleString()}
+                                {entry.comment ? ` — ${entry.comment}` : ""}
+                              </div>
+                            ))}
+                          </details>
+                        )}
+                      </td>
                       <td>{request.remaining_leave == null ? "—" : `${request.remaining_leave} days`}</td>
                       <td><Badge status={request.status} /></td>
-                      {hasPendingRequests && (
+                      {hasActionRequests && (
                         <td>
                           {request.status === "pending" ? (
                             <div className="manager-leave-actions">
@@ -483,6 +517,10 @@ export default function ManagerLeaveDashboard() {
                               </button>
                               <button className="btn btn-sm btn-danger" disabled={busyRequestId !== null} onClick={() => decide(request, "rejected")}>Reject</button>
                             </div>
+                          ) : request.status === "rejected" ? (
+                            <button className="btn btn-sm btn-success" disabled={busyRequestId !== null} onClick={() => reapprove(request)}>
+                              {busyRequestId === request.id ? "Saving..." : "Reapprove"}
+                            </button>
                           ) : "—"}
                         </td>
                       )}
@@ -492,15 +530,16 @@ export default function ManagerLeaveDashboard() {
               </table>
             </div>
             <div className="table-pagination">
-              <span>{sortedRequests.length ? `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, sortedRequests.length)} of ${sortedRequests.length}` : "0 requests"}</span>
+              <span>{sortedRequests.length ? `Showing ${pageSize === 0 ? 1 : (page - 1) * pageSize + 1}–${pageSize === 0 ? sortedRequests.length : Math.min(page * pageSize, sortedRequests.length)} of ${sortedRequests.length}` : "0 requests"}</span>
               <label>Rows per page
                 <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}>
                   {[10, 25, 50].map((size) => <option key={size} value={size}>{size}</option>)}
+                  <option value={0}>Show All</option>
                 </select>
               </label>
-              <button type="button" className="btn btn-sm btn-outline" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>Previous</button>
-              <span>Page {Math.min(page, pageCount)} of {pageCount}</span>
-              <button type="button" className="btn btn-sm btn-outline" disabled={page >= pageCount} onClick={() => setPage((current) => current + 1)}>Next</button>
+              <button type="button" className="btn btn-sm btn-outline" disabled={page <= 1 || pageSize === 0} onClick={() => setPage((current) => current - 1)}>Previous</button>
+              <span>Page {pageSize === 0 ? 1 : Math.min(page, pageCount)} of {pageCount}</span>
+              <button type="button" className="btn btn-sm btn-outline" disabled={page >= pageCount || pageSize === 0} onClick={() => setPage((current) => current + 1)}>Next</button>
             </div>
           </div>
         </>

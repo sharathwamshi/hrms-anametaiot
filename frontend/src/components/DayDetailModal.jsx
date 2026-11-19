@@ -6,7 +6,17 @@ import RegularizeRequestModal from "./RegularizeRequestModal";
 import ManagerEditDayModal from "./ManagerEditDayModal";
 import ManagerRegularizeModal from "./ManagerRegularizeModal";
 import ApplyLeaveModal from "./ApplyLeaveModal";
-import { fmtTime, fmtHours, arrivalLabel, placeLabel, localDateStr, formatCompanyDateLabel, formatCompanyDateTime } from "../utils/attendanceTime";
+import {
+  fmtTime,
+  fmtHours,
+  arrivalLabel,
+  placeLabel,
+  localDateStr,
+  isSundayDate,
+  isDisallowedBackdatedLeaveDate,
+  formatCompanyDateLabel,
+  formatCompanyDateTime,
+} from "../utils/attendanceTime";
 import { mapsUrl } from "../utils/geo";
 
 function Place({ within, lat, lng, label }) {
@@ -48,6 +58,8 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
   const rec = day.rec;
   const sessions = rec?.sessions || [];
   const pastOrToday = day.ds <= localDateStr();
+  const sunday = isSundayDate(day.ds);
+  const previousMonth = isDisallowedBackdatedLeaveDate(day.ds);
   const pretty = formatCompanyDateLabel(day.ds, {
     weekday: "long",
     day: "numeric",
@@ -305,7 +317,7 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
             Close
           </button>
 
-          {!manager && pastOrToday && !regularized && !pending && !day.holiday && (
+          {!manager && pastOrToday && !sunday && !regularized && !pending && !day.holiday && (
             <button
               className="btn btn-primary"
               onClick={() => setSub("request")}
@@ -317,7 +329,7 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
             </button>
           )}
 
-          {!manager && day.ds >= localDateStr() && !day.leave && !day.holiday && (
+          {!manager && !previousMonth && !sunday && !day.leave && !day.holiday && (
             <button
               className="btn btn-primary"
               onClick={() => setSub("leave")}
@@ -326,7 +338,7 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
             </button>
           )}
 
-          {manager && pastOrToday && !regularized && (
+          {manager && pastOrToday && !sunday && !regularized && (
             <button
               className="btn btn-outline"
               onClick={() => setSub("regularize")}
@@ -335,7 +347,7 @@ export default function DayDetailModal({ day, person, manager, onClose, onChange
             </button>
           )}
 
-          {manager && pastOrToday && (
+          {manager && pastOrToday && !sunday && (
             <button
               className="btn btn-primary"
               onClick={() => setSub("edit")}

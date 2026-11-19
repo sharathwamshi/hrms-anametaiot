@@ -4,7 +4,7 @@ from app.models.attendance import (
     Attendance, AttendanceRegularizationReason, AttendanceRegularizationRequest, AttendanceWfhReason,
     Holiday, OfficeLocation, WorkLocation, DeviceToken, AttendanceSession,
 )
-from app.models.leave import LeaveType, LeaveBalance, LeaveRequest, LeaveEntitlementAudit
+from app.models.leave import LeaveType, LeaveBalance, LeaveRequest, LeaveReviewHistory, LeaveEntitlementAudit
 from app.models.payroll import SalaryStructure, Payslip
 from app.models.payroll_template import SalaryTemplate
 from app.models.recruitment import JobPosting, Candidate, Interview, InterviewPanelist
@@ -35,7 +35,7 @@ __all__ = [
     "AttendanceRegularizationRequest",
     "AttendanceWfhReason",
     "WorkLocation",
-    "LeaveType", "LeaveBalance", "LeaveRequest", "LeaveEntitlementAudit",
+    "LeaveType", "LeaveBalance", "LeaveRequest", "LeaveReviewHistory", "LeaveEntitlementAudit",
     "SalaryStructure", "Payslip", "SalaryTemplate",
     "JobPosting", "Candidate", "Interview", "InterviewPanelist",
     "ScreeningCall",

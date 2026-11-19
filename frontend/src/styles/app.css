@@ -309,6 +309,68 @@
   font-size: 15.5px;
 }
 
+.employees-directory-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr);
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+.employees-directory-search {
+  display: flex;
+  min-width: 0;
+}
+
+.employees-directory-search input {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.employees-directory-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.employees-directory-filters select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 8px;
+}
+
+.employees-directory-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .employees-directory-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .employees-directory-filters {
+    grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .employees-directory-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .employees-directory-actions > * {
+    flex: 1 1 150px;
+  }
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

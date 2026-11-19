@@ -5,11 +5,17 @@ import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
 import Loader from "../components/Loader";
 import LeaveBalanceSummary from "../components/LeaveBalanceSummary";
+import LeaveBalancePreview from "../components/LeaveBalancePreview";
 import LeaveReasonPreview from "../components/LeaveReasonPreview";
 import ManagerLeaveDashboard from "../components/ManagerLeaveDashboard";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
-import { localDateStr } from "../utils/attendanceTime";
+import {
+  isDisallowedBackdatedLeaveDate,
+  isSundayDate,
+  BACKDATED_LEAVE_ERROR,
+  currentMonthLeaveStart,
+} from "../utils/attendanceTime";
 
 const APPROVER_ROLES = [ROLES.MANAGER, ROLES.HR_OPERATIONS, ROLES.SUPER_ADMIN];
 
@@ -37,6 +43,10 @@ export default function Leave() {
   const [approvalSort, setApprovalSort] = useState({ key: "start_date", direction: "desc" });
   const isManager = user.role === ROLES.MANAGER;
   const isApprover = APPROVER_ROLES.includes(user.role) && !isManager;
+  const minimumDate = currentMonthLeaveStart();
+  const minimumEndDate = form.start_date && (!minimumDate || form.start_date > minimumDate)
+    ? form.start_date
+    : minimumDate;
   const sortedMyRequests = [...myRequests].sort((a, b) => {
     const left = a[mySort.key] ?? "";
     const right = b[mySort.key] ?? "";
@@ -45,8 +55,10 @@ export default function Leave() {
       : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
     return comparison * (mySort.direction === "asc" ? 1 : -1);
   });
-  const myPageCount = Math.max(1, Math.ceil(sortedMyRequests.length / myPageSize));
-  const pageMyRequests = sortedMyRequests.slice((myPage - 1) * myPageSize, myPage * myPageSize);
+  const myPageCount = myPageSize === 0 ? 1 : Math.max(1, Math.ceil(sortedMyRequests.length / myPageSize));
+  const pageMyRequests = myPageSize === 0
+    ? sortedMyRequests
+    : sortedMyRequests.slice((myPage - 1) * myPageSize, myPage * myPageSize);
   const sortedApprovals = [...approvals].sort((a, b) => {
     const left = a[approvalSort.key] ?? "";
     const right = b[approvalSort.key] ?? "";
@@ -55,8 +67,10 @@ export default function Leave() {
       : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
     return comparison * (approvalSort.direction === "asc" ? 1 : -1);
   });
-  const approvalPageCount = Math.max(1, Math.ceil(sortedApprovals.length / approvalPageSize));
-  const pageApprovals = sortedApprovals.slice((approvalPage - 1) * approvalPageSize, approvalPage * approvalPageSize);
+  const approvalPageCount = approvalPageSize === 0 ? 1 : Math.max(1, Math.ceil(sortedApprovals.length / approvalPageSize));
+  const pageApprovals = approvalPageSize === 0
+    ? sortedApprovals
+    : sortedApprovals.slice((approvalPage - 1) * approvalPageSize, approvalPage * approvalPageSize);
 
   useEffect(() => { setMyPage(1); }, [myRequests, myPageSize]);
   useEffect(() => { setApprovalPage(1); }, [approvals, approvalPageSize]);
@@ -100,6 +114,17 @@ export default function Leave() {
     e.preventDefault();
     setFormError("");
     setSuccess("");
+    if (isSundayDate(form.start_date) || isSundayDate(form.end_date)) {
+      setFormError("Leave start and end dates cannot be Sundays.");
+      return;
+    }
+    if (
+      isDisallowedBackdatedLeaveDate(form.start_date) ||
+      isDisallowedBackdatedLeaveDate(form.end_date)
+    ) {
+      setFormError(BACKDATED_LEAVE_ERROR);
+      return;
+    }
     setSubmitting(true);
     try {
       if (editingRequestId) {
@@ -154,6 +179,22 @@ export default function Leave() {
       {label}{approvalSort.key === key ? (approvalSort.direction === "asc" ? " ▲" : " ▼") : ""}
     </button>
   );
+  const updateLeaveDate = (field, value) => {
+    if (isSundayDate(value)) {
+      setFormError("Sundays cannot be selected for leave.");
+      return;
+    }
+    if (isDisallowedBackdatedLeaveDate(value)) {
+      setFormError(BACKDATED_LEAVE_ERROR);
+      return;
+    }
+    setFormError("");
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === "start_date" && current.end_date < value ? { end_date: value } : {}),
+    }));
+  };
 
   if (loading) return <AppLayout title="Leave"><Loader /></AppLayout>;
 
@@ -193,14 +234,15 @@ export default function Leave() {
               </table>
             </div>
             <div className="table-pagination">
-              <span>{sortedMyRequests.length ? `Showing ${(myPage - 1) * myPageSize + 1}–${Math.min(myPage * myPageSize, sortedMyRequests.length)} of ${sortedMyRequests.length}` : "0 requests"}</span>
+              <span>{sortedMyRequests.length ? `Showing ${myPageSize === 0 ? 1 : (myPage - 1) * myPageSize + 1}–${myPageSize === 0 ? sortedMyRequests.length : Math.min(myPage * myPageSize, sortedMyRequests.length)} of ${sortedMyRequests.length}` : "0 requests"}</span>
               <label>Rows per page
                 <select value={myPageSize} onChange={(event) => { setMyPageSize(Number(event.target.value)); setMyPage(1); }}>
                   {[10, 25, 50].map((size) => <option key={size} value={size}>{size}</option>)}
+                  <option value={0}>Show All</option>
                 </select>
               </label>
               <button type="button" className="btn btn-sm btn-outline" disabled={myPage <= 1} onClick={() => setMyPage((current) => current - 1)}>Previous</button>
-              <span>Page {Math.min(myPage, myPageCount)} of {myPageCount}</span>
+              <span>Page {myPageSize === 0 ? 1 : Math.min(myPage, myPageCount)} of {myPageCount}</span>
               <button type="button" className="btn btn-sm btn-outline" disabled={myPage >= myPageCount} onClick={() => setMyPage((current) => current + 1)}>Next</button>
             </div>
           </div>
@@ -230,14 +272,15 @@ export default function Leave() {
             </table>
           </div>
           <div className="table-pagination">
-            <span>{sortedApprovals.length ? `Showing ${(approvalPage - 1) * approvalPageSize + 1}–${Math.min(approvalPage * approvalPageSize, sortedApprovals.length)} of ${sortedApprovals.length}` : "0 requests"}</span>
+            <span>{sortedApprovals.length ? `Showing ${approvalPageSize === 0 ? 1 : (approvalPage - 1) * approvalPageSize + 1}–${approvalPageSize === 0 ? sortedApprovals.length : Math.min(approvalPage * approvalPageSize, sortedApprovals.length)} of ${sortedApprovals.length}` : "0 requests"}</span>
             <label>Rows per page
               <select value={approvalPageSize} onChange={(event) => { setApprovalPageSize(Number(event.target.value)); setApprovalPage(1); }}>
                 {[10, 25, 50].map((size) => <option key={size} value={size}>{size}</option>)}
+                <option value={0}>Show All</option>
               </select>
             </label>
             <button type="button" className="btn btn-sm btn-outline" disabled={approvalPage <= 1} onClick={() => setApprovalPage((current) => current - 1)}>Previous</button>
-            <span>Page {Math.min(approvalPage, approvalPageCount)} of {approvalPageCount}</span>
+            <span>Page {approvalPageSize === 0 ? 1 : Math.min(approvalPage, approvalPageCount)} of {approvalPageCount}</span>
             <button type="button" className="btn btn-sm btn-outline" disabled={approvalPage >= approvalPageCount} onClick={() => setApprovalPage((current) => current + 1)}>Next</button>
           </div>
         </div>
@@ -259,13 +302,18 @@ export default function Leave() {
               <div className="form-grid">
                 <div className="form-field">
                   <label>Start Date</label>
-                  <input type="date" required min={localDateStr()} value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value, end_date: form.end_date < e.target.value ? e.target.value : form.end_date })} />
+                  <input type="date" required min={minimumDate} value={form.start_date} onChange={(e) => updateLeaveDate("start_date", e.target.value)} />
                 </div>
                 <div className="form-field">
                   <label>End Date</label>
-                  <input type="date" required min={form.start_date || localDateStr()} value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
+                  <input type="date" required min={minimumEndDate} value={form.end_date} onChange={(e) => updateLeaveDate("end_date", e.target.value)} />
                 </div>
               </div>
+              <LeaveBalancePreview
+                leaveTypeId={form.leave_type_id}
+                startDate={form.start_date}
+                endDate={form.end_date}
+              />
               <div className="form-field">
                 <label>Reason</label>
                 <textarea rows={3} maxLength={500} required value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />

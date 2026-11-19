@@ -54,6 +54,10 @@ For an existing database, run
 `mysql -u root anametaiot_hrms < backend/migration_leave_entitlement_audit.sql`
 to create the audit table used by manager leave-entitlement changes.
 
+For an existing database, run
+`mysql -u root anametaiot_hrms < backend/migration_leave_review_history.sql`
+to preserve prior leave decisions and record subsequent reapprovals for auditing.
+
 For company-specific payroll and private payslip PDFs, back up an existing database and
 manually apply `backend/migration_company_specific_payslips.sql`. Existing employees will
 be assigned to Acknowledger First Pvt Ltd (AFPL); Finance can change assignments from the
