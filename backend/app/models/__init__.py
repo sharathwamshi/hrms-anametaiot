@@ -24,6 +24,7 @@ from app.models.mocktest import (
     MockTestAssignment, MockTestAnswer, MockTestResult,
 )
 from app.models.misc import Announcement, Asset
+from app.models.notification import AttendanceNotificationSettings, AttendanceReminderRun
 from app.models.resignation import (
     ResignationPolicy, ResignationRequest, ResignationDateRevision, ResignationRouting,
     ResignationEvent, ResignationChecklistItem,
@@ -34,6 +35,7 @@ __all__ = [
     "Attendance",
     "AttendanceRegularizationRequest",
     "AttendanceWfhReason",
+    "AttendanceNotificationSettings", "AttendanceReminderRun",
     "WorkLocation",
     "LeaveType", "LeaveBalance", "LeaveRequest", "LeaveReviewHistory", "LeaveEntitlementAudit",
     "SalaryStructure", "Payslip", "SalaryTemplate",

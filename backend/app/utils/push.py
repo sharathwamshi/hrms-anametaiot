@@ -12,10 +12,25 @@ import requests
 from flask import current_app
 
 from app.extensions import db
-from app.models import DeviceToken
+from app.models import AttendanceNotificationSettings, DeviceToken
 
 logger = logging.getLogger(__name__)
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+_SETTING_BY_NOTIFICATION_TYPE = {
+    "regularization_request": "regularization_enabled",
+    "regularization_approved": "regularization_enabled",
+    "regularization_rejected": "regularization_enabled",
+    "leave_request": "leave_enabled",
+    "leave_request_approved": "leave_enabled",
+    "leave_request_rejected": "leave_enabled",
+    "attendance_corrected": "attendance_updates_enabled",
+    "office_restriction": "attendance_updates_enabled",
+    "clock_in_reminder": "clock_in_reminder_enabled",
+    "manager_missing_alert": "manager_missing_alert_enabled",
+    "clock_out_reminder": "clock_out_reminder_enabled",
+    "insurance_expiry": "business_alerts_enabled",
+    "vendor_agreement_expiry": "business_alerts_enabled",
+}
 
 
 def send_push(user_ids, title, body, data=None):
@@ -29,6 +44,12 @@ def send_push(user_ids, title, body, data=None):
     if not current_app.config.get("EXPO_PUSH_ENABLED", True):
         logger.info("Push disabled — would have sent %r to users %s", title, user_ids)
         return False
+    setting_field = _SETTING_BY_NOTIFICATION_TYPE.get((data or {}).get("type"))
+    if setting_field:
+        settings = AttendanceNotificationSettings.query.filter_by(id=1).first()
+        if settings is not None and not getattr(settings, setting_field):
+            logger.info("Notification type %s is disabled by attendance notification settings.", (data or {}).get("type"))
+            return False
 
     tokens = [t.token for t in DeviceToken.query.filter(DeviceToken.user_id.in_(user_ids)).all()]
     if not tokens:

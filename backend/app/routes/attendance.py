@@ -5,7 +5,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from app.extensions import db
 from app.models import (Attendance, AttendanceSession, AttendanceRegularizationReason,
                         AttendanceRegularizationRequest, User, Holiday, OfficeLocation,
-                        AttendanceWfhReason, CompanySettings, LeaveRequest, WorkLocation)
+                        AttendanceWfhReason, CompanySettings, LeaveRequest, WorkLocation,
+                        AttendanceNotificationSettings, AttendanceReminderRun)
 from app.models.attendance import AUTO_CLOCK_OUT_NOTE
 from app.utils.push import send_push
 from app.utils.company_time import company_today, company_timezone, utc_now_naive, to_company_local
@@ -15,6 +16,7 @@ import os
 import uuid
 from datetime import timedelta
 import json
+from sqlalchemy.exc import IntegrityError
 from app.roles import ROLES_WITH_CLOCK_IN_OUT, CONTRACT_EMPLOYEE, MANAGER, HR_OPERATIONS, OPERATIONS, SUPER_ADMIN
 
 FULL_ACCESS = (HR_OPERATIONS, SUPER_ADMIN)          # every active person, incl. locations + selfies
@@ -1290,12 +1292,51 @@ def run_attendance_reminders():
         return jsonify({"message": "Not authorized."}), 403
 
     kind = (request.get_json(silent=True) or {}).get("kind")
-    if kind not in ("clock_in_reminder", "clock_out_reminder", "manager_missing_alert"):
-        return jsonify({"message": "kind must be clock_in_reminder, clock_out_reminder, or manager_missing_alert."}), 400
+    reminder_kinds = ("clock_in_reminder", "clock_out_reminder", "manager_missing_alert")
+    if kind != "dispatch" and kind not in reminder_kinds:
+        return jsonify({"message": "kind must be dispatch, clock_in_reminder, clock_out_reminder, or manager_missing_alert."}), 400
 
+    if kind == "dispatch":
+        if company_today().weekday() >= 5:
+            return jsonify({"sent": 0, "runs": [], "skipped": "weekend"})
+        settings = AttendanceNotificationSettings.query.filter_by(id=1).first()
+        if settings is None:
+            settings = AttendanceNotificationSettings(id=1)
+        now_time = datetime.now(company_timezone()).strftime("%H:%M")
+        scheduled = (
+            ("clock_in_reminder", "clock_in_reminder_enabled", "clock_in_reminder_time"),
+            ("manager_missing_alert", "manager_missing_alert_enabled", "manager_missing_alert_time"),
+            ("clock_out_reminder", "clock_out_reminder_enabled", "clock_out_reminder_time"),
+        )
+        due = [
+            reminder_kind
+            for reminder_kind, enabled_field, time_field in scheduled
+            if getattr(settings, enabled_field)
+            and now_time >= getattr(settings, time_field).strftime("%H:%M")
+        ]
+        completed = []
+        total_sent = 0
+        for reminder_kind in due:
+            run = AttendanceReminderRun(reminder_kind=reminder_kind, reminder_date=company_today())
+            db.session.add(run)
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                continue
+            sent = _send_attendance_reminder(reminder_kind)
+            total_sent += sent
+            completed.append({"kind": reminder_kind, "sent": sent})
+        return jsonify({"sent": total_sent, "runs": completed})
+
+    sent = _send_attendance_reminder(kind)
+    return jsonify({"sent": sent})
+
+
+def _send_attendance_reminder(kind):
     today = company_today()
     if today.isoformat() in {h.holiday_date.isoformat() for h in Holiday.query.filter_by(holiday_date=today).all()}:
-        return jsonify({"sent": 0, "skipped": "today is a holiday"})
+        return 0
 
     eligible_ids = {u.id for u in User.query.filter(User.is_active.is_(True), User.role != "contract_employee").all()}
     punched_in_ids = {r.user_id for r in Attendance.query.filter(Attendance.work_date == today, Attendance.clock_in.isnot(None)).all()}
@@ -1321,7 +1362,7 @@ def run_attendance_reminders():
             send_push(manager_id, "Team attendance", f"Not yet clocked in: {who}", data={"type": "manager_missing_alert"})
             sent += 1
 
-    return jsonify({"sent": sent})
+    return sent
 
 
 @bp.post("/internal/auto-midnight-clockout")
