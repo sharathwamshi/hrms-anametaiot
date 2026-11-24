@@ -11,7 +11,6 @@ import Attendance from "./pages/Attendance";
 import Leave from "./pages/Leave";
 import Employees from "./pages/Employees";
 import Payroll from "./pages/Payroll";
-import PayslipManagement from "./components/PayslipManagement";
 import Recruitment from "./pages/Recruitment";
 import AllCandidates from "./pages/AllCandidates";
 import AllPlacements from "./pages/AllPlacements";
@@ -24,7 +23,7 @@ import Assets from "./pages/Assets";
 import Profile from "./pages/Profile";
 import Insurance from "./pages/Insurance";
 
-import { ALL_ROLES, ROLES } from "./config/roles";
+import { ALL_ROLES, PAYROLL_MANAGEMENT_ROLES, ROLES } from "./config/roles";
 import Resignation from "./pages/Resignation";
 
 export default function App() {
@@ -106,24 +105,24 @@ export default function App() {
       <Route
         path="/payroll/manage"
         element={
-          <ProtectedRoute allow={[ROLES.FINANCE_ACCOUNTS]}>
-            <PayslipManagement />
+          <ProtectedRoute allow={PAYROLL_MANAGEMENT_ROLES}>
+            <Payroll />
           </ProtectedRoute>
         }
       />
       <Route
         path="/payroll/manage/create"
         element={
-          <ProtectedRoute allow={[ROLES.FINANCE_ACCOUNTS]}>
-            <PayslipManagement />
+          <ProtectedRoute allow={PAYROLL_MANAGEMENT_ROLES}>
+            <Payroll />
           </ProtectedRoute>
         }
       />
       <Route
         path="/payroll/manage/:payslipId/edit"
         element={
-          <ProtectedRoute allow={[ROLES.FINANCE_ACCOUNTS]}>
-            <PayslipManagement />
+          <ProtectedRoute allow={PAYROLL_MANAGEMENT_ROLES}>
+            <Payroll />
           </ProtectedRoute>
         }
       />

@@ -117,7 +117,7 @@ with app.app_context():
     # --- Full payroll run generates a real PDF ---
     r = client.post('/api/payroll/generate', headers=fh, json={'month': 8, 'year': 2026})
     ok("payroll generation runs", r.status_code == 200, r.get_json())
-    matching = [p for p in r.get_json() if p['user_id'] == emp.id]
+    matching = [p for p in r.get_json()['generated'] if p['user_id'] == emp.id]
     ok("employee's payslip generated with a PDF", len(matching) == 1 and matching[0]['pdf_path'] is not None, matching)
     import os
     pdf_path = os.path.join(app.config["PAYSLIP_FOLDER"], matching[0]['pdf_path'])

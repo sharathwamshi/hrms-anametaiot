@@ -123,7 +123,7 @@ with app.app_context():
     ok("...and the user record itself still exists", User.query.get(r1.id) is not None)
 
     ok("payroll no longer generates new payslips for a removed person",
-       r1.id not in {p['user_id'] for p in c.post('/api/payroll/generate', headers=H['admin'], json={'month': 9, 'year': 2026}).get_json()})
+       r1.id not in {p['user_id'] for p in c.post('/api/payroll/generate', headers=H['fin'], json={'month': 9, 'year': 2026}).get_json()['generated']})
 
     # a removed person's pending regularization request shouldn't clutter the approvals queue
     reason = c.post('/api/attendance/regularization-reasons', headers=H['mgr'], json={'label': 'Forgot to punch'}).get_json()

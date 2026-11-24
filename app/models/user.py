@@ -32,8 +32,10 @@ class User(db.Model):
     emergency_contact_relationship = db.Column(db.String(100), nullable=True)
     emergency_contact_phone = db.Column(db.String(30), nullable=True)
     uan = db.Column(db.String(12), nullable=True)
+    bank_account_name = db.Column(db.String(150), nullable=True)
 
     role = db.Column(db.String(30), nullable=False)  # see app/roles.py
+    employee_category = db.Column(db.String(20), nullable=True)
     company_name = db.Column(
         db.String(150), nullable=False,
         default="Acknowledger First Pvt Ltd",

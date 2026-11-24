@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { NAV_BY_ROLE, NAV_ITEMS, ROLES } from "../src/config/roles.js";
+import {
+  NAV_BY_ROLE, NAV_ITEMS, PAYROLL_MANAGEMENT_ROLES, ROLES,
+} from "../src/config/roles.js";
 
 const payslipRoles = [
   ROLES.MANAGER,
@@ -22,12 +24,6 @@ test("all authorized roles see one Payslips navigation item", () => {
   }
 });
 
-test("only Finance & Accounts sees Payslip Management navigation", () => {
-  for (const role of payslipRoles) {
-    assert.equal(
-      NAV_BY_ROLE[role].includes("payslipManagement"),
-      role === ROLES.FINANCE_ACCOUNTS,
-      `${role} Payslip Management visibility`,
-    );
-  }
+test("Finance & Accounts and Operations can access payroll management", () => {
+  assert.deepEqual(PAYROLL_MANAGEMENT_ROLES, [ROLES.FINANCE_ACCOUNTS, ROLES.OPERATIONS]);
 });

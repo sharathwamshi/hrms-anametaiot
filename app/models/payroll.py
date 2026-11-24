@@ -8,8 +8,10 @@ class SalaryStructure(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True, nullable=False)
+    salary_template_id = db.Column(db.Integer, db.ForeignKey("salary_templates.id"), nullable=True)
 
     annual_ctc = db.Column(db.Numeric(12, 2), nullable=True)
+    employee_overrides = db.Column(JSON, nullable=False, default=dict)
     basic = db.Column(db.Float, default=0)
     hra = db.Column(db.Float, default=0)
     special_allowance = db.Column(db.Float, default=0)
@@ -20,9 +22,12 @@ class SalaryStructure(db.Model):
     insurance = db.Column(db.Float, default=0)      # employee's share of group health/life insurance premium
     professional_tax = db.Column(db.Float, default=0)
     tds = db.Column(db.Float, default=0)
+    custom_earnings = db.Column(JSON, nullable=False, default=list)
+    custom_deductions = db.Column(JSON, nullable=False, default=list)
 
     effective_from = db.Column(db.Date, default=datetime.utcnow)
     user = db.relationship("User", backref=db.backref("salary_structure", uselist=False))
+    salary_template = db.relationship("SalaryTemplate", back_populates="assigned_structures")
 
     @property
     def gross(self):
@@ -48,6 +53,9 @@ class SalaryStructure(db.Model):
     def to_dict(self):
         return {
             "basic": self.basic,
+            "annual_ctc": float(self.annual_ctc) if self.annual_ctc is not None else None,
+            "salary_template_id": self.salary_template_id,
+            "employee_overrides": self.employee_overrides or {},
             "hra": self.hra,
             "special_allowance": self.special_allowance,
             "other_allowance": self.other_allowance,
@@ -56,6 +64,8 @@ class SalaryStructure(db.Model):
             "insurance": self.insurance,
             "professional_tax": self.professional_tax,
             "tds": self.tds,
+            "custom_earnings": self.custom_earnings or [],
+            "custom_deductions": self.custom_deductions or [],
             "gross": self.gross,
             "total_deductions": self.total_deductions,
             "net": self.net,
@@ -97,12 +107,26 @@ class Payslip(db.Model):
     published_at = db.Column(db.DateTime, nullable=True)
     pdf_is_uploaded = db.Column(db.Boolean, nullable=False, default=False, server_default="0")
     pdf_filename = db.Column(db.String(255), nullable=True)
+    template_snapshot = db.Column(JSON, nullable=True)
 
     user = db.relationship("User", foreign_keys=[user_id], backref="payslips")
+    revisions = db.relationship(
+        "PayslipRevision",
+        back_populates="payslip",
+        cascade="all, delete-orphan",
+        order_by="PayslipRevision.revision",
+    )
 
-    def to_dict(self):
+    def to_dict(self, revision_count=None):
         from app.utils.number_to_words import number_to_words_inr
 
+        if revision_count is None:
+            revision_count = (
+                db.session.query(db.func.count(PayslipRevision.id))
+                .filter_by(payslip_id=self.id)
+                .scalar()
+                if self.id else 0
+            )
         return {
             "id": self.id,
             "user_id": self.user_id,
@@ -131,5 +155,63 @@ class Payslip(db.Model):
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "pdf_is_uploaded": bool(self.pdf_is_uploaded),
             "pdf_filename": self.pdf_filename,
+            "template_snapshot": self.template_snapshot or {},
+            "revision_count": revision_count,
             "pdf_url": f"/api/payroll/payslips/{self.id}/pdf" if self.pdf_path else None,
         }
+
+
+class CompanyPayslipTemplate(db.Model):
+    __tablename__ = "company_payslip_templates"
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_name = db.Column(db.String(150), nullable=False, unique=True)
+    layout_key = db.Column(db.String(40), nullable=False)
+    address = db.Column(db.Text, nullable=False)
+    primary_color = db.Column(db.String(7), nullable=False)
+    accent_color = db.Column(db.String(7), nullable=False)
+    logo_path = db.Column(db.String(255), nullable=False)
+    earnings_components = db.Column(JSON, nullable=False)
+    deductions_components = db.Column(JSON, nullable=False)
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    updated_at = db.Column(db.DateTime, nullable=True)
+
+    def to_dict(self):
+        return {
+            "company_name": self.company_name,
+            "layout_key": self.layout_key,
+            "address": self.address,
+            "primary_color": self.primary_color,
+            "accent_color": self.accent_color,
+            "logo_path": self.logo_path,
+            "earnings_components": self.earnings_components or [],
+            "deductions_components": self.deductions_components or [],
+            "updated_by": self.updated_by,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class PayslipRevision(db.Model):
+    __tablename__ = "payslip_revisions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    payslip_id = db.Column(db.Integer, db.ForeignKey("payslips.id", ondelete="CASCADE"), nullable=False)
+    revision = db.Column(db.Integer, nullable=False)
+    action = db.Column(db.String(30), nullable=False)
+    actor_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    snapshot = db.Column(JSON, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    payslip = db.relationship("Payslip", back_populates="revisions")
+
+
+class PayrollAuditLog(db.Model):
+    __tablename__ = "payroll_audit_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    payslip_id = db.Column(db.Integer, db.ForeignKey("payslips.id"), nullable=True)
+    actor_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    action = db.Column(db.String(40), nullable=False)
+    previous_values = db.Column(JSON, nullable=True)
+    new_values = db.Column(JSON, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
