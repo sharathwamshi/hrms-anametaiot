@@ -52,11 +52,17 @@ with app.app_context():
     # Same payment flow works for a recruiter: generate -> processed -> paid
     g = c.post('/api/payroll/generate', headers=F, json={'month': 6, 'year': 2026})
     ok("generate only produced payslips for people with a structure (recruiter + manager)",
-       g.status_code == 200 and {p['user_id'] for p in g.get_json()} == {rec.id, mgr.id}, g.get_json())
+       g.status_code == 200 and {p['user_id'] for p in g.get_json()['generated']} == {rec.id, mgr.id}, g.get_json())
+    ok("employees without salary structures are reported",
+       {p['user_id'] for p in g.get_json()['skipped']} == {fin.id, emp.id, con.id}, g.get_json()['skipped'])
     b = c.get('/api/payroll/coverage?month=6&year=2026', headers=F).get_json()
     by = {p['full_name']: p for p in b['people']}
     ok("generated payslips remain drafts until Finance publishes", by["Sneha Recruiter"]['payroll_state']=="draft" and b['summary']['payslips_draft']==2, b['summary'])
     r = c.post(f"/api/payroll/payslips/{by['Sneha Recruiter']['payslip_id']}/mark-paid", headers=F)
     b = c.get('/api/payroll/coverage?month=6&year=2026', headers=F).get_json()
     ok("marking the recruiter's payslip paid shows as paid", {p['full_name']:p for p in b['people']}["Sneha Recruiter"]['payroll_state']=="paid" and b['summary']['payslips_paid']==1, b['summary'])
+    rerun = c.post('/api/payroll/generate', headers=F, json={'month': 6, 'year': 2026}).get_json()
+    skipped_paid = next(item for item in rerun['skipped'] if item['user_id'] == rec.id)
+    ok("published payroll is reported as skipped on rerun",
+       skipped_paid["reason"] == "Payslip is already paid.", skipped_paid)
 print("\nALL PAYROLL COVERAGE SMOKE TESTS PASSED")

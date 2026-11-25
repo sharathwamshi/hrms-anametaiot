@@ -58,17 +58,23 @@ For an existing database, run
 `mysql -u root anametaiot_hrms < backend/migration_leave_review_history.sql`
 to preserve prior leave decisions and record subsequent reapprovals for auditing.
 
-For company-specific payroll and private payslip PDFs, back up an existing database and
-manually apply `backend/migration_company_specific_payslips.sql`. Existing employees will
-be assigned to Acknowledger First Pvt Ltd (AFPL); Finance can change assignments from the
-Payroll People tab. New employees default to AFPL. Finance uses the dedicated
-`/payroll/manage` page to create, edit, preview, upload, publish, download and delete draft
-payslips; the create and edit workflows use full-page routes. Only Finance can open the
-management routes, while backend endpoints independently enforce mutation permissions.
-Configure `PAYSLIP_FOLDER` to a private,
-durable directory in production. Optional company address placeholders can be configured
-with `ANA_META_IOT_ADDRESS`, `ACKNOWLEDGER_FIRST_ADDRESS`, and `VKALPA_INNOVATIONS_ADDRESS`.
-The application does not run this migration automatically.
+For company-specific payroll and reusable salary structures, back up an existing database
+and apply these migrations in order, only if their schema changes are not already present:
+`backend/migration_company_specific_payslips.sql`,
+`backend/migration_reusable_salary_structures.sql`, then
+`migration_payslip_management.sql`, and
+`backend/migration_salary_template_arrears.sql`, then
+`backend/migration_salary_template_arrears_by_employee.sql`. Existing employees are assigned to Acknowledger First
+Pvt Ltd (AFPL) by the company migration; Finance and Operations can manage assignment across
+the three supported companies. The shared `/payroll` page provides the salary-structure
+editor and generated-payslip management. Finance & Accounts and Operations can assign
+employees, update authorized CTC values, generate, edit, publish, and download payslips;
+backend routes enforce those permissions independently. Employees and other read-only roles
+can access only the payslips allowed by their role and employee scope. Configure
+`PAYSLIP_FOLDER` to a private, durable directory in production. Optional company address
+placeholders can be configured with `ANA_META_IOT_ADDRESS`, `ACKNOWLEDGER_FIRST_ADDRESS`,
+and `VKALPA_INNOVATIONS_ADDRESS`. Template arrears are limited to one selected employee and
+payroll month. The application does not run these migrations automatically.
 
 ## 2. Backend (Flask API)
 
@@ -178,10 +184,11 @@ right roles get 403'd, not just that the right roles succeed).
 - **Documents** — every employee has their own document locker (academic documents,
   experience documents, relieving letter). Visible to the owner, their Manager, and HR
   Operations. Contract Employees' entire scope is this plus Payroll.
-- **Payroll** — Finance-only payslip creation, editing, upload, publish, and draft deletion;
-  company assignment and three company-branded A4 PDF templates. Employees see only their
-  own published payslips; HR Operations, Managers, Contract Employees, Operations, and HR
-  Recruiters can view published company payslips but cannot change payroll data.
+- **Payroll** — reusable, company-specific salary structures with employee assignment,
+  CTC-based earnings, individual overrides, attendance-aware payroll generation, auditable
+  payslip revisions, and three branded PDF templates. Finance & Accounts and Operations
+  manage salary structures and payslips; employees see only their own published payslips,
+  while other read-only roles are limited to published payslips in their permitted scope.
 - **Recruitment** — the full pipeline: Applied → Auto-Validated → Verified → Screening Call →
   Mock Test → Interview → Offer → Hired/Rejected. See the dedicated section below.
 - **Vendor Management** — under Finance & Accounts (with Manager approval oversight, and

@@ -4,44 +4,41 @@ import AppLayout from "../components/AppLayout";
 import Badge from "../components/Badge";
 import Loader from "../components/Loader";
 import PayslipDetailModal from "../components/PayslipDetailModal";
-import PayrollPeopleTab from "../components/PayrollPeopleTab";
+import SalaryStructuresWorkspace from "../components/SalaryStructuresWorkspace";
 import { useAuth } from "../context/AuthContext";
-import { ROLES, ROLE_LABELS } from "../config/roles";
+import { PAYROLL_MANAGEMENT_ROLES, ROLES, ROLE_LABELS } from "../config/roles";
+import { PAYROLL_COMPANY_LABELS } from "../config/companies";
 
-const PAYROLL_ADMIN_ROLES = [ROLES.FINANCE_ACCOUNTS];
+const PAYROLL_ADMIN_ROLES = PAYROLL_MANAGEMENT_ROLES;
+const SALARY_STRUCTURE_ROLES = PAYROLL_MANAGEMENT_ROLES;
 const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const inputStyle = { border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px" };
 
 const EMPTY_TEMPLATE = {
   name: "", description: "",
   basic_pct: 50, hra_pct: 20, special_allowance_pct: 20, other_allowance_pct: 10,
-  pf_employee_pct: 6, esi_employee_pct: 0, insurance_pct: 0, professional_tax_flat: 200, tds_pct: 0,
+  pf_employee_pct: 0, esi_employee_pct: 0, insurance_pct: 0, professional_tax_flat: 0, tds_pct: 0,
 };
 
 export default function Payroll() {
   const { user } = useAuth();
   const isAdmin = PAYROLL_ADMIN_ROLES.includes(user.role);
-  const [tab, setTab] = useState("payslips");
+  const canManageSalaryStructures = SALARY_STRUCTURE_ROLES.includes(user.role);
+  const [tab, setTab] = useState(canManageSalaryStructures ? "structures" : "payslips");
   const [myPayslips, setMyPayslips] = useState([]);
   const [allPayslips, setAllPayslips] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [month, setMonth] = useState(user.role === ROLES.FINANCE_ACCOUNTS ? new Date().getMonth() + 1 : "");
   const [year, setYear] = useState(user.role === ROLES.FINANCE_ACCOUNTS ? new Date().getFullYear() : "");
-  const [structureModal, setStructureModal] = useState(false);
-  const [empQuery, setEmpQuery] = useState("");
-  const [empResults, setEmpResults] = useState([]);
-  const [selectedEmp, setSelectedEmp] = useState(null);
-  const [structure, setStructure] = useState({
-    basic: 0, hra: 0, special_allowance: 0, other_allowance: 0,
-    pf_employee: 0, esi_employee: 0, insurance: 0, professional_tax: 0, tds: 0,
-  });
-  const [structError, setStructError] = useState("");
+  const [publishedMonth, setPublishedMonth] = useState("");
+  const [publishedYear, setPublishedYear] = useState("");
   const [selectedPayslip, setSelectedPayslip] = useState(null);
   const [coverage, setCoverage] = useState(null);
   const [coverageVersion, setCoverageVersion] = useState(0);
   const [downloadingPayslipId, setDownloadingPayslipId] = useState(null);
   const [payslipError, setPayslipError] = useState("");
+  const [generationResult, setGenerationResult] = useState(null);
 
   const downloadPayslip = async (payslip) => {
     setPayslipError("");
@@ -65,9 +62,11 @@ export default function Payroll() {
 
   const load = async () => {
     setLoading(true);
+    const filterMonth = isAdmin ? publishedMonth : month;
+    const filterYear = isAdmin ? publishedYear : year;
     const params = {
-      ...(month ? { month } : {}),
-      ...(year ? { year } : {}),
+      ...(filterMonth ? { month: filterMonth } : {}),
+      ...(filterYear ? { year: filterYear } : {}),
     };
     if (user.role !== ROLES.EMPLOYEE) {
       const { data } = await client.get("/payroll/payslips", { params });
@@ -82,7 +81,7 @@ export default function Payroll() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, user.id, user.role, month, year]);
+  }, [isAdmin, user.id, user.role, month, year, publishedMonth, publishedYear]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -91,77 +90,29 @@ export default function Payroll() {
 
   const generate = async () => {
     setGenerating(true);
+    setPayslipError("");
+    setGenerationResult(null);
     try {
-      await client.post("/payroll/generate", { month, year });
-      load();
+      const { data } = await client.post("/payroll/generate", { month, year });
+      setGenerationResult(data);
+      await load();
       setCoverageVersion((v) => v + 1);
+    } catch (error) {
+      setPayslipError(error?.response?.data?.message || "Could not generate payroll.");
     } finally {
       setGenerating(false);
     }
   };
 
-  const searchEmployees = async (q) => {
-    setEmpQuery(q);
-    setSelectedEmp(null);
-    if (q.length < 2) { setEmpResults([]); return; }
-    const { data } = await client.get("/employees", { params: { q } });
-    setEmpResults(data);
-  };
-
-  const pickEmployeeForStructure = async (emp) => {
-    setSelectedEmp(emp);
-    setEmpResults([]);
-    try {
-      const { data } = await client.get(`/payroll/structure/${emp.id}`);
-      setStructure({
-        basic: data.basic || 0, hra: data.hra || 0, special_allowance: data.special_allowance || 0,
-        other_allowance: data.other_allowance || 0, pf_employee: data.pf_employee || 0,
-        esi_employee: data.esi_employee || 0, insurance: data.insurance || 0,
-        professional_tax: data.professional_tax || 0, tds: data.tds || 0,
-      });
-    } catch {
-      // no existing structure yet — leave the form at its defaults for a fresh entry
-      setStructure({ basic: 0, hra: 0, special_allowance: 0, other_allowance: 0, pf_employee: 0, esi_employee: 0, insurance: 0, professional_tax: 0, tds: 0 });
-    }
-  };
-
-  const saveStructure = async (e) => {
-    e.preventDefault();
-    setStructError("");
-    if (!selectedEmp) {
-      setStructError("Search and select an employee first.");
-      return;
-    }
-    try {
-      await client.post(`/payroll/structure/${selectedEmp.id}`, structure);
-      setCoverageVersion((v) => v + 1);
-      setStructureModal(false);
-      setSelectedEmp(null);
-      setEmpQuery("");
-    } catch (err) {
-      setStructError(err?.response?.data?.message || "Could not save salary structure.");
-    }
-  };
-
   return (
     <AppLayout title={isAdmin ? "Payroll" : "Payslips"} subtitle={isAdmin ? "Company payslips, salary templates and payroll." : user.role === ROLES.EMPLOYEE ? "Your published payslip history." : "Published payslips · View only"}>
-      {isAdmin && (
-        <div className="tag-list section-gap">
-          <button className={`btn btn-sm ${tab === "payslips" ? "btn-primary" : "btn-outline"}`} onClick={() => setTab("payslips")}>Payslips</button>
-          <button className={`btn btn-sm ${tab === "templates" ? "btn-primary" : "btn-outline"}`} onClick={() => setTab("templates")}>Salary Templates</button>
-          <button className={`btn btn-sm ${tab === "people" ? "btn-primary" : "btn-outline"}`} onClick={() => setTab("people")}>
-            People{coverage && coverage.missing_structure > 0 ? ` (${coverage.missing_structure} to set up)` : ""}
-          </button>
-        </div>
-      )}
-
-      {(!isAdmin || tab === "payslips") && (
+      {tab === "payslips" && (
         <>
           {isAdmin && (
             <div className="card section-gap">
               <div className="card-title-row">
                 <h3>Run Payroll</h3>
-                <button className="btn btn-outline btn-sm" onClick={() => setStructureModal(true)}>
+                <button className="btn btn-outline btn-sm" onClick={() => setTab("structures")}>
                   Set Salary Structure Manually
                 </button>
               </div>
@@ -186,6 +137,20 @@ export default function Payroll() {
                   skipped. <a href="#people" onClick={(e) => { e.preventDefault(); setTab("people"); }}>Review in the People tab</a>.
                 </div>
               )}
+              {generationResult && (
+                <div className={generationResult.skipped.length ? "callout warn" : "callout note"} style={{ marginTop: 12 }} role="status">
+                  Generated {generationResult.generated.length} draft payslip(s). Skipped {generationResult.skipped.length}.
+                  {generationResult.skipped.length > 0 && (
+                    <ul>
+                      {generationResult.skipped.map((person) => (
+                        <li key={person.user_id}>
+                          {person.full_name} ({person.employee_code || person.user_id}): {person.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
                 Generates draft payslips (with a downloadable PDF for each) for every employee with a salary
                 structure defined, using this month's attendance and approved leave to compute loss-of-pay.
@@ -200,6 +165,27 @@ export default function Payroll() {
                 <span className="muted">View-only · manage drafts in Payslip Management</span>
               </div>
               {payslipError && <div className="login-error" role="alert" style={{ marginBottom: 12 }}>{payslipError}</div>}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                <select
+                  aria-label="Published payslip month"
+                  value={publishedMonth}
+                  onChange={(event) => setPublishedMonth(event.target.value)}
+                  style={{ ...inputStyle, width: "auto", minWidth: 140 }}
+                >
+                  <option value="">All months</option>
+                  {MONTH_NAMES.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}
+                </select>
+                <input
+                  aria-label="Published payslip year"
+                  type="number"
+                  min="2000"
+                  max="2200"
+                  value={publishedYear}
+                  onChange={(event) => setPublishedYear(event.target.value)}
+                  placeholder="All years"
+                  style={{ ...inputStyle, width: 120 }}
+                />
+              </div>
               {loading ? <Loader /> : (
                 <div className="table-wrap">
                   <table className="data-table">
@@ -268,7 +254,7 @@ export default function Payroll() {
                     {(user.role === ROLES.EMPLOYEE ? myPayslips : allPayslips).map((p) => (
                       <tr key={p.id} onClick={() => setSelectedPayslip(p)} style={{ cursor: "pointer" }}>
                         {user.role !== ROLES.EMPLOYEE && <td>{p.employee_name}</td>}
-                        <td>{p.company_name || "—"}</td>
+                        <td>{PAYROLL_COMPANY_LABELS[p.company_name] || p.company_name || "—"}</td>
                         <td>{MONTH_NAMES[p.month - 1]} {p.year}</td>
                         <td>{p.days_present}</td>
                         <td>{p.lop_days}</td>
@@ -298,66 +284,17 @@ export default function Payroll() {
         </>
       )}
 
-      {isAdmin && tab === "templates" && <TemplatesTab />}
+      {canManageSalaryStructures && tab === "structures" && (
+        <SalaryStructuresWorkspace canGeneratePayslips={isAdmin} />
+      )}
       {isAdmin && tab === "people" && (
         <PayrollPeopleTab
           month={month} year={year} version={coverageVersion}
-          onSetStructure={(p) => { setStructureModal(true); pickEmployeeForStructure(p); }}
+          onSetStructure={() => setTab("structures")}
           onOpenPayslips={() => setTab("payslips")}
         />
       )}
 
-      {structureModal && (
-        <div className="modal-overlay" onClick={() => setStructureModal(false)}>
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginBottom: 16 }}>Set Salary Structure</h3>
-            {structError && <div className="login-error">{structError}</div>}
-            <form onSubmit={saveStructure}>
-              <div className="form-field">
-                <label>Employee</label>
-                <input
-                  value={selectedEmp ? selectedEmp.full_name : empQuery}
-                  onChange={(e) => searchEmployees(e.target.value)}
-                  placeholder="Search by name — internal employees and contract logins both appear"
-                />
-                {empResults.length > 0 && !selectedEmp && (
-                  <div style={{ border: "1px solid var(--color-border)", borderRadius: 6, marginTop: 4, maxHeight: 160, overflowY: "auto" }}>
-                    {empResults.map((emp) => (
-                      <div key={emp.id} onClick={() => pickEmployeeForStructure(emp)}
-                        style={{ padding: "6px 10px", cursor: "pointer", fontSize: 12.5, display: "flex", justifyContent: "space-between" }}>
-                        <span>{emp.full_name} — {emp.employee_code}</span>
-                        <span className="muted">{ROLE_LABELS[emp.role] || emp.role}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {selectedEmp && (
-                  <p className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>
-                    {ROLE_LABELS[selectedEmp.role] || selectedEmp.role}
-                    {selectedEmp.role === ROLES.CONTRACT_EMPLOYEE && " — placed with a vendor, tracked here for payroll only"}
-                  </p>
-                )}
-              </div>
-              <div className="form-grid">
-                {Object.keys(structure).map((field) => (
-                  <div className="form-field" key={field}>
-                    <label>{field.replace(/_/g, " ")}</label>
-                    <input
-                      type="number"
-                      value={structure[field]}
-                      onChange={(e) => setStructure({ ...structure, [field]: Number(e.target.value) })}
-                    />
-                  </div>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button type="button" className="btn btn-outline" onClick={() => { setStructureModal(false); setSelectedEmp(null); setEmpQuery(""); setEmpResults([]); }}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={!selectedEmp}>Save Structure</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
       {selectedPayslip && (
         <PayslipDetailModal payslip={selectedPayslip} onClose={() => setSelectedPayslip(null)} />
       )}

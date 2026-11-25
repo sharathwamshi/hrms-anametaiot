@@ -18,6 +18,7 @@ export const ROLES = {
   OPERATIONS: "operations",
 };
 export const ALL_ROLES = Object.values(ROLES);
+export const PAYROLL_MANAGEMENT_ROLES = [ROLES.FINANCE_ACCOUNTS, ROLES.OPERATIONS];
 
 export const ROLE_LABELS = {
   [ROLES.SUPER_ADMIN]: "Super Admin",
@@ -53,7 +54,7 @@ export const NAV_BY_ROLE = {
     "allCandidates", "recruiters", "vendors", "allPlacements", "insurance", "resignation", "profile",
   ],
   [ROLES.FINANCE_ACCOUNTS]: [
-    "dashboard", "attendance", "leave", "payslips", "payslipManagement", "allCandidates", "recruiters",
+    "dashboard", "attendance", "leave", "payslips", "allCandidates", "recruiters",
     "vendors", "allPlacements", "insurance", "resignation", "profile",
   ],
   [ROLES.OPERATIONS]: [
@@ -80,7 +81,6 @@ export const NAV_ITEMS = {
   reports: { path: "/attendance?tab=reports", label: "Reports", icon: "\u25A4" },
   leave: { path: "/leave", label: "Leave", icon: "\u2708" },
   resignation: { path: "/resignation", label: "Resignation", icon: "\u21AA" },
-  payslipManagement: { path: "/payroll/manage", label: "Payslip Management", icon: "\u20B9" },
   payslips: { path: "/payroll", label: "Payslips", icon: "\u20B9" },
   insurance: { path: "/insurance", label: "Insurance", icon: "\u2665" },
   recruitment: { path: "/recruitment", label: "Recruitment", icon: "\u2605" },

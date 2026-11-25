@@ -374,7 +374,9 @@ class EmployeeCtcTests(unittest.TestCase):
             json={"month": 10, "year": 2026},
         )
         self.assertEqual(payroll.status_code, 200)
-        self.assertNotIn(employee_id, {item["user_id"] for item in payroll.get_json()})
+        self.assertNotIn(employee_id, {item["user_id"] for item in payroll.get_json()["generated"]})
+        skipped = next(item for item in payroll.get_json()["skipped"] if item["user_id"] == employee_id)
+        self.assertEqual(skipped["reason"], "No complete salary structure is assigned.")
 
     def test_failed_ctc_persistence_rolls_back_employee_creation(self):
         with patch.object(db.session, "commit", side_effect=SQLAlchemyError("simulated failure")):

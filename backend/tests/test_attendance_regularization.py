@@ -12,7 +12,7 @@ from app.models import (
     User, Department, CompanySettings, Attendance, AttendanceRegularizationRequest,
     SalaryStructure,
 )
-from app.roles import HR_OPERATIONS, HR_RECRUITER, MANAGER, EMPLOYEE, CONTRACT_EMPLOYEE
+from app.roles import HR_OPERATIONS, HR_RECRUITER, MANAGER, EMPLOYEE, CONTRACT_EMPLOYEE, FINANCE_ACCOUNTS
 from datetime import date, datetime, timedelta
 
 app = create_app(TestConfig)
@@ -35,6 +35,7 @@ with app.app_context():
     mgr = mk("M1", "mgr@t.com", "Ananya Manager", MANAGER)
     other_mgr = mk("M2", "mgr2@t.com", "Other Manager", MANAGER)
     admin = mk("A1", "admin@t.com", "Priya Ops", HR_OPERATIONS)
+    finance = mk("F1", "finance@t.com", "Rahul Finance", FINANCE_ACCOUNTS)
     rec1 = mk("R1", "rec1@t.com", "Sneha Recruiter", HR_RECRUITER, manager_id=mgr.id)
     rec2 = mk("R2", "rec2@t.com", "Meera Recruiter", HR_RECRUITER, manager_id=other_mgr.id)
     con = mk("C1", "con@t.com", "Chitra Contract", CONTRACT_EMPLOYEE)
@@ -44,7 +45,7 @@ with app.app_context():
     def login(email):
         r = client.post('/api/auth/login', json={'email': email, 'password': 'pw'})
         return {'Authorization': f"Bearer {r.get_json()['access_token']}"}
-    H = {n: login(f"{n}@t.com") for n in ("mgr", "mgr2", "admin", "rec1", "rec2", "con")}
+    H = {n: login(f"{n}@t.com") for n in ("mgr", "mgr2", "admin", "finance", "rec1", "rec2", "con")}
 
     # ---- 1. Reason rules ("manager gonna add the rules") -------------------------------
     ok("recruiter cannot define a reason rule", client.post('/api/attendance/regularization-reasons', headers=H['rec1'], json={'label': 'x'}).status_code == 403)
@@ -223,9 +224,9 @@ with app.app_context():
     db.session.add(SalaryStructure(user_id=rec1.id, basic=50000))
     db.session.commit()
     client.post('/api/attendance/holidays', headers=H['admin'], json={'name': 'Company Day', 'holiday_date': '2026-06-15'})
-    g = client.post('/api/payroll/generate', headers=H['admin'], json={'month': 6, 'year': 2026})
+    g = client.post('/api/payroll/generate', headers=H['finance'], json={'month': 6, 'year': 2026})
     ok("payroll generation succeeds with a holiday in the month", g.status_code == 200, g.get_json())
-    slip = next(p for p in g.get_json() if p['user_id'] == rec1.id)
+    slip = next(p for p in g.get_json()['generated'] if p['user_id'] == rec1.id)
     ok("the holiday is not counted as a loss-of-pay day (LOP < days_in_month - present)", slip['lop_days'] < 30, slip)
 
 print("\nALL ATTENDANCE REGULARIZATION / HOLIDAY SMOKE TESTS PASSED")

@@ -6,7 +6,9 @@ from app.models.attendance import (
 )
 from app.models.notification import AttendanceNotificationSettings, AttendanceReminderRun
 from app.models.leave import LeaveType, LeaveBalance, LeaveRequest, LeaveEntitlementAudit
-from app.models.payroll import SalaryStructure, Payslip
+from app.models.payroll import (
+    SalaryStructure, Payslip, CompanyPayslipTemplate, PayslipRevision, PayrollAuditLog,
+)
 from app.models.payroll_template import SalaryTemplate
 from app.models.recruitment import JobPosting, Candidate, Interview, InterviewPanelist
 from app.models.screening import ScreeningCall
@@ -33,7 +35,7 @@ __all__ = [
     "AttendanceNotificationSettings", "AttendanceReminderRun",
     "WorkLocation",
     "LeaveType", "LeaveBalance", "LeaveRequest", "LeaveEntitlementAudit",
-    "SalaryStructure", "Payslip", "SalaryTemplate",
+    "SalaryStructure", "Payslip", "CompanyPayslipTemplate", "PayslipRevision", "PayrollAuditLog", "SalaryTemplate",
     "JobPosting", "Candidate", "Interview", "InterviewPanelist",
     "ScreeningCall",
     "CandidateAuditLog", "CandidateNote",

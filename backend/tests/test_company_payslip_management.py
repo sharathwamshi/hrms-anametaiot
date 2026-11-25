@@ -18,7 +18,7 @@ class TestConfig(Config):
 
 from app import create_app
 from app.extensions import db
-from app.models import User
+from app.models import Payslip, User
 from app.utils.payslip_pdf import COMPANY_THEMES
 import pdfplumber
 from app.roles import (
@@ -56,12 +56,14 @@ def create_user(code, name, role):
 with app.app_context():
     db.create_all()
     finance = create_user("FIN1", "Finance User", FINANCE_ACCOUNTS)
+    operations = create_user("OPS1", "Operations User", OPERATIONS)
     employee = create_user("EMP1", "Payslip Employee", EMPLOYEE)
     other_employee = create_user("EMP2", "Other Employee", EMPLOYEE)
+    manager = create_user("MGR1", "Manager User", MANAGER)
+    employee.manager_id = manager.id
     readonly_users = [
         create_user("HR1", "HR Operations User", HR_OPERATIONS),
-        create_user("MGR1", "Manager User", MANAGER),
-        create_user("OPS1", "Operations User", OPERATIONS),
+        manager,
         create_user("REC1", "Recruiter User", HR_RECRUITER),
         create_user("CON1", "Contract User", CONTRACT_EMPLOYEE),
     ]
@@ -78,6 +80,7 @@ with app.app_context():
         return {"Authorization": f"Bearer {response.get_json()['access_token']}"}
 
     finance_headers = login(finance)
+    operations_headers = login(operations)
     employee_headers = login(employee)
     other_employee_headers = login(other_employee)
     readonly_headers = [login(user) for user in readonly_users]
@@ -166,6 +169,15 @@ with app.app_context():
     check("Finance can access management company selection", client.get(
         "/api/payroll/companies", headers=finance_headers,
     ).status_code == 200)
+    check("Operations can access management company selection", client.get(
+        "/api/payroll/companies", headers=operations_headers,
+    ).status_code == 200)
+    check("Operations can see a draft payslip", client.get(
+        "/api/payroll/payslips", headers=operations_headers,
+    ).get_json()[0]["id"] == payslip_id)
+    check("Operations can access salary-template management", client.get(
+        "/api/payroll/templates", headers=operations_headers,
+    ).status_code == 200)
 
     edit_payload = {
         **initial,
@@ -175,6 +187,12 @@ with app.app_context():
         ],
         "deductions": [{"name": "Custom Deduction", "amount": 125}],
     }
+    operations_edit = client.put(
+        f"/api/payroll/payslips/{payslip_id}",
+        headers=operations_headers,
+        json=edit_payload,
+    )
+    check("Operations can edit a draft payslip", operations_edit.status_code == 200)
     response = client.put(f"/api/payroll/payslips/{payslip_id}", headers=finance_headers, json=edit_payload)
     check("Finance edits a draft payslip", response.status_code == 200 and response.get_json()["net_pay"] == 1575)
 
@@ -206,7 +224,7 @@ with app.app_context():
     response = client.get(f"/api/payroll/payslips/{payslip_id}/pdf", headers=employee_headers)
     check("employee downloads their published PDF", response.status_code == 200 and response.data == uploaded_bytes)
     check("public uploads route does not expose payslips", client.get(f"/static/uploads/{uploaded['pdf_path']}").status_code == 404)
-    check("non-Finance cannot remove an uploaded PDF", client.delete(
+    check("employee cannot remove an uploaded PDF", client.delete(
         f"/api/payroll/payslips/{payslip_id}/pdf", headers=employee_headers,
     ).status_code == 403)
     replacement_bytes = b"%PDF-1.4\n% Replacement payslip\n%%EOF\n"
@@ -282,16 +300,32 @@ with app.app_context():
     check("employee can still view an updated published payslip", len(client.get(
         f"/api/payroll/payslips/{employee.id}", headers=employee_headers,
     ).get_json()) == 1)
+    check("Operations can view a published payslip", client.get(
+        f"/api/payroll/payslip/{payslip_id}", headers=operations_headers,
+    ).status_code == 200)
 
     for role_user, headers in zip(readonly_users, readonly_headers):
-        response = client.get("/api/payroll/payslips", headers=headers)
-        check(f"{role_user.role} can view published payslips", response.status_code == 200 and len(response.get_json()) == 1)
-        check(f"{role_user.role} can view a published payslip directly", client.get(
-            f"/api/payroll/payslip/{payslip_id}", headers=headers,
-        ).status_code == 200)
-        check(f"{role_user.role} can download a published payslip", client.get(
-            f"/api/payroll/payslips/{payslip_id}/pdf", headers=headers,
-        ).status_code == 200)
+        if role_user.role == CONTRACT_EMPLOYEE:
+            check("contract employee cannot list another employee's published payslip", client.get(
+                "/api/payroll/payslips", headers=headers,
+            ).status_code == 200 and client.get(
+                "/api/payroll/payslips", headers=headers,
+            ).get_json() == [])
+            check("contract employee cannot view another employee's published payslip", client.get(
+                f"/api/payroll/payslip/{payslip_id}", headers=headers,
+            ).status_code == 403)
+            check("contract employee cannot download another employee's published payslip", client.get(
+                f"/api/payroll/payslips/{payslip_id}/pdf", headers=headers,
+            ).status_code == 403)
+        else:
+            response = client.get("/api/payroll/payslips", headers=headers)
+            check(f"{role_user.role} can view published payslips", response.status_code == 200 and len(response.get_json()) == 1)
+            check(f"{role_user.role} can view a published payslip directly", client.get(
+                f"/api/payroll/payslip/{payslip_id}", headers=headers,
+            ).status_code == 200)
+            check(f"{role_user.role} can download a published payslip", client.get(
+                f"/api/payroll/payslips/{payslip_id}/pdf", headers=headers,
+            ).status_code == 200)
         check(f"{role_user.role} cannot create payslips", client.post(
             "/api/payroll/payslips", headers=headers, json=initial,
         ).status_code == 403)
@@ -314,10 +348,10 @@ with app.app_context():
             f"/api/payroll/payslips/{payslip_id}/mark-paid", headers=headers,
         ).status_code == 403)
 
-    for company_name, month in (
-        ("Ana Meta IoT", 7),
-        ("Acknowledger First Pvt Ltd", 8),
-        ("Vkalpa Innovations", 9),
+    for company_name, month, layout_key in (
+        ("Ana Meta IoT", 7, "ana_meta_iot"),
+        ("Acknowledger First Pvt Ltd", 8, "acknowledger_first"),
+        ("Vkalpa Innovations", 9, "vkalpa_innovations"),
     ):
         response = client.patch(
             f"/api/payroll/people/{other_employee.id}/company",
@@ -332,11 +366,24 @@ with app.app_context():
             "company_name": company_name,
         }
         response = client.post("/api/payroll/payslips", headers=finance_headers, json=payload)
-        check(f"{company_name} template creates a payslip", response.status_code == 201 and response.get_json()["company_name"] == company_name)
-        generated = os.path.join(TestConfig.PAYSLIP_FOLDER, response.get_json()["pdf_path"])
+        generated_payslip = response.get_json()
+        check(f"{company_name} template creates a payslip", response.status_code == 201
+              and generated_payslip["company_name"] == company_name
+              and generated_payslip["template_snapshot"]["layout_key"] == layout_key)
+        generated = os.path.join(TestConfig.PAYSLIP_FOLDER, generated_payslip["pdf_path"])
         check(f"{company_name} PDF exists", os.path.isfile(generated))
         with pdfplumber.open(generated) as document:
-            check(f"{company_name} PDF uses the assigned company header", company_name in document.pages[0].extract_text())
+            page = document.pages[0]
+            page_text = page.extract_text() or ""
+            header_tokens = {
+                "Ana Meta IoT": ("PAYSLIP",),
+                "Acknowledger First Pvt Ltd": ("Acknowledger First Pvt Ltd",),
+                "Vkalpa Innovations": ("Vkalpa", "Innovations"),
+            }[company_name]
+            header_matches = all(token in page_text for token in header_tokens)
+            if company_name == "Ana Meta IoT":
+                header_matches = header_matches and bool(page.images)
+            check(f"{company_name} PDF uses the assigned company header", header_matches)
         if month == 7:
             foreign_payslip_id = response.get_json()["id"]
             check("Finance publishes another employee's payslip", client.post(
@@ -366,6 +413,24 @@ with app.app_context():
     delete_draft_id = delete_draft_response.get_json()["id"]
     check("Finance deletes a draft payslip", client.delete(
         f"/api/payroll/payslips/{delete_draft_id}", headers=finance_headers,
+    ).status_code == 200)
+
+    delete_processed_payload = {
+        **initial,
+        "user_id": other_employee.id,
+        "month": 1,
+        "company_name": other_employee.company_name,
+    }
+    delete_processed_response = client.post(
+        "/api/payroll/payslips", headers=finance_headers, json=delete_processed_payload,
+    )
+    check("Finance creates a processed-payslip deletion test record", delete_processed_response.status_code == 201,
+          delete_processed_response.get_json())
+    delete_processed_id = delete_processed_response.get_json()["id"]
+    db.session.get(Payslip, delete_processed_id).status = "processed"
+    db.session.commit()
+    check("Finance deletes an unpublished processed payslip", client.delete(
+        f"/api/payroll/payslips/{delete_processed_id}", headers=finance_headers,
     ).status_code == 200)
 
     check("employee cannot assign a company", client.patch(
