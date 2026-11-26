@@ -1,16 +1,94 @@
 
 from datetime import date, datetime, timedelta
+import calendar
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.extensions import db
-from app.models import LeaveRequest, LeaveType, LeaveBalance, LeaveEntitlementAudit, LeaveReviewHistory, User
+from app.models import LeaveRequest, LeaveType, LeaveBalance, LeaveEntitlementAudit, LeaveReviewHistory, User, Attendance, Holiday
 from app.models.leave import ensure_leave_balances
 from app.roles import MANAGER, HR_OPERATIONS, SUPER_ADMIN, APPROVER_ROLES, CONTRACT_EMPLOYEE
 from app.utils.company_time import company_today
 
 bp = Blueprint("leave", __name__, url_prefix="/api/leave")
+
+
+def _category_name(leave_type):
+    name = (leave_type.name if leave_type else "").strip().lower()
+    if name in ("paid leave", "paid", "pl"):
+        return "paid"
+    if name in ("casual leave", "casual", "cl"):
+        return "casual"
+    if name in ("sick leave", "sick", "sl"):
+        return "sick"
+    return "legacy"
+
+
+def _paid_leave_eligibility(user):
+    joining = user.date_of_joining
+    if not joining:
+        return None, True, None
+    month = joining.month - 1 + 3
+    year = joining.year + month // 12
+    month_number = month % 12 + 1
+    eligibility = date(year, month_number, min(joining.day, calendar.monthrange(year, month_number)[1]))
+    eligible = company_today() >= eligibility
+    return eligibility, eligible, None
+
+
+def _sync_approved_leave_attendance(leave_request, final_classification=None):
+    category = _category_name(leave_request.leave_type)
+    if category == "sick" and final_classification:
+        category = final_classification
+    if category not in ("paid", "casual"):
+        return
+    if category in ("paid", "legacy"):
+        attendance_status = "on_leave"
+    else:
+        attendance_status = "absent"
+    current = leave_request.start_date
+    while current <= leave_request.end_date:
+        if current.weekday() == 6:
+            current += timedelta(days=1)
+            continue
+        holiday = Holiday.query.filter_by(holiday_date=current).first()
+        if holiday:
+            current += timedelta(days=1)
+            continue
+        record = Attendance.query.filter_by(
+            user_id=leave_request.user_id,
+            work_date=current,
+        ).first()
+        if record is None:
+            db.session.add(Attendance(
+                user_id=leave_request.user_id,
+                work_date=current,
+                status=attendance_status,
+                total_hours=0,
+            ))
+        elif record.status not in ("regularized", "present", "half_day"):
+            record.status = attendance_status
+            record.total_hours = 0
+        current += timedelta(days=1)
+
+
+def _remove_approved_leave_attendance(leave_request, final_classification=None):
+    category = _category_name(leave_request.leave_type)
+    if category == "sick" and final_classification:
+        category = final_classification
+    if category not in ("paid", "casual"):
+        return
+    current = leave_request.start_date
+    while current <= leave_request.end_date:
+        record = Attendance.query.filter_by(
+            user_id=leave_request.user_id,
+            work_date=current,
+        ).first()
+        if record and record.status in ("on_leave", "absent"):
+            record.status = "not_clocked_in"
+            record.total_hours = 0
+        current += timedelta(days=1)
 
 
 def _current_month_leave_start(today=None):
@@ -42,6 +120,8 @@ def _calendar_days_by_year(start, end):
 
 
 def _leave_request_days_by_year(leave_request):
+    if leave_request.duration != "full_day":
+        return {leave_request.start_date.year: 0.5}
     calendar_days = _calendar_days_by_year(
         leave_request.start_date, leave_request.end_date
     )
@@ -118,6 +198,21 @@ def _validated_leave_fields(
     leave_type = db.session.get(LeaveType, leave_type_id)
     if leave_type is None:
         return None, "The selected leave type is invalid."
+    category = _category_name(leave_type)
+    duration = str(payload.get("duration", "full_day"))
+    if duration not in ("full_day", "first_half", "second_half"):
+        return None, "Duration must be full_day, first_half or second_half."
+    if duration != "full_day" and start != end:
+        return None, "Half-day leave must use the same start and end date."
+
+    employee = db.session.get(User, user_id)
+    if category == "paid":
+        eligibility, eligible, _ = _paid_leave_eligibility(employee)
+        if not eligible:
+            message = "Paid Leave is unavailable during the first three months."
+            if eligibility:
+                message += f" Eligibility begins on {eligibility.isoformat()}."
+            return None, message
 
     overlap_query = LeaveRequest.query.filter(
         LeaveRequest.user_id == user_id,
@@ -137,18 +232,20 @@ def _validated_leave_fields(
     days_by_year = _leave_days_by_year(start, end)
     if not days_by_year:
         return None, "The selected date range contains no eligible working days."
-    balance_error = _available_balance_error(
-        user_id, leave_type.id, start, end, exclude_request_id
-    )
-    if balance_error:
-        return None, balance_error
+    if category in ("paid", "legacy"):
+        balance_error = _available_balance_error(
+            user_id, leave_type.id, start, end, exclude_request_id
+        )
+        if balance_error:
+            return None, balance_error
 
     return {
         "leave_type_id": leave_type.id,
         "start_date": start,
         "end_date": end,
-        "days": sum(days_by_year.values()),
+        "days": 0.5 if duration != "full_day" else sum(days_by_year.values()),
         "reason": reason,
+        "duration": duration,
     }, None
 
 
@@ -218,6 +315,7 @@ def leave_types():
 def balances():
     user_id = int(get_jwt_identity())
     year = request.args.get("year", type=int) or date.today().year
+    employee = db.session.get(User, user_id)
     ensure_leave_balances(user_id, year)
     rows = LeaveBalance.query.filter_by(user_id=user_id, year=year).all()
     results = []
@@ -233,6 +331,13 @@ def balances():
         result["pending_reserved"] = reserved
         result["available"] = max(0, row.balance - reserved)
         results.append(result)
+    paid_types = [row for row in results if row.get("leave_type") == "Paid Leave"]
+    eligibility, eligible, _ = _paid_leave_eligibility(employee)
+    for result in paid_types:
+        result["eligibility_status"] = "eligible" if eligible else "not_eligible"
+        result["eligibility_date"] = eligibility.isoformat() if eligibility else None
+    if paid_types and paid_types[0]["remaining_leave"] <= 0 and eligible:
+        paid_types[0]["exhausted"] = True
     db.session.commit()
     return jsonify(results)
 
@@ -388,17 +493,23 @@ def cancel_leave(request_id):
 
     if leave_request.status == "approved":
         days_by_year = _leave_request_days_by_year(leave_request)
+        balance_type = leave_request.leave_type
+        if _category_name(leave_request.leave_type) == "sick" and leave_request.final_classification == "paid":
+            balance_type = LeaveType.query.filter_by(name="Paid Leave").first() or balance_type
+        elif _category_name(leave_request.leave_type) == "paid":
+            balance_type = LeaveType.query.filter_by(name="Paid Leave").first() or balance_type
         for year in days_by_year:
             ensure_leave_balances(user_id, year)
         db.session.flush()
         for year, days_in_year in days_by_year.items():
             balance = LeaveBalance.query.filter_by(
                 user_id=user_id,
-                leave_type_id=leave_request.leave_type_id,
+                leave_type_id=balance_type.id,
                 year=year,
             ).first()
             if balance:
                 balance.used = max(0, balance.used - days_in_year)
+        _remove_approved_leave_attendance(leave_request, leave_request.final_classification)
 
     leave_request.status = "cancelled"
     db.session.commit()
@@ -794,27 +905,56 @@ def decide(request_id):
             return jsonify({
                 "message": "This request starts or ends on a Sunday. Ask the employee to correct and resubmit it."
             }), 409
-        days_by_year = _leave_days_by_year(leave_request.start_date, leave_request.end_date)
+        days_by_year = (
+            {leave_request.start_date.year: 0.5}
+            if leave_request.duration != "full_day"
+            else _leave_days_by_year(leave_request.start_date, leave_request.end_date)
+        )
         leave_request.days = sum(days_by_year.values())
-        for year in days_by_year:
-            ensure_leave_balances(leave_request.user_id, year)
-        db.session.flush()
-        yearly_balances = []
-        for year, days_in_year in days_by_year.items():
-            balance = LeaveBalance.query.filter_by(
-                user_id=leave_request.user_id,
-                leave_type_id=leave_request.leave_type_id,
-                year=year,
-            ).with_for_update().first()
-            if balance is None or balance.balance < days_in_year:
+        category = _category_name(leave_request.leave_type)
+        final_classification = None
+        if category == "sick":
+            final_classification = payload.get("final_classification")
+            if final_classification not in ("paid", "casual"):
                 db.session.rollback()
-                available = balance.balance if balance else 0
-                return jsonify({
-                    "message": f"Insufficient balance for {year}. Available: {available} day(s)."
-                }), 409
-            yearly_balances.append((balance, days_in_year))
-        for balance, days_in_year in yearly_balances:
-            balance.used += days_in_year
+                return jsonify({"message": "Sick Leave must be approved as Paid Leave or Casual Leave."}), 400
+            eligibility, eligible, _ = _paid_leave_eligibility(leave_request.user)
+            if final_classification == "paid" and not eligible:
+                db.session.rollback()
+                return jsonify({"message": "Sick Leave cannot be converted to Paid Leave during the first three months."}), 409
+            leave_request.final_classification = final_classification
+        elif category == "paid":
+            final_classification = "paid"
+        elif category == "casual":
+            final_classification = "casual"
+
+        consumed_balance_category = "paid" if (
+            category in ("paid", "legacy")
+            or (category == "sick" and final_classification == "paid")
+        ) else None
+        balance_type = leave_request.leave_type
+        if consumed_balance_category:
+            balance_type = LeaveType.query.filter_by(name="Paid Leave").first() or leave_request.leave_type
+        if consumed_balance_category:
+            for year in days_by_year:
+                ensure_leave_balances(leave_request.user_id, year)
+            db.session.flush()
+            yearly_balances = []
+            for year, days_in_year in days_by_year.items():
+                balance = LeaveBalance.query.filter_by(
+                    user_id=leave_request.user_id,
+                    leave_type_id=balance_type.id,
+                    year=year,
+                ).with_for_update().first()
+                if balance is None or balance.balance < days_in_year:
+                    db.session.rollback()
+                    available = balance.balance if balance else 0
+                    return jsonify({
+                        "message": f"Insufficient balance for {year}. Available: {available} day(s)."
+                    }), 409
+                yearly_balances.append((balance, days_in_year))
+            for balance, days_in_year in yearly_balances:
+                balance.used += days_in_year
 
     leave_request.status = decision
     leave_request.reviewed_by = reviewer_id
@@ -824,6 +964,8 @@ def decide(request_id):
         action=decision,
         comment=comment,
     ))
+    if decision == "approved":
+        _sync_approved_leave_attendance(leave_request, final_classification)
 
     db.session.commit()
 

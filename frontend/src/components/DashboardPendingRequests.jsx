@@ -8,6 +8,9 @@ export default function DashboardPendingRequests() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [sickApprovalRequest, setSickApprovalRequest] = useState(null);
+  const [sickClassification, setSickClassification] = useState("");
+  const [sickApprovalComment, setSickApprovalComment] = useState("");
 
   const load = useCallback(async () => {
     setError("");
@@ -37,6 +40,17 @@ export default function DashboardPendingRequests() {
   useEffect(() => { load(); }, [load]);
 
   const decide = async (request, decision) => {
+    if (
+      request.requestType === "Leave"
+      && decision === "approve"
+      && /sick/i.test(request.leave_type || "")
+    ) {
+      setSickApprovalRequest(request);
+      setSickClassification("");
+      setSickApprovalComment("");
+      return;
+    }
+
     let comment = "";
     if (decision === "reject" && request.requestType === "Attendance correction") {
       comment = window.prompt("Enter a reason for rejecting this correction request.") || "";
@@ -66,7 +80,28 @@ export default function DashboardPendingRequests() {
     }
   };
 
+  const approveSickLeave = async (event) => {
+    event.preventDefault();
+    if (!sickApprovalRequest || !["paid", "casual"].includes(sickClassification)) return;
+    setBusy(sickApprovalRequest.key);
+    setError("");
+    try {
+      await client.post(`/leave/${sickApprovalRequest.id}/decision`, {
+        decision: "approved",
+        final_classification: sickClassification,
+        comment: sickApprovalComment,
+      });
+      setSickApprovalRequest(null);
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not approve this Sick Leave request.");
+    } finally {
+      setBusy("");
+    }
+  };
+
   return (
+    <>
     <section className="card dashboard-pending section-gap" aria-label="Pending requests">
       <div className="card-title-row">
         <div>
@@ -120,5 +155,57 @@ export default function DashboardPendingRequests() {
         <Link to="/leave">View all requests ›</Link>
       </div>
     </section>
+    {sickApprovalRequest && (
+      <div className="modal-overlay" onClick={() => busy === "" && setSickApprovalRequest(null)}>
+        <div className="modal-box" onClick={(event) => event.stopPropagation()}>
+          <h3 style={{ marginBottom: 8 }}>Approve Sick Leave</h3>
+          <p className="muted" style={{ marginBottom: 16 }}>
+            {sickApprovalRequest.employee_name} · {sickApprovalRequest.start_date} to {sickApprovalRequest.end_date} · {sickApprovalRequest.days} day(s)
+          </p>
+          <form onSubmit={approveSickLeave}>
+            <div className="form-field">
+              <label htmlFor="dashboard-sick-classification">Approve this request as</label>
+              <select
+                id="dashboard-sick-classification"
+                required
+                value={sickClassification}
+                onChange={(event) => setSickClassification(event.target.value)}
+              >
+                <option value="">Select classification</option>
+                <option value="paid">Paid Leave (no salary deduction)</option>
+                <option value="casual">Casual Leave (salary deduction)</option>
+              </select>
+            </div>
+            <p className="muted" style={{ fontSize: 12 }}>
+              Paid Leave classification is allowed only after the employee completes three months of service.
+            </p>
+            <div className="form-field">
+              <label htmlFor="dashboard-sick-comment">Manager remarks (optional)</label>
+              <textarea
+                id="dashboard-sick-comment"
+                rows={3}
+                maxLength={255}
+                value={sickApprovalComment}
+                onChange={(event) => setSickApprovalComment(event.target.value)}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                disabled={busy !== ""}
+                onClick={() => setSickApprovalRequest(null)}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-success" disabled={busy !== "" || !sickClassification}>
+                {busy === sickApprovalRequest.key ? "Approving..." : "Confirm Approval"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

@@ -25,9 +25,9 @@ DEMO_PASSWORD = "Welcome@123"
 DEPARTMENTS = ["Engineering", "Human Resources", "Finance", "Operations", "Sales & Marketing"]
 
 LEAVE_TYPES = [
-    ("Casual Leave", 12),
-    ("Sick Leave", 8),
-    ("Earned Leave", 15),
+    ("Paid Leave", 6),
+    ("Casual Leave", 0),
+    ("Sick Leave", 0),
 ]
 
 MOCK_TEST_TOPICS = [

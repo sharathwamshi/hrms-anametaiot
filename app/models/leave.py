@@ -25,6 +25,7 @@ class LeaveBalance(db.Model):
     year = db.Column(db.Integer, nullable=False)
     allocated = db.Column(db.Float, default=0)
     used = db.Column(db.Float, default=0)
+    exhaustion_acknowledged = db.Column(db.Boolean, nullable=False, default=False)
 
     leave_type = db.relationship("LeaveType")
 
@@ -42,6 +43,7 @@ class LeaveBalance(db.Model):
             "annual_entitlement": self.allocated,
             "approved_leave_taken": self.used,
             "remaining_leave": self.balance,
+            "exhaustion_acknowledged": bool(self.exhaustion_acknowledged),
         }
 
 
@@ -93,6 +95,8 @@ class LeaveRequest(db.Model):
     status = db.Column(db.String(20), default="pending")  # pending, approved, rejected, cancelled
     reviewed_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     review_comment = db.Column(db.String(255))
+    duration = db.Column(db.String(20), nullable=False, default="full_day")
+    final_classification = db.Column(db.String(20), nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -118,6 +122,8 @@ class LeaveRequest(db.Model):
             "reviewer_name": self.reviewer.full_name if self.reviewer else None,
             "review_comment": self.review_comment,
             "created_at": self.created_at.isoformat(),
+            "duration": self.duration,
+            "final_classification": self.final_classification,
         }
 
 
