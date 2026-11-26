@@ -6,6 +6,7 @@ import Badge from "../components/Badge";
 import Loader from "../components/Loader";
 import LeaveBalanceSummary from "../components/LeaveBalanceSummary";
 import LeaveBalancePreview from "../components/LeaveBalancePreview";
+import LeaveDurationSelector from "../components/LeaveDurationSelector";
 import LeaveReasonPreview from "../components/LeaveReasonPreview";
 import ManagerLeaveDashboard from "../components/ManagerLeaveDashboard";
 import { useAuth } from "../context/AuthContext";
@@ -28,7 +29,7 @@ export default function Leave() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingRequestId, setEditingRequestId] = useState(null);
-  const [form, setForm] = useState({ leave_type_id: "", start_date: "", end_date: "", reason: "" });
+  const [form, setForm] = useState({ leave_type_id: "", duration: "full_day", start_date: "", end_date: "", reason: "" });
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
   const [success, setSuccess] = useState("");
@@ -134,7 +135,7 @@ export default function Leave() {
       }
       setShowForm(false);
       setEditingRequestId(null);
-      setForm({ leave_type_id: "", start_date: "", end_date: "", reason: "" });
+      setForm({ leave_type_id: "", duration: "full_day", start_date: "", end_date: "", reason: "" });
       if (await loadAll()) setSuccess("Your leave request was submitted.");
     } catch (err) {
       setFormError(err?.response?.data?.message || "Could not submit leave request.");
@@ -192,7 +193,16 @@ export default function Leave() {
     setForm((current) => ({
       ...current,
       [field]: value,
-      ...(field === "start_date" && current.end_date < value ? { end_date: value } : {}),
+      ...(field === "start_date" && (
+        current.duration !== "full_day" || current.end_date < value
+      ) ? { end_date: value } : {}),
+    }));
+  };
+  const updateDuration = (duration) => {
+    setForm((current) => ({
+      ...current,
+      duration,
+      ...(duration !== "full_day" ? { end_date: current.start_date } : {}),
     }));
   };
 
@@ -211,7 +221,7 @@ export default function Leave() {
 
       {leaveTab === "my" && (
         <>
-          <LeaveBalanceSummary balances={balances} showLink={false} />
+          <LeaveBalanceSummary balances={balances} requests={myRequests} showLink={false} />
           <div className="card section-gap">
             <div className="card-title-row">
               <h3>My Leave Requests</h3>
@@ -299,6 +309,7 @@ export default function Leave() {
                   {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
               </div>
+              <LeaveDurationSelector value={form.duration} onChange={updateDuration} />
               <div className="form-grid">
                 <div className="form-field">
                   <label>Start Date</label>
@@ -306,13 +317,14 @@ export default function Leave() {
                 </div>
                 <div className="form-field">
                   <label>End Date</label>
-                  <input type="date" required min={minimumEndDate} value={form.end_date} onChange={(e) => updateLeaveDate("end_date", e.target.value)} />
+                  <input type="date" required min={minimumEndDate} value={form.end_date} disabled={form.duration !== "full_day"} onChange={(e) => updateLeaveDate("end_date", e.target.value)} />
                 </div>
               </div>
               <LeaveBalancePreview
                 leaveTypeId={form.leave_type_id}
                 startDate={form.start_date}
                 endDate={form.end_date}
+                duration={form.duration}
               />
               <div className="form-field">
                 <label>Reason</label>

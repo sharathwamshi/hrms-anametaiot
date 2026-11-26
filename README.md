@@ -58,6 +58,14 @@ For an existing database, run
 `mysql -u root anametaiot_hrms < backend/migration_leave_review_history.sql`
 to preserve prior leave decisions and record subsequent reapprovals for auditing.
 
+For the leave-management redesign, apply `migration_leave_redesign.sql` once to each
+existing database before deploying the updated application. It adds leave duration,
+classification, and reminder-acknowledgement columns and maps legacy Earned/Annual Leave
+to Paid Leave without deleting leave requests or balances. Untouched legacy default
+allocations are normalized to 6 Paid, 0 Casual, and 0 Sick days; used days and
+manager-customized allocations are preserved. The application cannot load leave requests
+or balances against an older schema.
+
 For company-specific payroll and reusable salary structures, back up an existing database
 and apply these migrations in order, only if their schema changes are not already present:
 `backend/migration_company_specific_payslips.sql`,

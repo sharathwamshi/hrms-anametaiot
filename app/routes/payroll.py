@@ -5,7 +5,7 @@ import os
 import re
 import uuid
 import zipfile
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from types import SimpleNamespace
 from flask import Blueprint, request, jsonify, current_app, send_file, send_from_directory
@@ -407,33 +407,64 @@ def _payslip_rows_with_ytd_mtd(payslip):
 
 def _attendance_for_period(user_id, month, year):
     days_in_month = calendar.monthrange(year, month)[1]
-    holiday_days = Holiday.query.filter(
-        db.extract("month", Holiday.holiday_date) == month,
-        db.extract("year", Holiday.holiday_date) == year,
-    ).count()
-    present_days = Attendance.query.filter(
-        Attendance.user_id == user_id,
-        db.extract("month", Attendance.work_date) == month,
-        db.extract("year", Attendance.work_date) == year,
-        Attendance.status.in_(["present", "half_day", "regularized"]),
-    ).count()
-    approved_leave_days = (
-        db.session.query(db.func.coalesce(db.func.sum(LeaveRequest.days), 0))
-        .filter(
-            LeaveRequest.user_id == user_id,
-            LeaveRequest.status == "approved",
-            db.extract("month", LeaveRequest.start_date) == month,
-            db.extract("year", LeaveRequest.start_date) == year,
-        )
-        .scalar()
+    first = date(year, month, 1)
+    last = date(year, month, days_in_month)
+    holiday_dates = {
+        row[0] for row in db.session.query(Holiday.holiday_date).filter(
+            Holiday.holiday_date >= first,
+            Holiday.holiday_date <= last,
+        ).all()
+    }
+    present_dates = {
+        row[0] for row in db.session.query(Attendance.work_date).filter(
+            Attendance.user_id == user_id,
+            Attendance.work_date >= first,
+            Attendance.work_date <= last,
+            Attendance.status.in_(["present", "half_day", "regularized"]),
+        ).all()
+    }
+    present_days = len(present_dates)
+    holiday_days = len(holiday_dates)
+    approved = LeaveRequest.query.filter(
+        LeaveRequest.user_id == user_id,
+        LeaveRequest.status == "approved",
+        LeaveRequest.start_date <= last,
+        LeaveRequest.end_date >= first,
+    ).all()
+    paid_leave_days = 0.0
+    casual_leave_adjustment = 0.0
+    for leave in approved:
+        name = (leave.leave_type.name if leave.leave_type else "").strip().lower()
+        final_category = leave.final_classification
+        is_paid = "paid" in name or final_category == "paid"
+        is_absent = "casual" in name or final_category == "casual"
+        if not (is_paid or is_absent):
+            continue
+        current = max(first, leave.start_date)
+        end = min(last, leave.end_date)
+        while current <= end:
+            if current.weekday() == 6 or current in holiday_dates:
+                current += timedelta(days=1)
+                continue
+            quantity = 0.5 if leave.duration != "full_day" else 1.0
+            if is_paid:
+                if current not in present_dates:
+                    paid_leave_days += quantity
+            else:
+                casual_leave_adjustment += quantity - (0 if current in present_dates else 1)
+            current += timedelta(days=1)
+    paid_days = min(
+        days_in_month,
+        present_days + paid_leave_days + holiday_days,
     )
-    paid_days = min(days_in_month, present_days + approved_leave_days + holiday_days)
+    base_lop_days = max(0, days_in_month - present_days - paid_leave_days - holiday_days)
+    lop_days = max(0, base_lop_days + casual_leave_adjustment)
     return {
         "days_in_month": days_in_month,
         "present_days": present_days,
-        "leave_days": float(approved_leave_days or 0),
+        "leave_days": float(paid_leave_days),
         "paid_days": paid_days,
-        "lop_days": max(0, days_in_month - paid_days),
+        "lop_days": lop_days,
     }
 
 

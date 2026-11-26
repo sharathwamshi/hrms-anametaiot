@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import client from "../api/client";
 import LeaveBalancePreview from "./LeaveBalancePreview";
+import LeaveDurationSelector from "./LeaveDurationSelector";
 import {
   isDisallowedBackdatedLeaveDate,
   isSundayDate,
@@ -10,6 +11,7 @@ import {
 
 const emptyForm = (startDate) => ({
   leave_type_id: "",
+  duration: "full_day",
   start_date: startDate,
   end_date: startDate,
   reason: "",
@@ -72,7 +74,16 @@ export default function ApplyLeaveModal({ startDate, onClose, onDone }) {
     setForm((current) => ({
       ...current,
       [field]: value,
-      ...(field === "start_date" && current.end_date < value ? { end_date: value } : {}),
+      ...(field === "start_date" && (
+        current.duration !== "full_day" || current.end_date < value
+      ) ? { end_date: value } : {}),
+    }));
+  };
+  const updateDuration = (duration) => {
+    setForm((current) => ({
+      ...current,
+      duration,
+      ...(duration !== "full_day" ? { end_date: current.start_date } : {}),
     }));
   };
 
@@ -96,6 +107,7 @@ export default function ApplyLeaveModal({ startDate, onClose, onDone }) {
                 {types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
               </select>
             </div>
+            <LeaveDurationSelector value={form.duration} onChange={updateDuration} />
             <div className="form-grid">
               <div className="form-field">
                 <label>Start Date</label>
@@ -106,13 +118,14 @@ export default function ApplyLeaveModal({ startDate, onClose, onDone }) {
               </div>
               <div className="form-field">
                 <label>End Date</label>
-                <input type="date" required min={minimumEndDate} value={form.end_date} onChange={(e) => updateDate("end_date", e.target.value)} />
+                <input type="date" required min={minimumEndDate} value={form.end_date} disabled={form.duration !== "full_day"} onChange={(e) => updateDate("end_date", e.target.value)} />
               </div>
             </div>
             <LeaveBalancePreview
               leaveTypeId={form.leave_type_id}
               startDate={form.start_date}
               endDate={form.end_date}
+              duration={form.duration}
             />
             <div className="form-field">
               <label>Reason</label>

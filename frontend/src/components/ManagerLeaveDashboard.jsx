@@ -22,6 +22,9 @@ export default function ManagerLeaveDashboard() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [busyRequestId, setBusyRequestId] = useState(null);
+  const [approvalRequest, setApprovalRequest] = useState(null);
+  const [approvalClassification, setApprovalClassification] = useState("");
+  const [approvalComment, setApprovalComment] = useState("");
   const [policyOpen, setPolicyOpen] = useState(false);
   const [policyMode, setPolicyMode] = useState("default");
   const [policyValues, setPolicyValues] = useState({});
@@ -217,6 +220,12 @@ export default function ManagerLeaveDashboard() {
 
   const decide = async (request, decision) => {
     const action = decision === "approved" ? "approve" : "reject";
+    if (decision === "approved" && /sick/i.test(request.leave_type)) {
+      setApprovalRequest(request);
+      setApprovalClassification("");
+      setApprovalComment("");
+      return;
+    }
     if (!window.confirm(`${action === "approve" ? "Approve" : "Reject"} ${request.employee_name}'s ${request.leave_type} request?`)) {
       return;
     }
@@ -233,6 +242,26 @@ export default function ManagerLeaveDashboard() {
       }
     } catch (err) {
       setError(err?.response?.data?.message || `Could not ${action} this leave request.`);
+    } finally {
+      setBusyRequestId(null);
+    }
+  };
+  const submitSickApproval = async (event) => {
+    event.preventDefault();
+    if (!approvalRequest || !["paid", "casual"].includes(approvalClassification)) return;
+    setError("");
+    setSuccess("");
+    setBusyRequestId(approvalRequest.id);
+    try {
+      await client.post(`/leave/${approvalRequest.id}/decision`, {
+        decision: "approved",
+        comment: approvalComment,
+        final_classification: approvalClassification,
+      });
+      setApprovalRequest(null);
+      if (await loadData(filters)) setSuccess("Sick Leave approved.");
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not approve this Sick Leave request.");
     } finally {
       setBusyRequestId(null);
     }
@@ -543,6 +572,62 @@ export default function ManagerLeaveDashboard() {
             </div>
           </div>
         </>
+      )}
+
+      {approvalRequest && (
+        <div className="modal-overlay" onClick={() => busyRequestId === null && setApprovalRequest(null)}>
+          <div className="modal-box" onClick={(event) => event.stopPropagation()}>
+            <h3 style={{ marginBottom: 8 }}>Approve Sick Leave</h3>
+            <p className="muted" style={{ marginBottom: 16 }}>
+              {approvalRequest.employee_name} · {approvalRequest.start_date} to {approvalRequest.end_date} · {approvalRequest.days} day(s)
+            </p>
+            <form onSubmit={submitSickApproval}>
+              <div className="form-field">
+                <label htmlFor="sick-leave-classification">Approve this request as</label>
+                <select
+                  id="sick-leave-classification"
+                  required
+                  value={approvalClassification}
+                  onChange={(event) => setApprovalClassification(event.target.value)}
+                >
+                  <option value="">Select classification</option>
+                  <option value="paid">Paid Leave (no salary deduction)</option>
+                  <option value="casual">Casual Leave (salary deduction)</option>
+                </select>
+              </div>
+              <p className="muted" style={{ fontSize: 12 }}>
+                Paid Leave classification is allowed only after the employee completes three months of service.
+              </p>
+              <div className="form-field">
+                <label htmlFor="sick-leave-manager-comment">Manager remarks (optional)</label>
+                <textarea
+                  id="sick-leave-manager-comment"
+                  rows={3}
+                  maxLength={255}
+                  value={approvalComment}
+                  onChange={(event) => setApprovalComment(event.target.value)}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  disabled={busyRequestId !== null}
+                  onClick={() => setApprovalRequest(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-success"
+                  disabled={busyRequestId !== null || !approvalClassification}
+                >
+                  {busyRequestId === approvalRequest.id ? "Approving..." : "Confirm Approval"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {policyOpen && (
