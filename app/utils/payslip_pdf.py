@@ -206,7 +206,7 @@ def generate_company_payslip_pdf(
         ("Location", employee_info.get("location")),
         ("Present Days", days_present),
         ("Paid Days", total_paid_days),
-        ("LOP Days", lop_days),
+        ("Absent / LOP Days", lop_days),
         ("Leave Days", days_on_leave),
     ]
     detail_rows = []

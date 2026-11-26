@@ -33,7 +33,7 @@ export default function PayslipDetailModal({ payslip, onClose, onDownload }) {
     ["Total working days", payslip.total_working_days],
     ["Total paid days", payslip.total_paid_days],
     ["Present days", payslip.days_present],
-    ["LOP days", payslip.lop_days],
+    ["Absent / LOP days", payslip.lop_days],
   ];
 
   const downloadPdf = async () => {

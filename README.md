@@ -65,6 +65,13 @@ and soft deletion. Announcements can optionally have no expiry and remain visibl
 archived. Legacy announcement records and their audience visibility are preserved.
 Birthday feeds use Asia/Kolkata dates; February 29 birthdays are observed on March 1 in
 non-leap years and are generated dynamically without storing birthday announcement rows.
+For the leave-management redesign, apply `migration_leave_redesign.sql` once to each
+existing database before deploying the updated application. It adds leave duration,
+classification, and reminder-acknowledgement columns and maps legacy Earned/Annual Leave
+to Paid Leave without deleting leave requests or balances. Untouched legacy default
+allocations are normalized to 6 Paid, 0 Casual, and 0 Sick days; used days and
+manager-customized allocations are preserved. The application cannot load leave requests
+or balances against an older schema.
 
 For company-specific payroll and reusable salary structures, back up an existing database
 and apply these migrations in order, only if their schema changes are not already present:
