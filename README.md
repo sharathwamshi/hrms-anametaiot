@@ -58,6 +58,13 @@ For an existing database, run
 `mysql -u root anametaiot_hrms < backend/migration_leave_review_history.sql`
 to preserve prior leave decisions and record subsequent reapprovals for auditing.
 
+For an existing database, run
+`mysql -u root anametaiot_hrms < backend/migration_fresh_announcements.sql`
+to extend the existing announcements table for audience targeting, scheduling, expiry,
+and soft deletion. Announcements can optionally have no expiry and remain visible until
+archived. Legacy announcement records and their audience visibility are preserved.
+Birthday feeds use Asia/Kolkata dates; February 29 birthdays are observed on March 1 in
+non-leap years and are generated dynamically without storing birthday announcement rows.
 For the leave-management redesign, apply `migration_leave_redesign.sql` once to each
 existing database before deploying the updated application. It adds leave duration,
 classification, and reminder-acknowledgement columns and maps legacy Earned/Annual Leave

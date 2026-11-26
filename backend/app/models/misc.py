@@ -1,4 +1,5 @@
 from datetime import datetime
+
 from app.extensions import db
 
 
@@ -9,20 +10,18 @@ class Announcement(db.Model):
     title = db.Column(db.String(200), nullable=False)
     body = db.Column(db.Text, nullable=False)
     posted_by = db.Column(db.Integer, db.ForeignKey("users.id"))
-    audience_role = db.Column(db.String(30), nullable=True)  # null = everyone
+    audience_role = db.Column(db.String(30), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    category = db.Column(db.String(40), nullable=False, default="general")
+    priority = db.Column(db.String(20), nullable=False, default="normal")
+    audiences = db.Column(db.JSON, nullable=True)
+    publish_at = db.Column(db.DateTime, nullable=True, index=True)
+    expires_at = db.Column(db.DateTime, nullable=True)
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    updated_at = db.Column(db.DateTime, nullable=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)
 
-    author = db.relationship("User")
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "title": self.title,
-            "body": self.body,
-            "author_name": self.author.full_name if self.author else "HR Operations",
-            "audience_role": self.audience_role,
-            "created_at": self.created_at.isoformat(),
-        }
+    author = db.relationship("User", foreign_keys=[posted_by])
 
 
 class Asset(db.Model):

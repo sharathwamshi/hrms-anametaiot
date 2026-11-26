@@ -4,9 +4,10 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 from app.extensions import db
 from app.models import (
-    User, Attendance, LeaveRequest, JobPosting, Candidate, Payslip, Announcement,
+    User, Attendance, LeaveRequest, JobPosting, Candidate, Payslip,
 )
 from app.roles import SUPER_ADMIN, MANAGER, HR_OPERATIONS, FINANCE_ACCOUNTS, OPERATIONS, HR_RECRUITER, EMPLOYEE, CONTRACT_EMPLOYEE
+from app.utils.official_announcements import dashboard_announcements
 
 bp = Blueprint("dashboard", __name__, url_prefix="/api/dashboard")
 
@@ -105,9 +106,10 @@ def summary():
         pending = LeaveRequest.query.filter_by(user_id=user_id, status="pending").count()
         data["pending_leave_requests"] = pending
 
-    data["recent_announcements"] = [
-        a.to_dict() for a in Announcement.query.order_by(Announcement.created_at.desc()).limit(5).all()
-    ]
+    data["recent_announcements"] = dashboard_announcements(
+        db.session.get(User, user_id),
+        limit=2,
+    )
     return jsonify(data)
 
 

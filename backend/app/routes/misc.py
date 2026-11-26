@@ -1,42 +1,12 @@
 from datetime import date
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 from app.extensions import db
-from app.models import Announcement, Asset
+from app.models import Asset
 from app.utils.security import roles_required
 from app.roles import HR_OPERATIONS, OPERATIONS, SUPER_ADMIN
 
 bp = Blueprint("misc", __name__, url_prefix="/api")
-
-
-@bp.get("/announcements")
-@jwt_required()
-def list_announcements():
-    claims = get_jwt()
-    role = claims.get("role")
-    rows = Announcement.query.filter(
-        db.or_(Announcement.audience_role.is_(None), Announcement.audience_role == role)
-    ).order_by(Announcement.created_at.desc()).all()
-    return jsonify([a.to_dict() for a in rows])
-
-
-@bp.post("/announcements")
-@roles_required(HR_OPERATIONS)
-def create_announcement():
-    payload = request.get_json(silent=True) or {}
-    if not payload.get("title") or not payload.get("body"):
-        return jsonify({"message": "title and body are required."}), 400
-
-    announcement = Announcement(
-        title=payload["title"],
-        body=payload["body"],
-        audience_role=payload.get("audience_role"),
-        posted_by=int(get_jwt_identity()),
-    )
-    db.session.add(announcement)
-    db.session.commit()
-    return jsonify(announcement.to_dict()), 201
 
 
 @bp.get("/assets")
