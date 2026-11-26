@@ -87,8 +87,18 @@ CREATE TABLE announcements (
 	posted_by INTEGER, 
 	audience_role VARCHAR(30), 
 	created_at DATETIME, 
+	category VARCHAR(40) NOT NULL DEFAULT 'general',
+	priority VARCHAR(20) NOT NULL DEFAULT 'normal',
+	audiences JSON,
+	publish_at DATETIME,
+	expires_at DATETIME,
+	updated_by INTEGER,
+	updated_at DATETIME,
+	deleted_at DATETIME,
 	PRIMARY KEY (id), 
-	FOREIGN KEY(posted_by) REFERENCES users (id)
+	INDEX ix_announcements_publish_at (publish_at),
+	FOREIGN KEY(posted_by) REFERENCES users (id),
+	FOREIGN KEY(updated_by) REFERENCES users (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE assets (

@@ -11,6 +11,7 @@ import AttendanceDashboard from "../components/AttendanceDashboard";
 import DashboardPendingRequests from "../components/DashboardPendingRequests";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../config/roles";
+import { millisecondsUntilNextIstMidnight } from "../utils/officialAnnouncements.js";
 
 const STAT_META = {
   headcount: { label: "Total Headcount", icon: "\u25A5", color: "blue" },
@@ -38,20 +39,45 @@ export default function Dashboard() {
 
   useEffect(() => {
     let active = true;
-    client
-      .get("/dashboard/summary")
-      .then(({ data }) => {
-        if (active) setSummary(data);
-      })
-      .catch((err) => {
-        if (active) setSummaryError(err?.response?.data?.message || "Could not load the dashboard.");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    let requestId = 0;
+    let midnightRefresh;
+    const fetchSummary = () => {
+      const currentRequestId = ++requestId;
+      client
+        .get("/dashboard/summary")
+        .then(({ data }) => {
+          if (active && currentRequestId === requestId) {
+            setSummary(data);
+            setSummaryError("");
+          }
+        })
+        .catch((err) => {
+          if (active && currentRequestId === requestId) {
+            setSummaryError(err?.response?.data?.message || "Could not load the dashboard.");
+          }
+        })
+        .finally(() => {
+          if (active && currentRequestId === requestId) setLoading(false);
+        });
+    };
+    const refreshAtNextIstMidnight = () => {
+      midnightRefresh = window.setTimeout(() => {
+        fetchSummary();
+        refreshAtNextIstMidnight();
+      }, millisecondsUntilNextIstMidnight() + 100);
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") fetchSummary();
+    };
+
+    fetchSummary();
+    refreshAtNextIstMidnight();
+    document.addEventListener("visibilitychange", refreshWhenVisible);
 
     return () => {
       active = false;
+      window.clearTimeout(midnightRefresh);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [user.role]);
 

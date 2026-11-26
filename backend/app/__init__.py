@@ -51,6 +51,7 @@ def create_app(config_class=Config):
     from app.routes.insurance import bp as insurance_bp
     from app.routes.vendors import bp as vendors_bp
     from app.routes.dashboard import bp as dashboard_bp
+    from app.routes.announcements import bp as announcements_bp
     from app.routes.misc import bp as misc_bp
     from app.routes.notifications import bp as notifications_bp
     from app.routes.exports import bp as exports_bp
@@ -70,6 +71,7 @@ def create_app(config_class=Config):
     app.register_blueprint(insurance_bp)
     app.register_blueprint(vendors_bp)
     app.register_blueprint(dashboard_bp)
+    app.register_blueprint(announcements_bp)
     app.register_blueprint(misc_bp)
     app.register_blueprint(notifications_bp)
     app.register_blueprint(exports_bp)

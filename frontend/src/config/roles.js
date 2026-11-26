@@ -42,7 +42,7 @@ export const ROLE_LABELS = {
 // Which nav items each role sees. Every role gets Dashboard + Profile.
 export const NAV_BY_ROLE = {
   [ROLES.SUPER_ADMIN]: [
-    "dashboard", "employees", "attendance", "leave", "resignation", "assets", "insurance", "profile",
+    "dashboard", "employees", "attendance", "leave", "announcements", "resignation", "assets", "insurance", "profile",
   ],
   [ROLES.HR_OPERATIONS]: [
     "dashboard", "employees", "attendance", "leave", "payslips", "recruitment",
@@ -51,24 +51,32 @@ export const NAV_BY_ROLE = {
   ],
   [ROLES.MANAGER]: [
     "dashboard", "employees", "attendance", "leave", "payslips", "recruitment",
-    "allCandidates", "recruiters", "vendors", "allPlacements", "insurance", "resignation", "profile",
+    "allCandidates", "recruiters", "vendors", "allPlacements", "announcements", "insurance", "resignation", "profile",
   ],
   [ROLES.FINANCE_ACCOUNTS]: [
     "dashboard", "attendance", "leave", "payslips", "allCandidates", "recruiters",
-    "vendors", "allPlacements", "insurance", "resignation", "profile",
+    "vendors", "allPlacements", "announcements", "insurance", "resignation", "profile",
   ],
   [ROLES.OPERATIONS]: [
-    "dashboard", "attendance", "assets", "employees", "vendors", "payslips", "resignation", "profile",
+    "dashboard", "attendance", "assets", "employees", "vendors", "payslips", "announcements", "resignation", "profile",
   ],
   [ROLES.HR_RECRUITER]: [
-    "dashboard", "attendance", "leave", "payslips", "recruitment", "allCandidates", "resignation", "profile",
+    "dashboard", "attendance", "leave", "payslips", "recruitment", "allCandidates", "announcements", "resignation", "profile",
   ],
   [ROLES.EMPLOYEE]: [
-    "home", "myAttendance", "leave", "resignation", "payslips", "insurance", "profile",
+    "home", "myAttendance", "leave", "announcements", "resignation", "payslips", "insurance", "profile",
   ],
   [ROLES.CONTRACT_EMPLOYEE]: [
-    "dashboard", "payslips", "insurance", "profile",
+    "dashboard", "payslips", "announcements", "insurance", "profile",
   ],
+  [ROLES.ADMIN]: ["dashboard", "announcements", "profile"],
+  [ROLES.TEAM_LEAD]: ["dashboard", "announcements", "profile"],
+  [ROLES.DEVELOPER]: ["dashboard", "announcements", "profile"],
+  [ROLES.TESTER_QA]: ["dashboard", "announcements", "profile"],
+  [ROLES.SCRUM_MASTER]: ["dashboard", "announcements", "profile"],
+  [ROLES.BUSINESS_ANALYST]: ["dashboard", "announcements", "profile"],
+  [ROLES.HR]: ["dashboard", "announcements", "profile"],
+  [ROLES.HR_EXECUTIVE]: ["dashboard", "announcements", "profile"],
 };
 
 export const NAV_ITEMS = {
